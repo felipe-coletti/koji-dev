@@ -1,34 +1,45 @@
-//! Runs the examples from the documentation and checks their output.
+//! Runs the examples from the documentation with the compiler written in Koji and checks their
+//! output.
 
-use std::cell::RefCell;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
-#[derive(Clone, Default)]
-struct Output(Rc<RefCell<Vec<u8>>>);
+#[path = "koji/mod.rs"]
+mod koji;
 
-impl Write for Output {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.borrow_mut().extend_from_slice(buf);
-        Ok(buf.len())
-    }
+/// How a program failed: it ended with `system.exit` and this code, or with an error (a type
+/// error, an error stopping the program, a panic) and its message.
+#[derive(Debug, PartialEq)]
+enum Failure {
+    Exit(i32),
+    Error(String),
+}
 
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
+impl std::fmt::Display for Failure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Failure::Exit(code) => write!(formatter, "exit({})", code),
+            Failure::Error(message) => write!(formatter, "{}", message),
+        }
     }
 }
 
-fn execute(source: &str, input: &str, path: &Path) -> (String, Result<(), kojic::error::EzError>) {
-    let output = Output::default();
-    let result = kojic::run_source(
-        source,
-        path,
-        Box::new(output.clone()),
-        Box::new(std::io::Cursor::new(input.to_string().into_bytes())),
-    );
-    let text = String::from_utf8(output.0.borrow().clone()).unwrap();
-    (text, result)
+/// Compiles and runs `source` as the file `path` with the compiler written in Koji. A relative
+/// path is written in a directory of its own, which is the program's current directory; the
+/// messages name the file as `path` writes it.
+fn execute(source: &str, input: &str, path: &Path) -> (String, Result<(), Failure>) {
+    let directory = koji::scratch("language");
+    let file = if path.is_absolute() { path.to_path_buf() } else { directory.join(path) };
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, source).unwrap();
+    let finished = koji::run(path, &directory, input);
+    let result = match finished.code {
+        Some(0) => Ok(()),
+        Some(1) if !finished.stderr.is_empty() => Err(Failure::Error(finished.stderr.trim_end().to_string())),
+        Some(code) => Err(Failure::Exit(code)),
+        None => Err(Failure::Error(format!("stopped by a signal\n{}", finished.stderr))),
+    };
+    let _ = std::fs::remove_dir_all(&directory);
+    (finished.stdout, result)
 }
 
 fn run_with_input(source: &str, input: &str) -> String {
@@ -76,7 +87,7 @@ fn temp_dir(name: &str) -> PathBuf {
 fn primitive_types() {
     let source = r#"
         immut age: int = 23
-        immut pi: float = 3.14
+        immut pi: decimal = 3.14
         immut name: string = 'Mary'
         immut isStudent: boolean = true
 
@@ -233,7 +244,7 @@ fn lists() {
 fn arithmetic_operators() {
     assert_eq!(
         run("print(1 + 2, 5 - 7, 3 * 4, 2 ** 10, 7 % 3, 2.5 * 2)"),
-        "3 -2 12 1024 1 5.0\n"
+        "3 -2 12 1024 1 5\n"
     );
 }
 
@@ -245,7 +256,7 @@ fn division_follows_the_operand_types() {
         "3 -3 3.5 3.5 -1 1.5\n"
     );
     assert_eq!(run("mut x: int = 17\nx /= 5\nprint(x)"), "3\n");
-    assert_error("immut x: int = 7 / 2.0", "cannot assign a value of type float");
+    assert_error("immut x: int = 7 / 2.0", "cannot assign a value of type decimal");
     assert_error("print(1 / 0)", "division by zero");
 }
 
@@ -357,11 +368,27 @@ fn string_interpolation() {
 fn conversion_methods() {
     assert_eq!(
         run("print(int('0'), int('abc'), float('0'), string(0), int(3.9), float(2))"),
-        "Ok(0) Err(InvalidNumber('abc')) Ok(0.0) 0 3 2.0\n"
+        "Ok(0) Err(InvalidNumber('abc')) Ok(0x0p0) 0 3 0x1p1\n"
     );
     assert_eq!(
         run("print(int('99999999999999999999'), float('1e400'), float('nan'), float('inf'))"),
         "Err(OutOfRange('99999999999999999999')) Err(OutOfRange('1e400')) Err(InvalidNumber('nan')) Err(InvalidNumber('inf'))\n"
+    );
+    // The limits of an int, white space around (Unicode's too), and signs.
+    assert_eq!(
+        run("print(int(' -9223372036854775808\\n'), int('+9223372036854775807'), int('-9223372036854775809'), int('9223372036854775808x'), int('\u{3000}7'), int('+-1'), int('-'))"),
+        "Ok(-9223372036854775808) Ok(9223372036854775807) Err(OutOfRange('-9223372036854775809')) Err(InvalidNumber('9223372036854775808x')) Ok(7) Err(InvalidNumber('+-1')) Err(InvalidNumber('-'))\n"
+    );
+    // Exact without the C library (Clinger's fast path) and with it, signed zeros, the smallest
+    // floats, and the forms that are not numbers.
+    assert_eq!(
+        run("print(float('-0'), float('.5'), float('5.'), float('1e22'), float('1e23'), float('9007199254740993'), float('0.1'), float('4.9e-324'), float('1e-400'), float('1e'), float('.'), float('1.2.3'))"),
+        "Ok(-0x0p0) Ok(0x1p-1) Ok(0x1.4p2) Ok(0x1.0f0cf064dd592p73) Ok(0x1.52d02c7e14af6p76) Ok(0x1p53) Ok(0x1.999999999999ap-4) Ok(0x0.0000000000001p-1022) Ok(0x0p0) Err(InvalidNumber('1e')) Err(InvalidNumber('.')) Err(InvalidNumber('1.2.3'))\n"
+    );
+    // In hexadecimal, rounded to the nearest float (half to even).
+    assert_eq!(
+        run("print(float('0x1.999999999999ap-4'), float('0x1.00000000000008p0'), float('0x1.00000000000018p0'), float('0x1.000000000000081p0'), float('0x1.8p-1074'), float('-0x1.8p1'), float('0x1p1024'), float('0x'))"),
+        "Ok(0x1.999999999999ap-4) Ok(0x1p0) Ok(0x1.0000000000002p0) Ok(0x1.0000000000001p0) Ok(0x0.0000000000002p-1022) Ok(-0x1.8p1) Err(OutOfRange('0x1p1024')) Err(InvalidNumber('0x'))\n"
     );
     let source = r#"
         match (int('42')) {
@@ -385,6 +412,26 @@ fn string_methods() {
         run(source),
         "3 hi HELLO hello\ntrue true true true\ntrue true true false false\n['a', 'b'] hi\n"
     );
+    // Written in Koji (std/koji/core.kj), on the bytes of UTF-8: positions are in characters,
+    // white space is Unicode's.
+    let source = r#"
+        print('　 ção \t'.trim().debug(), 'ção, é, '.split(', '), ',,'.split(','), ''.split(','))
+        print('éaéa'.replace('a', 'ã'), 'abc'.replace('x', 'y'), 'aaa'.replace('aa', 'b'))
+        print('ção😀x'.indexOf('x'), 'ção'.indexOf(''), 'ção'.indexOf('z'), 'ção'.startsWith('çã'), 'ção'.endsWith('ão'), 'a'.endsWith('ba'))
+    "#;
+    assert_eq!(
+        run(source),
+        "'ção' ['ção', 'é', ''] ['', '', ''] ['']\néãéã abc ba\nSome(4) Some(0) None true true false\n"
+    );
+    // The cases and the properties of Unicode (std/koji/unicode.kj): a character may become
+    // several, and `Σ` at the end of a word is `ς`.
+    let source = r#"
+        print('straße ﬃ ŉ'.upper(), 'İSTANBUL'.lower().length(), 'ΟΔΥΣΣΕΥΣ, ΣΑΣ. Σ'.lower(), 'Ǆungla'.lower())
+        print('ção'.isAlpha(), '٣٤'.isNumeric(), 'Ⅻ'.isNumeric(), 'ÉCOLE'.isUpper(), 'école1'.isLower(), 'Élan Vital'.isTitle(), '　'.isSpace())
+    "#;
+    assert_eq!(run(source), "STRASSE FFI ʼN 9 οδυσσευς, σας. σ ǆungla\ntrue true true true true true true\n");
+    assert_error("print('a'.split(''))", "panic: test.kj:1: split() separator cannot be empty");
+    assert_error("print('a'.replace('', 'b'))", "panic: test.kj:1: replace() needs a non-empty text to replace");
 }
 
 // ---------------------------------------------------------------------------
@@ -403,6 +450,16 @@ fn input_returns_an_option() {
     "#;
     assert_eq!(run_with_input(source, "Ana\n"), "What's your name?Hello, Ana!\n");
     assert_eq!(run_with_input(source, ""), "What's your name?No input\n");
+    // Lines end with `\n` or `\r\n`, and the last one may have no line break.
+    let source = r#"
+        mut line = input()
+
+        while (line is Some) {
+            print(line)
+            line = input()
+        }
+    "#;
+    assert_eq!(run_with_input(source, "a\r\n\nbé\nlast"), "Some('a')\nSome('')\nSome('bé')\nSome('last')\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -568,8 +625,8 @@ fn match_arms_on_separate_lines() {
 fn match_literals_and_nested_patterns() {
     let source = r#"
         type Shape = {
-            Circle(radius: float)
-            Rectangle(width: float, height: float)
+            Circle(radius: decimal)
+            Rectangle(width: decimal, height: decimal)
         }
 
         immut shapes: Option[Shape][] = [Some(Circle(2.0)), None, Some(Rectangle(1.0, 2.0))]
@@ -588,7 +645,7 @@ fn match_literals_and_nested_patterns() {
             _ => print('?')
         }
     "#;
-    assert_eq!(run(source), "circle 2.0\nnothing\nrect 1.0x2.0\nB\n");
+    assert_eq!(run(source), "circle 2\nnothing\nrect 1x2\nB\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -620,11 +677,11 @@ fn sum_types() {
 fn sum_type_destructuring() {
     let source = r#"
         type Shape = {
-            Circle(radius: float)
-            Rectangle(width: float, height: float)
+            Circle(radius: decimal)
+            Rectangle(width: decimal, height: decimal)
         }
 
-        function area(shape: Shape): float {
+        function area(shape: Shape): decimal {
             match (shape) {
                 Circle(radius) => 3.14 * radius * radius
                 Rectangle(width, height) => width * height
@@ -633,7 +690,7 @@ fn sum_type_destructuring() {
 
         print(area(Circle(1.0)), area(Rectangle(2.0, 3.0)))
     "#;
-    assert_eq!(run(source), "3.14 6.0\n");
+    assert_eq!(run(source), "3.14 6\n");
 }
 
 #[test]
@@ -695,6 +752,97 @@ fn shape_types() {
     assert_error("type P = { a: int }\nimmut p: P = { a: 1, b: 2 }", "has no field 'b'");
     assert_error("type P = { a: int  b: int }\nimmut p: P = { a: 1 }", "missing field(s) b");
     assert_error("type P = { a: int }\nimmut p: P = { a: 'x' }", "must be int");
+}
+
+#[test]
+fn sort_by_calls_its_comparison_in_a_known_order() {
+    // A stable merge sort (std/koji/list.kj): the calls of the comparison, which may print, are
+    // part of what a program does.
+    let source = r#"
+        type Person = { name: string, age: int }
+        mut people: Person[] = [{ name: 'Ana', age: 30 }, { name: 'Bo', age: 25 }, { name: 'Cy', age: 30 }]
+        people.sortBy((a: Person, b: Person) => {
+            print(`${a.name} ${b.name}`)
+            return a.age < b.age
+        })
+        print(people)
+    "#;
+    assert_eq!(
+        run(source),
+        "Cy Bo\nBo Ana\nCy Ana\n[{ name: 'Bo', age: 25 }, { name: 'Ana', age: 30 }, { name: 'Cy', age: 30 }]\n"
+    );
+}
+
+#[test]
+fn appending_to_a_top_level_string() {
+    // In place when no one else sees the string; a copy when another variable shares it.
+    let source = r#"
+        mut text = 'a'
+        immut alias = text
+        text += 'b'
+        mut keep = text
+        text += 'c'
+        text += text
+        for i in range(3) {
+            keep += `${i}`
+        }
+        print(text, alias, keep)
+    "#;
+    assert_eq!(run(source), "abcabc a ab012\n");
+}
+
+#[test]
+fn lists_of_two_words_and_shared_lists() {
+    // A decimal takes two words of a list (std/koji/list.kj); a list shared by two variables is
+    // copied before one of them changes it, down to the lists it holds.
+    let source = r#"
+        mut prices = [2.50, 0.10, 7.25]
+        immut before = prices
+        prices.insert(1, 1.75)
+        prices.insert(4, 0.10)
+        prices.sort()
+        print(prices, before, prices.indexOf(7.25), 0.10 in prices, prices[1..3])
+        print(prices.removeAt(0), prices.pop(), prices, prices + before)
+        mut grid = [[1, 2], [3]]
+        immut copy = grid
+        grid[1].push(4)
+        print(grid, copy)
+    "#;
+    assert_eq!(
+        run(source),
+        "[0.1, 0.1, 1.75, 2.5, 7.25] [2.5, 0.1, 7.25] Some(4) true [0.1, 1.75]\n\
+         Some(0.1) Some(7.25) [0.1, 1.75, 2.5] [0.1, 1.75, 2.5, 2.5, 0.1, 7.25]\n\
+         [[1, 2], [3, 4]] [[1, 2], [3]]\n"
+    );
+}
+
+#[test]
+fn maps_keep_their_order_through_removals() {
+    // Many keys in a small table: a removal takes the entry out of a run of slots (std/koji/map.kj),
+    // and the keys that follow in the run must still be found, in the order they were added.
+    let source = r#"
+        mut seed = 7
+        mut m: Map[int, int] = [:]
+        mut sum = 0
+        for step in range(3000) {
+            seed = (seed * 1103515245 + 12345) % 2147483648
+            immut key = (seed / 16) % 64
+            if (seed % 3 == 0) {
+                m.remove(key)
+            } else {
+                m[key] = step
+            }
+            match (m.get((key * 5) % 64)) {
+                Some(v) => sum += v % 11
+                None => sum += 1
+            }
+        }
+        print(m.length(), sum, m.keys())
+    "#;
+    assert_eq!(
+        run(source),
+        "42 11081 [10, 7, 17, 34, 21, 43, 13, 27, 58, 57, 49, 15, 55, 2, 35, 48, 5, 45, 51, 6, 33, 0, 61, 44, 38, 62, 8, 11, 4, 12, 42, 22, 31, 40, 47, 25, 16, 1, 24, 26, 39, 53]\n"
+    );
 }
 
 #[test]
@@ -839,7 +987,7 @@ fn nested_shapes() {
         type Product = {
             id: int
             name: string
-            price: float
+            price: decimal
         }
 
         function printProduct(product: Product) {
@@ -858,9 +1006,9 @@ fn nested_shapes() {
 fn shapes_are_nominal() {
     // Two types with the same fields are still different types.
     let source = r#"
-        type Celsius = { value: float }
+        type Celsius = { value: decimal }
 
-        type Fahrenheit = { value: float }
+        type Fahrenheit = { value: decimal }
 
         immut c: Celsius = { value: 20.0 }
         immut f: Fahrenheit = c
@@ -1141,18 +1289,124 @@ fn imports_are_hoisted() {
 
         print(root(16.0))
 
-        function root(x: float): Result[float, Failure] {
+        function root(x: decimal): Result[decimal, Failure] {
             return Ok(math.sqrt(x)?)
         }
 
         import math
     "#;
-    assert_eq!(run(source), "Ok(4.0)\n");
+    assert_eq!(run(source), "Ok(4)\n");
 }
 
 // ---------------------------------------------------------------------------
 // Modules
 // ---------------------------------------------------------------------------
+
+#[test]
+fn panics_name_modules_as_imports_write_them() {
+    // Like type errors: the main file as it was given, a module as its `import` wrote it.
+    let dir = temp_dir("panic-module");
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    std::fs::write(dir.join("lib/numbers.kj"), "export function half(n: int): int {\n    return n / 0\n}\n").unwrap();
+    let main = dir.join("main.kj");
+    let (_, result) = execute("import { half } from 'lib/numbers.kj'\nprint(half(4))\n", "", &main);
+    assert_eq!(result.unwrap_err().to_string(), "panic: lib/numbers.kj:2: division by zero");
+}
+
+#[test]
+fn compound_bitwise_assignments() {
+    assert_eq!(run("mut x = 12\nx &= 10\nx |= 5\nx ^= 3\nx <<= 2\nx >>= 1\nprint(x)"), "28\n");
+    assert_error("mut s = 'a'\ns &= 1", "operator '&' cannot be applied to string and int");
+    assert_error("mut f = 1.5\nf <<= 1", "operator '<<' cannot be applied to decimal and int");
+    assert_error("immut x = 1\nx |= 2", "cannot modify 'x': it is immut");
+}
+
+#[test]
+fn errors_files_and_the_operating_system_are_checked() {
+    assert_error("printError(print)", "'print' is a built-in function and must be called");
+    assert_error("import file\nimmut x: int = file.remove('a')", "of type Result[void, FileError] to 'x' of type int");
+    assert_error("import file\nfile.remove(1)", "argument 1 of 'file.remove' must be string, found int");
+    assert_error(
+        "import system\nimmut n = match (system.os) {\n    Linux => 1\n    MacOS => 2\n}",
+        "match is not exhaustive: Windows is not handled",
+    );
+    assert_error("import system\nsystem.os = system.Linux", "'os' is read-only outside 'system'");
+}
+
+#[test]
+fn opaque_types() {
+    // Other modules use an opaque type, but do not see its structure: no fields, no literal, no
+    // variants. It is shown by its `display` method, or by its name, inside other values too.
+    let dir = temp_dir("opaque");
+    std::fs::write(dir.join("counter.kj"), r#"
+export opaque type Counter = {
+    name: string
+    count: int
+}
+
+export opaque type Shape = {
+    Circle(radius: int)
+    Square(side: int)
+}
+
+export function counter(name: string): Counter {
+    return { name: name, count: 0 }
+}
+
+function Counter.display(self): string {
+    return `<counter ${self.name}=${self.count}>`
+}
+
+function Counter.add(mut self) {
+    self.count += 1
+}
+
+function Counter.total(self): int {
+    return self.count
+}
+
+export function circle(radius: int): Shape {
+    return Circle(radius)
+}
+
+function Shape.area(self): int {
+    return match (self) {
+        Circle(radius) => 3 * radius * radius
+        Square(side) => side * side
+    }
+}
+"#)
+    .unwrap();
+    let source = r#"
+import { Counter, Shape, counter, circle } from 'counter.kj'
+
+mut c = counter('clicks')
+c.add()
+c.add()
+immut list: Counter[] = [c, counter('other')]
+print(c, c.total(), list, Some(c).debug(), `${c}`)
+immut s = circle(2)
+print(s.area(), [s], s)
+"#;
+    let (output, result) = execute(source, "", &dir.join("main.kj"));
+    result.unwrap();
+    assert_eq!(
+        output,
+        "<counter clicks=2> 2 [<counter clicks=2>, <counter other=0>] Some(<counter clicks=2>) <counter clicks=2>\n12 [<Shape>] <Shape>\n"
+    );
+
+    let fails = |body: &str, fragment: &str| {
+        let source = format!("import {{ Counter, Shape, counter, circle }} from 'counter.kj'\nmut c = counter('a')\nimmut s = circle(1)\n{}\n", body);
+        let (_, result) = execute(&source, "", &dir.join("main.kj"));
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains(fragment), "expected {:?} in {:?}", fragment, error);
+    };
+    fails("print(c.count)", "Counter is opaque: its fields are not visible outside its module");
+    fails("c.count = 3", "Counter is opaque: its fields are not visible outside its module");
+    fails("immut d: Counter = { name: 'x', count: 1 }", "Counter is opaque: it is built by the functions of its module, not with a literal");
+    fails("immut q = Circle(1)", "undefined variable 'Circle'");
+    fails("match (s) {\n    Circle(r) => print(r)\n    _ => {}\n}", "Shape is opaque: its variants are not visible outside its module");
+}
 
 #[test]
 fn modules_and_imports() {
@@ -1175,8 +1429,8 @@ fn modules_and_imports() {
         }
 
         export type Shape = {
-            Circle(radius: float)
-            Square(side: float)
+            Circle(radius: decimal)
+            Square(side: decimal)
         }
 
         export mut count = 0
@@ -1213,7 +1467,7 @@ fn modules_and_imports() {
     "#;
     let (output, result) = execute(source, "", &dir.join("main.kj"));
     result.unwrap();
-    assert_eq!(output, "15\n15 -5\nCircle(1.0) Square(2.0)\n2 2\n");
+    assert_eq!(output, "15\n15 -5\nCircle(1) Square(2)\n2 2\n");
 
     let fails = |source: &str, fragment: &str| {
         let (_, result) = execute(source, "", &dir.join("main.kj"));
@@ -1237,6 +1491,11 @@ fn export_rules() {
     assert_error(
         "type Hidden = { value: int }\nexport function make(): Hidden { return { value: 1 } }",
         "uses the private type 'Hidden'",
+    );
+    // A private alias does not make the type it names private.
+    assert_eq!(
+        run("type Counts = Map[string, int]\nexport type Stats = { counts: Map[string, int] }\nimmut stats: Stats = { counts: ['a': 1] }\nprint(stats.counts)"),
+        "['a': 1]\n"
     );
     // Exports of the main file are allowed (and simply unused).
     assert_eq!(run("export immut answer = 42\nprint(answer)"), "42\n");
@@ -1262,8 +1521,65 @@ fn stdlib_time() {
         immut end = time.monotonic()
 
         print(end - start >= 0.0, time.now() > 1700000000.0)
+
+        // Timestamps count from 0000-01-01 00:00:00 UTC; those of Unix, from 1970.
+        immut unix = time.now() - 62167219200
+        print(unix > 1700000000 and unix < 4000000000)
+
+        immut before = time.monotonic()
+        time.sleep(0.05)
+        print(time.monotonic() - before >= 0.05)
+        time.sleep(0)
+        time.sleep(-1)
     "#;
-    assert_eq!(run(source), "Waiting...\nDone!\ntrue true\n");
+    assert_eq!(run(source), "Waiting...\nDone!\ntrue true\ntrue\ntrue\n");
+}
+
+#[test]
+fn bytes() {
+    // An unsigned integer of 8 bits: literals become bytes where bytes are expected, arithmetic
+    // panics outside 0 to 255, bits stay in 8 bits.
+    let source = r#"
+immut a: byte = 200
+immut b: byte = 55
+immut c = a + b
+mut data: byte[] = [1, 2, 255]
+data.push(a)
+data[0] = 7
+data.sort()
+immut counts: Map[byte, int] = [a: 1, b: 2]
+print(c, a - b, a / b, a % b, a & b, a | b, a ^ b, ~a, b << 2, a >> 3, a > b, a == 200, 3 + b)
+print(data, data.debug(), counts, counts[b], int(a) + 1000, float(a), decimal(b), byte(17), `${a}!`, string(b).length())
+mut bytes: byte[] = []
+
+for i in range(256) {
+    bytes.push(byte(i))
+}
+
+print(bytes.length(), bytes[255], 255 in bytes, byte(2) ** byte(7))
+"#;
+    assert_eq!(
+        run(source),
+        "255 145 3 35 0 255 255 55 220 25 true true 58\n\
+         [2, 7, 200, 255] [2, 7, 200, 255] [200: 1, 55: 2] 2 1200 0x1.9p7 55 17 200! 2\n\
+         256 255 true 128\n"
+    );
+    assert_error("immut x: byte = 256", "256 is not a byte (0 to 255)");
+    assert_error("immut x: byte = 1\nimmut n = 5\nprint(x + n)", "operator '+' cannot be applied to byte and int");
+    assert_error("immut x: byte = 1\nprint(-x)", "operator '-' cannot be applied to byte");
+    assert_error("print(byte(1.5))", "cannot convert decimal to byte (only an int)");
+    assert!(run_err("immut x: byte = 200\nprint(x + 100)").contains("byte overflow"));
+    assert!(run_err("print(byte(300))").contains("the value is not a byte (0 to 255)"));
+    assert!(run_err("immut x: byte = 2\nprint(x << 9)").contains("shift of a byte out of range (0 to 7)"));
+}
+
+#[test]
+fn unsafe_is_for_the_standard_library() {
+    // `koji:unsafe` and `extern` functions are the lowest level of the standard library: other
+    // programs cannot use them.
+    assert_error("import { allocate } from 'koji:unsafe'\nprint(allocate(8))", "'koji:unsafe' is only for the standard library");
+    assert_error("import { trim } from 'koji:core'\nprint(trim(' a '))", "'koji:core' is only for the standard library");
+    assert_error("extern function abs(x: int): int\nprint(abs(-1))", "'extern' functions are only for the standard library");
 }
 
 #[test]
@@ -1347,7 +1663,7 @@ fn stdlib_datetime() {
     "#;
     assert_eq!(
         run(source),
-        "10\n1745107200\n20/04/2025\n2025-04-20 00:00:00\n2025-04-20 01:01:01\n\
+        "10\n63912326400\n20/04/2025\n2025-04-20 00:00:00\n2025-04-20 01:01:01\n\
          Err(InvalidDate('2025-02-30')) Err(PatternMismatch('20/04', 'YYYY-MM-DD'))\n\
          Err(PatternMismatch('2025/02/03', 'YYYY-MM-DD'))\ntrue true\n"
     );
@@ -1376,24 +1692,163 @@ fn stdlib_math() {
     "#;
     assert_eq!(
         run(source),
-        "78.53981633974483\nno real square root\nOk(4.0) Err(Complex) Ok(1.0) Err(Infinite) Ok(-8.0)\n3 2.5 2 3 3\ntrue\n"
+        "78.53981633974483096156608458198758\nno real square root\nOk(4) Err(Complex) Ok(1) Err(Infinite) Ok(-8)\n3 2.5 2 3 3\ntrue\n"
     );
     // Representation limits panic: a larger type would fit the result, unlike Infinite.
-    assert_error("import math\nprint(math.pow(10, 400))", "float overflow");
+    assert_error("import math\nprint(math.pow(10, 7000))", "decimal overflow");
+    assert_error("import math\nprint(math.pow(float(10), 400))", "float overflow");
     assert_error("import math\nprint(math.round(1e300))", "integer overflow");
+    // A zero made by an operation (`0 * 1.5`) has no fraction to round up.
+    assert_eq!(run("import math\nimmut z = 0 * 1.5\nprint(math.ceil(z), math.floor(-z), math.ceil(1e-50), math.floor(-1e-50))"), "0 0 1 -1\n");
+    // The module is in Koji (std/math.kj): its panics are at the line of the call.
+    assert_error("import math\n\nprint(math.abs(-9223372036854775807 - 1))", "panic: test.kj:3: integer overflow");
+    assert_error("import math\n\nprint(math.pow(float(10), float(400)))", "panic: test.kj:3: float overflow");
+    assert_error("import math\n\nprint(math.floor(1e30))", "panic: test.kj:3: integer overflow: 1000000000000000000000000000000 does not fit in an int");
+    // The messages are the `display` of `math.MathError`: a type of the program with its name shows
+    // as any other.
+    assert_eq!(run("import math\ntype MathError = { Complex }\nprint(Complex, math.Complex)"), "Complex the result is not a real number (it is complex)\n");
+    // `sqrt` imported by name is the one of `math`, not the C function that std/math.kj calls.
+    assert_eq!(
+        run("import { abs, sqrt, pow } from 'math'\nprint(abs(float(-2.5)), sqrt(16), sqrt(float(-1)), pow(2, 10))"),
+        "0x1.4p1 Ok(4) Err(Complex) Ok(1024)\n"
+    );
 }
 
 #[test]
 fn floats_have_no_nan_or_infinity() {
-    assert_error("immut x = 1e308 * 10.0", "float overflow");
-    assert_error("immut x = 1.5 / 0.0", "division by zero");
-    assert_error("immut x = (-8.0) ** 0.5", "not a real number");
+    assert_error("immut x = float(1e308) * float(10)", "float overflow");
+    assert_error("immut x = float(1.5) / float(0)", "division by zero");
+    assert_error("immut x = float(-8) ** float(0.5)", "not a real number");
+    assert_error("immut x = (-8.0) ** 0.5", "-8 ** 0.5 is not a real number");
     assert_error("immut x = 0.0 ** -1.0", "division by zero");
-    assert_error("immut x = 1e400", "float literal is too large");
-    assert_eq!(run("print(2.0 ** 0.5 > 1.41, 2 ** 3, (-8.0) ** 2.0)"), "true 8 64.0\n");
+    // `1e400` is a finite number too large for a `float` (not an infinity).
+    assert_error("immut x = float(1e400)", "test.kj:1: 1e400 is too large for a float");
+    assert_error("immut x = 0x1p1024", "test.kj:1: 0x1p1024 is too large for a float");
+    assert_error("match (float(1.5)) {\n    -0x1p2000 => print(0)\n    _ => print(1)\n}", "test.kj:2: 0x1p2000 is too large for a float");
+    assert_eq!(run("print(2.0 ** 0.5 > 1.41, 2 ** 3, (-8.0) ** 2.0, float(2) ** float(0.5) > float(1.41))"), "true 8 64 true\n");
     // 0 ** 0 is 1: the value of the expression (the indeterminate form only concerns limits).
-    assert_eq!(run("print(0 ** 0, 0.0 ** 0.0)"), "1 1.0\n");
-    assert_eq!(run("print(6.022e23, 1e15, 2.5e-3)"), "6.022e23 1000000000000000.0 0.0025\n");
+    assert_eq!(run("print(0 ** 0, 0.0 ** 0.0, float(0) ** float(0))"), "1 1 0x1p0\n");
+    assert_eq!(run("print(6.022e23, 1e15, 2.5e-3)"), "602200000000000000000000 1000000000000000 0.0025\n");
+}
+
+#[test]
+fn decimals_are_exact_as_written() {
+    let source = r#"
+import math
+
+immut price: decimal = 0.1
+immut tax: decimal = 0.2
+print(price + tax, price + tax == 0.3)
+print(0.1 + 0.2)
+mut total: decimal = 0
+for i in range(10) {
+    total += 0.1
+}
+print(total, total == 1)
+immut third = decimal(1) / 3
+print(third, third * 3)
+print(decimal(2) / 3, -decimal(7.5), 7.5 * price)
+print(decimal(1.5) ** 2, decimal(2) ** -2, decimal(10) ** 20)
+print(decimal(7.5) % 2, math.abs(decimal(-2.5)), math.sqrt(decimal(2)))
+print(math.floor(decimal(-2.5)), math.ceil(decimal(2.1)), math.round(decimal(2.5)), int(decimal(-2.7)))
+print(float(decimal(0.1)), decimal(float(0.1) + float(0.2)), decimal('12.50'), decimal('x'))
+immut values: decimal[] = [1.5, 0.25, 3]
+print(values, values.length())
+mut sorted = values
+sorted.sort()
+print(sorted, decimal(1.50) == 1.5, 1.5 < decimal(2), decimal(1e300) * 10)
+immut big: decimal = 1e384
+print(big, `interpolated ${price}`, string(tax))
+immut counts: Map[decimal, int] = [1.5: 1, 1.50: 2]
+print(counts)
+match (price) {
+    0.1 => print('a tenth')
+    _ => print('other')
+}
+"#;
+    assert_eq!(
+        run(source),
+        "0.3 true\n\
+0.3\n\
+1 true\n\
+0.3333333333333333333333333333333333 0.9999999999999999999999999999999999\n\
+0.6666666666666666666666666666666667 -7.5 0.75\n\
+2.25 0.25 100000000000000000000\n\
+1.5 2.5 Ok(1.414213562373095048801688724209698)\n\
+-3 3 3 -2\n\
+0x1.999999999999ap-4 0.30000000000000004 Ok(12.5) Err(InvalidNumber('x'))\n\
+[1.5, 0.25, 3] 3\n\
+[0.25, 1.5, 3] true true 1e301\n\
+1e384 interpolated 0.1 0.2\n\
+[1.5: 2]\n\
+a tenth\n\
+"
+    );
+    let errors = [
+        ("immut x: decimal = 0.12345678901234567890123456789012345", "decimal literal 0.12345678901234567890123456789012345 has more than 34 significant digits"),
+        ("immut x: decimal = 1e6145", "decimal literal 1e6145 is too large for a decimal"),
+        ("immut x: decimal = 1e-6177", "decimal literal 1e-6177 is too small for a decimal"),
+        ("immut f = float(1.5)\nimmut d: decimal = f", "cannot assign a value of type float to 'd' of type decimal"),
+        ("immut d: decimal = 1\nimmut f = float(2.5)\nprint(d + f)", "operator '+' cannot be applied to decimal and float: convert one of them with float(x) or decimal(x)"),
+        ("immut f: float = 2.5", "2.5 is a decimal: write float(2.5) for the nearest float, or the float in hexadecimal"),
+        ("immut f = 0x1.fffffffffffff8p0", "0x1.fffffffffffff8p0 has more digits than a float holds (53 bits): it would be rounded"),
+        ("immut d: decimal = -8\nprint(d ** 0.5)", "panic: test.kj:2: -8 ** 0.5 is not a real number (use math.pow to handle it)"),
+        ("import math\nprint(math.pow(float(2), 1.5))", "the arguments of 'math.pow' are a float and a decimal"),
+        ("print(decimal(true))", "cannot convert boolean to decimal"),
+        ("immut d: decimal = 9e6144\nprint(d * 10)", "panic: test.kj:2: decimal overflow"),
+        ("immut d: decimal = 1\nprint(d / 0)", "panic: test.kj:2: division by zero"),
+        ("immut d: decimal = 1e-6176\nprint(d / 3)", "panic: test.kj:2: decimal underflow"),
+        ("print(int(decimal(1e20)))", "integer overflow: 100000000000000000000 does not fit in an int"),
+    ];
+    for (code, fragment) in errors {
+        assert_error(code, fragment);
+    }
+}
+
+#[test]
+fn decimals_by_default_and_floats_as_stored() {
+    // A decimal as in everyday arithmetic; a float written (and shown) in base 16, as it is stored.
+    let source = r#"
+import math
+import time
+import json
+
+function main(): Result[void, math.MathError] {
+
+mut a: decimal = 10
+print(a)
+a = 0.1
+immut b: decimal = 0.2
+immut c = a + b
+print(c, float(c))
+immut x: float = 0x1.999999999999ap-4
+immut y = float(0.2)
+immut z = x + y
+print(z, decimal(z), float(c) == z, c == decimal(z))
+print(0xff, 0x10, 0x1.8p1, -0x1p-2, 0x0.0000000000001p-1022, float(3), float(1) / float(3))
+print(decimal(10) ** 20, 2 ** 0.5, 2 ** 0.5 == math.sqrt(2)?, math.pow(2, 0.5), math.pow(float(2), float(0.5)), math.pow(1.5, 2))
+print(math.pi, math.e, math.sqrt(16), math.sqrt(float(16)))
+immut started = time.monotonic()
+immut now: decimal = time.now()
+print(now > 1700000000, time.monotonic() >= started)
+print(json.parse('[0.1, 2, 1e3]'), json.stringify(json.Decimal(0.30)))
+    return Ok()
+}
+print(main())
+"#;
+    assert_eq!(
+        run(source),
+        "10\n\
+0.3 0x1.3333333333333p-2\n\
+0x1.3333333333334p-2 0.30000000000000004 false false\n\
+255 16 0x1.8p1 -0x1p-2 0x0.0000000000001p-1022 0x1.8p1 0x1.5555555555555p-2\n\
+100000000000000000000 1.414213562373095048801688724209698 true Ok(1.414213562373095048801688724209698) Ok(0x1.6a09e667f3bcdp0) Ok(2.25)\n\
+3.141592653589793238462643383279503 2.718281828459045235360287471352662 Ok(4) Ok(0x1p2)\n\
+true true\n\
+Ok(Array([Decimal(0.1), Int(2), Decimal(1000)])) 0.3\n\
+Ok(void)\n\
+"
+    );
 }
 
 #[test]
@@ -1439,7 +1894,7 @@ fn stdlib_json() {
                 print(json.get(data, 'year'), json.get(data, 'nope'))
 
                 match (json.get(data, 'year')) {
-                    Some(year) => print(json.asInt(year), json.asFloat(year), json.asString(year))
+                    Some(year) => print(json.asInt(year), json.asDecimal(year), json.asString(year))
                     None => print('no year')
                 }
 
@@ -1448,7 +1903,7 @@ fn stdlib_json() {
             Err(error) => print(error)
         }
 
-        print(json.stringify(json.Array([json.Float(2.0), json.Int(2), json.String('a'), json.Null, json.Bool(false), json.Float(6.022e23)])))
+        print(json.stringify(json.Array([json.Decimal(2.0), json.Int(2), json.String('a'), json.Null, json.Bool(false), json.Decimal(6.022e23)])))
 
         // parse and stringify give back the same text; floats keep their decimal point
         for text in ['{"name":"koji","year":2025,"tags":[1,2.5,null]}', '[2.0, 1e3]'] {
@@ -1463,8 +1918,18 @@ fn stdlib_json() {
     "#;
     assert_eq!(
         run(source),
-        "koji\nnull\nInt(2025) Array([String('a')]) Float(3.14)\nSome(Int(2025)) None\nSome(2025) Some(2025.0) None\n{\"year\":2025}\n[2.0,2,\"a\",null,false,6.022e23]\n\
-         {\"name\":\"koji\",\"year\":2025,\"tags\":[1,2.5,null]}\n[2.0,1000.0]\nErr(Syntax('unexpected character \\'}\\'', 1, 7))\nErr(NumberOutOfRange('99999999999999999999', 2, 2))\n"
+        "koji\n\
+null\n\
+Int(2025) Array([String('a')]) Decimal(3.14)\n\
+Some(Int(2025)) None\n\
+Some(2025) Some(2025) None\n\
+{\"year\":2025}\n\
+[2.0,2,\"a\",null,false,602200000000000000000000.0]\n\
+{\"name\":\"koji\",\"year\":2025,\"tags\":[1,2.5,null]}\n\
+[2.0,1000.0]\n\
+Err(Syntax('unexpected character \\'}\\'', 1, 7))\n\
+Err(NumberOutOfRange('99999999999999999999', 2, 2))\n\
+"
     );
     assert_error("import json\nprint(json.stringify(1))", "must be Json");
 }
@@ -1603,16 +2068,134 @@ fn stdlib_http() {
     server.join().unwrap();
 }
 
+/// `https://` (std/http.kj over koji:tls) against `openssl s_server`, with certificates made by the
+/// `openssl` command: skipped where it is missing, or cannot serve TLS 1.3.
+#[test]
+fn stdlib_https() {
+    use std::process::{Command, Stdio};
+
+    let dir = temp_dir("https");
+    std::fs::create_dir_all(&dir).unwrap();
+    let openssl = |args: &[&str]| Command::new("openssl").args(args).current_dir(&dir).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    if !matches!(openssl(&["version"]), Ok(status) if status.success()) {
+        eprintln!("no openssl command: https:// not tested");
+        return;
+    }
+    // An authority, and a certificate for localhost signed by it (P-256, two days).
+    std::fs::write(dir.join("leaf.ext"), "subjectAltName=DNS:localhost\nextendedKeyUsage=serverAuth\nbasicConstraints=critical,CA:FALSE\n").unwrap();
+    std::fs::write(dir.join("hello.txt"), "hello over TLS 1.3\n").unwrap();
+    let made = [
+        openssl(&["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes", "-keyout", "root.key", "-out", "root.pem", "-subj", "/CN=Koji Test Root", "-days", "2", "-addext", "basicConstraints=critical,CA:TRUE", "-addext", "keyUsage=critical,keyCertSign"]),
+        openssl(&["req", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes", "-keyout", "leaf.key", "-out", "leaf.csr", "-subj", "/CN=localhost"]),
+        openssl(&["x509", "-req", "-in", "leaf.csr", "-CA", "root.pem", "-CAkey", "root.key", "-CAcreateserial", "-out", "leaf.pem", "-days", "2", "-extfile", "leaf.ext"]),
+    ];
+    if !made.iter().all(|status| matches!(status, Ok(status) if status.success())) {
+        eprintln!("openssl cannot make the certificates: https:// not tested");
+        return;
+    }
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let mut server = Command::new("openssl")
+        .args(["s_server", "-accept", &port.to_string(), "-tls1_3", "-cert", "leaf.pem", "-key", "leaf.key", "-WWW", "-quiet"])
+        .current_dir(&dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let ready = (0..100).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+    });
+    if !ready {
+        let _ = server.kill();
+        eprintln!("openssl s_server did not start: https:// not tested");
+        return;
+    }
+    // The authorities of the program: only the test's.
+    std::env::set_var("SSL_CERT_FILE", dir.join("root.pem"));
+    std::env::set_var("SSL_CERT_DIR", dir.join("no-directory"));
+    let source = format!(
+        r#"
+        import http
+
+        match (http.get('https://localhost:{port}/hello.txt')) {{
+            Ok(res) => print(`${{res.status}} ${{res.body.trim()}}`)
+            Err(error) => print(error)
+        }}
+
+        // The certificate names localhost, not this address.
+        match (http.get('https://127.0.0.1:{port}/hello.txt')) {{
+            Ok(_) => print('trusted?')
+            Err(Tls(_, message)) => print(message)
+            Err(error) => print(error)
+        }}
+        "#
+    );
+    let output = run(&source);
+    let _ = server.kill();
+    let _ = server.wait();
+    assert_eq!(
+        output,
+        format!(
+            "200 hello over TLS 1.3\nhttps://127.0.0.1:{port}/hello.txt: invalid certificate: the certificate is not valid for this name\n"
+        )
+    );
+}
+
+#[test]
+fn stdlib_http_redirects_and_chunks() {
+    use std::io::{Read, Write as _};
+    use std::net::TcpListener;
+
+    // A POST redirected by 303 becomes a GET without a body; the answer comes in chunks, with an
+    // extension and a trailer (std/http.kj reads both, as HTTP/1.1 allows).
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        for stream in listener.incoming().take(2) {
+            let mut stream = stream.unwrap();
+            let mut data = Vec::new();
+            let mut buffer = [0u8; 4096];
+            while !String::from_utf8_lossy(&data).contains("\r\n\r\n") {
+                let read = stream.read(&mut buffer).unwrap();
+                if read == 0 {
+                    break;
+                }
+                data.extend_from_slice(&buffer[..read]);
+            }
+            let request = String::from_utf8_lossy(&data).to_string();
+            let first_line = request.lines().next().unwrap_or("").to_string();
+            let response = if first_line.starts_with("POST /form") {
+                "HTTP/1.1 303 See Other\r\nLocation: /done?ok=1\r\nContent-Length: 0\r\n\r\n".to_string()
+            } else {
+                format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5;ext=1\r\nhello\r\n{:x}\r\n {}\r\n0\r\nX-Trailer: y\r\n\r\n", first_line.len() + 1, first_line)
+            };
+            stream.write_all(response.as_bytes()).unwrap();
+        }
+    });
+    let source = format!(
+        r#"
+        import http
+
+        match (http.post('http://127.0.0.1:{port}/form', 'name=Ana')) {{
+            Ok(res) => print(res.status, res.body)
+            Err(error) => print(error)
+        }}
+        "#
+    );
+    assert_eq!(run(&source), "200 hello GET /done?ok=1 HTTP/1.1\n");
+    server.join().unwrap();
+}
+
 #[test]
 fn all_examples_type_check() {
     for entry in std::fs::read_dir("examples").unwrap() {
         let path = entry.unwrap().path();
-        if path.extension().and_then(|e| e.to_str()) != Some("Koji") {
+        if path.extension().and_then(|e| e.to_str()) != Some("kj") {
             continue;
         }
-        if let Err(error) = kojic::check_file(&path) {
-            panic!("{}: {}", path.display(), error);
-        }
+        let checked = koji::finish(koji::kojic().arg("check").arg(&path), "");
+        assert_eq!(checked.code, Some(0), "{}: {}", path.display(), checked.stderr);
     }
 }
 
@@ -1641,11 +2224,11 @@ fn methods_and_associated_functions() {
         }
 
         type Shape = {
-            Circle(radius: float)
-            Square(side: float)
+            Circle(radius: decimal)
+            Square(side: decimal)
         }
 
-        function Shape.area(self): float {
+        function Shape.area(self): decimal {
             return match (self) {
                 Circle(r) => 3.0 * r * r
                 Square(s) => s * s
@@ -1662,7 +2245,7 @@ fn methods_and_associated_functions() {
 
         print(person.olderThan(baby), Square(2.0).area())
     "#;
-    assert_eq!(run(source), "Hello, I'm John!\nHello, I'm Ana!\ntrue 4.0\n");
+    assert_eq!(run(source), "Hello, I'm John!\nHello, I'm Ana!\ntrue 4\n");
 
     let p = "type P = { name: string }\n";
     assert_error(&format!("{}function P.hi(self) {{ self.name = 'a' }}", p), "parameters can only be modified when declared 'mut'");
@@ -1777,8 +2360,8 @@ fn mut_parameters() {
     assert_error("function f(items: int[]) { items[0] = 1 }", "parameters can only be modified");
     assert_error(&format!("{}immut c = 1\nf(mut c)", f), "cannot pass 'c' as 'mut': it is immut");
     assert_error(&format!("{}immut c = [1]\nf(mut c[0])", f), "it is immut");
-    assert_error(&format!("{}mut c = 1\nf(c)", f), "argument 1 is a 'mut' parameter");
-    assert_error("function f(x: int) {}\nmut c = 1\nf(mut c)", "argument 1 is not a 'mut' parameter");
+    assert_error(&format!("{}mut c = 1\nf(c)", f), "argument 1 of 'f' is a 'mut' parameter");
+    assert_error("function f(x: int) {}\nmut c = 1\nf(mut c)", "argument 1 of 'f' is not a 'mut' parameter");
     assert_error("function f(mut x: float) {}\nmut c = 1\nf(mut c)", "must be exactly float, found int");
     assert_error(&format!("{}immut g = f", f), "can only be called, not used as a value");
     assert_error("immut g = (mut x: int) => x", "anonymous functions cannot have 'mut' parameters");
@@ -1870,8 +2453,8 @@ fn display_and_debug() {
         }
 
         type Shape = {
-            Circle(radius: float)
-            Square(side: float)
+            Circle(radius: decimal)
+            Square(side: decimal)
         }
 
         function Shape.display(self): string {
@@ -1893,7 +2476,7 @@ fn display_and_debug() {
     assert_eq!(
         run(source),
         "Ana (30)\nHi, Ana (30)!\nAna (30) Ana (30) { name: 'Ana', age: 30 }\n\
-         circle of radius 1.0 Circle(1.0)\n[{ name: 'Ana', age: 30 }]\n'text' text [1, 2]\n"
+         circle of radius 1 Circle(1)\n[{ name: 'Ana', age: 30 }]\n'text' text [1, 2]\n"
     );
 }
 
@@ -1958,7 +2541,7 @@ fn object_literals_need_a_type() {
     assert_error("print({ a: 1 })", "this object literal needs a type");
     assert_error("immut x: int = { a: 1 }", "an object literal cannot be a value of type int");
     assert_error(
-        "type S = { Circle(r: float) }\nimmut s: S = { r: 1.0 }",
+        "type S = { Circle(r: decimal) }\nimmut s: S = { r: 1.0 }",
         "an object literal cannot be a value of type S",
     );
 }
@@ -2383,7 +2966,7 @@ fn generic_errors() {
         ("function eq[T](a: T, b: T): boolean { return a == b }", "operator '==' needs 'T' to be equatable: declare it as '[T: equatable]'"),
         ("function f[T](a: T): int { return a.length }", "a value of type T has no field 'length'"),
         ("function id[T](a: T): T { return a }\nimmut g = id", "the type arguments of 'id' are not known here"),
-        ("function id[T](a: T): T { return a }\nimmut x: int = id('a')", "argument 1 must be int, found string"),
+        ("function id[T](a: T): T { return a }\nimmut x: int = id('a')", "argument 1 of 'id' must be int, found string"),
         ("type Box[T] = { value: T }\nimmut b: Box = { value: 1 }", "type 'Box' needs 1 type argument(s)"),
         ("type Box[T] = { value: T }\nimmut b: Box[int, int] = { value: 1 }", "expects 1 type argument(s), found 2"),
         ("import file\ntype Box[T] = { value: T }\nfunction f(b: Box[file.File]) {}", "type parameters cannot be move-only values yet"),
@@ -2636,11 +3219,20 @@ fn stdlib_system() {
         import system
 
         print(system.args(), system.env('KOJI_NOT_SET'))
+        print(system.executable() is Some)
 
-        match (system.run('echo', ['hello', 'koji'])) {
+        match (system.capture('echo', ['hello', 'koji'])) {
             Ok(output) => print(output.status, output.stdout.trim())
             Err(error) => print(error)
         }
+
+        match (system.capture('kj-no-such-command', [])) {
+            Ok(_) => print('?')
+            Err(error) => print(error, '|', error.debug())
+        }
+
+        // `run` uses the terminal: the program's output is not in `output` here.
+        print(system.run('true', []), system.run('false', []))
 
         match (system.run('kj-no-such-command', [])) {
             Ok(_) => print('?')
@@ -2654,10 +3246,10 @@ fn stdlib_system() {
         print('not printed')
     "#;
     let (output, result) = execute(source, "", Path::new("test.kj"));
-    assert_eq!(result, Err(kojic::error::EzError::Exit(3)));
+    assert_eq!(result, Err(Failure::Exit(3)));
     assert_eq!(
         output,
-        "[] None\n0 hello koji\ncommand 'kj-no-such-command' not found | NotFound('kj-no-such-command')\nbefore exit\n"
+        "[] None\ntrue\n0 hello koji\ncommand 'kj-no-such-command' not found | NotFound('kj-no-such-command')\nOk(0) Ok(1)\ncommand 'kj-no-such-command' not found | NotFound('kj-no-such-command')\nbefore exit\n"
     );
 }
 
@@ -2722,18 +3314,18 @@ fn stdlib_path_and_directories() {
 #[test]
 fn int_to_float_conversions() {
     assert_eq!(
-        run("immut a: float[] = [1, 2.5]\nimmut b: Option[float] = Some(1)\nimmut c: Result[float, string] = Ok(3)\nprint(a, a[0] / 2, b, c, [1, 2.5])"),
-        "[1.0, 2.5] 0.5 Some(1.0) Ok(3.0) [1.0, 2.5]\n"
+        run("immut a: float[] = [1, 0x1.4p1]\nimmut b: Option[float] = Some(1)\nimmut c: Result[float, string] = Ok(3)\nprint(a, a[0] / 2, b, c, [1, 2.5])"),
+        "[0x1p0, 0x1.4p1] 0x1p-1 Some(0x1p0) Ok(0x1.8p1) [1, 2.5]\n"
     );
     assert_error("immut counts = [1, 2]\nimmut values: float[] = counts", "cannot assign a value of type int[] to 'values' of type float[]");
-    assert_error("print([[1], [2.5]])", "list elements must have the same type: found int[] and float[]");
+    assert_error("print([[1], [2.5]])", "list elements must have the same type: found int[] and decimal[]");
 }
 
 #[test]
 fn object_fields_follow_the_declaration() {
     assert_eq!(
-        run("type Point = {\n    x: float\n    y: int\n}\n\nimmut p: Point = { y: 1, x: 2 }\nprint(p, p.x / 4)"),
-        "{ x: 2.0, y: 1 } 0.5\n"
+        run("type Point = {\n    x: decimal\n    y: int\n}\n\nimmut p: Point = { y: 1, x: 2 }\nprint(p, p.x / 4)"),
+        "{ x: 2, y: 1 } 0.5\n"
     );
 }
 

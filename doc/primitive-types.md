@@ -2,31 +2,65 @@
 
 ## Numeric Types
 
--   `int`: 64-bit integer numbers.
+-   `int`: 64-bit integer numbers. They are written in base 10 or, after `0x`, in base 16.
 
 ```koji
 immut age: int = 23
+immut mask = 0xff // 255
 ```
 
--   `float`: 64-bit floating-point numbers. A `float` is always a finite real number: there is no NaN and no infinity.
+-   `decimal`: numbers as in everyday arithmetic, with 34 significant digits. A literal with a point or an exponent is a `decimal`, exactly the number written: `0.1` is one tenth, so `0.1 + 0.2 == 0.3`.
 
 ```koji
-immut pi: float = 3.14
-immut avogadro: float = 6.022e23 // scientific notation
+immut price = 19.99 // a decimal
+immut tax: decimal = 0.07
+
+print(price * tax) // 1.3993
+print(0.1 + 0.2) // 0.3
+print(decimal(1) / 3) // 0.3333333333333333333333333333333333
+print(6.022e23) // 602200000000000000000000
+print(1500000.25) // 1500000.25
 ```
 
-A float literal too large to be represented (`1e400`) is a compile-time error.
+A decimal literal must hold exactly: one with more than 34 significant digits, or out of the range of a decimal (about 1e-6176 to 1e6145), is a compile-time error. An operation rounds its exact result to 34 significant digits, to the nearest (half to even): `decimal(2) / 3` is `0.6666666666666666666666666666666667`. A decimal is shown in full, without trailing zeros: `1.50` and `1.5` are equal and both are shown as `1.5`. A whole number is shown in full, like an `int` (`3000000`, `602200000000000000000000`), as long as it fits in the 34 digits a decimal holds; beyond them its other digits would be zeros the decimal does not keep, so it is shown in scientific notation, with every digit it keeps (`decimal(10) ** 300` is `1e300`). A fraction that needs six or more zeros after the point before its first digit is shown in scientific notation, as mathematics, physics and chemistry write it, which is also how it is written in code: `0.000001` stays, `0.0000001` is `1e-7`, and `1.602176634e-19` stays as it is.
 
-An `int` can be used where a `float` is expected, and it becomes a `float`. This applies to a single value, and to the items of a list literal; a list that already exists is not converted, since that would copy it:
+-   `float`: 64-bit binary floating-point numbers, computed by the processor: fast, but most fractions written in base 10 have no exact value in base 2. A `float` is written and shown as it is stored, in base 16: a mantissa after `0x` and a power of 2 after `p`. `0x1.8p1` is 1.5 × 2 = 3.
 
 ```koji
-immut ratio: float = 1 // 1.0
-immut weights: float[] = [1, 2.5] // [1.0, 2.5]
+immut half = 0x1p-1 // 0.5, exactly
+immut tenth = float(0.1) // the float nearest to 0.1
+
+print(tenth) // 0x1.999999999999ap-4
+print(tenth + float(0.2)) // 0x1.3333333333334p-2
+print(decimal(tenth + float(0.2))) // 0.30000000000000004
+```
+
+A float literal is exact: one with more digits than a float holds (53 bits), or out of its range, is a compile-time error. `float(x)` gives the float nearest to a decimal, and `decimal(x)` the shortest decimal that is the same float again, so a float goes to a decimal and back without losing anything.
+
+A `float` and a `decimal` never mix: one of them is converted with `float(x)` or `decimal(x)`, which shows where a value is rounded. A decimal literal is not a float either: `immut x: float = 0.5` is an error, `float(0.5)` or `0x1p-1` is the float.
+
+```koji
+immut rate: float = 0x1p-2
+immut amount = 10.0 // a decimal
+
+print(amount * decimal(rate)) // 2.5
+print(amount * rate) // Error! operator '*' cannot be applied to decimal and float: convert one of them with float(x) or decimal(x)
+```
+
+Simple calculations use a `decimal`; complex ones, which need speed (graph algorithms, simulations, science, graphics), use a `float`; see [Conventions](conventions.md#numbers).
+
+An `int` can be used where a `decimal` or a `float` is expected, and it is converted. This applies to a single value, and to the items of a list literal; a list that already exists is not converted, since that would copy it:
+
+```koji
+immut ratio: decimal = 1 // 1
+immut weights: decimal[] = [1, 2.5] // [1, 2.5]
 immut counts = [1, 2]
-immut values: float[] = counts // Error! cannot assign a value of type int[] to 'values' of type float[]
+immut values: decimal[] = counts // Error! cannot assign a value of type int[] to 'values' of type decimal[]
 ```
 
-When a numeric result does not fit in an `int` or a `float` (a representation limit), the program panics. For example, `9223372036854775807 + 1` and `1e308 * 10` stop the program. Results that do not exist in the real numbers (a domain problem, like the square root of a negative number) are reported by the `math` functions as a `MathError` (see [math](standard-library/math.md)).
+`int / int` is an `int` (truncated toward zero); with a `decimal`, the result is a `decimal`. `**` raises a decimal to any decimal power; an `int` exponent is exact.
+
+Neither a `decimal` nor a `float` has NaN or infinity: when a result does not fit in an `int`, a `decimal` or a `float` (a representation limit), the program panics. For example, `9223372036854775807 + 1` and `float(1e308) * float(10)` stop the program. A `decimal` also stops the program when a result is too small to be anything but zero (`decimal underflow`). Results that do not exist in the real numbers (a domain problem, like the square root of a negative number) are reported by the `math` functions as a `MathError` (see [math](standard-library/math.md)).
 
 ## Text
 
@@ -62,6 +96,23 @@ print(name[0] == 'K') // true
 ```
 
 Characters can be compared (`<`, `>`), by their code. They are not numbers: `'a' + 1` is an error; use `c.code()` and `char(code)`.
+
+## Bytes
+
+-   `byte`: an unsigned integer of 8 bits, from 0 to 255: the unit of binary data (`byte[]`).
+
+```koji
+immut low: byte = 200 // an integer literal is a byte where a byte is expected (256 is an error)
+mut data: byte[] = [1, 2, 255]
+
+print(low + 55, low & 15, ~low) // 255 8 55
+print(byte(17), int(low) * 1000) // 17 200000
+print(data, 255 in data) // [1, 2, 255] true
+```
+
+-   Bytes go with bytes: `low + 1` is a byte (the literal takes the type of the other side), but a byte and an `int` variable do not mix; convert one with `byte(n)` or `int(b)`.
+-   Arithmetic (`+`, `-`, `*`, `/`, `%`, `**`) panics when the result is not a byte (`byte overflow`), like that of ints; the bits (`&`, `|`, `^`, `~`, `<<`, `>>`) stay in 8 bits, and a shift by more than 7 panics. A byte has no `-`.
+-   `byte(n)` converts an `int` and panics outside 0 to 255; `int(b)`, `float(b)` and `decimal(b)` convert back. A byte is shown as its number.
 
 ## Boolean
 

@@ -4,23 +4,34 @@ This guide shows how to build Koji, write a first program and run it.
 
 ## Requirements
 
-Koji is implemented in Rust. To build it, install [Rust](https://www.rust-lang.org/tools/install) (which includes `cargo`).
+The Koji compiler, `kojic`, is written in Koji, and compiles programs to C. Building it needs:
+
+-   a C compiler (`cc`, such as gcc or clang), which `kojic` also uses to build programs;
+-   `gzip` and `ar`.
+
+The runtime library that compiled programs are linked with is written in Koji too; its C is in `bootstrap/libkoji.c.gz`, next to the seed.
 
 ## Building
 
-Clone the repository and build it in release mode:
+Clone the repository and run the build script:
 
 ```sh
 git clone https://github.com/koji-language/koji.git
 cd koji
-cargo build --release
+bootstrap/build.sh
 ```
 
-The executable is created at `target/release/kojic`. To call it as `kojic` from anywhere, add that directory to your `PATH`, or install it with:
+The compiler is written in Koji, so it needs a compiler to be built: the script starts from the C that the compiler generated for itself (`bootstrap/kojic.c.gz`, the seed), compiles it with the C compiler, and with it builds the compiler of `compiler/`.
+
+The compiler is created at `build/kojic`, and the runtime library at `build/libkoji_runtime.a`. `kojic` finds the runtime library next to itself; another one can be given in the environment variable `KOJI_RUNTIME`. `KOJI_CC` chooses the C compiler (default: `cc`). To call it as `kojic` from anywhere, add `build` to your `PATH`:
 
 ```sh
-cargo install --path .
+export PATH=$PWD/build:$PATH
 ```
+
+After a change to the compiler, `bootstrap/build.sh --seed` also writes the seed again from the compiler it built, so that the next build starts from it.
+
+A compiled program keeps the memory of the small values it drops for the next ones, which is faster than asking the system each time. To check a program with valgrind, run it with `KOJI_POOL=0`: each value then gets its own memory from the system, and valgrind sees the use of a value after it was freed.
 
 ## Your First Program
 
@@ -71,7 +82,7 @@ The message gives the file and the line of the error.
 | `kojic build <file.kj> [-o <output>]` | Compiles a program to an executable (needs a C compiler) |
 | `kojic help` | Shows the available commands |
 
-`kojic run` runs programs on an interpreter. `kojic build` compiles them to native executables, through C: it needs a C compiler (`cc`, such as gcc or clang). Both run every program the same way.
+`kojic build` compiles a program to a native executable, through C. `kojic run` does the same in a temporary file, runs it with the arguments and the input of `kojic`, and ends with its exit code.
 
 ```sh
 kojic build hello.kj
@@ -89,10 +100,12 @@ kojic run examples/shapes.kj
 
 ## Running the Tests
 
-If you want to contribute, run the test suite with:
+If you want to contribute, run the test suite with [Rust](https://www.rust-lang.org/tools/install)'s `cargo` (the tests are written in Rust; building Koji does not need it):
 
 ```sh
 cargo test
 ```
+
+The tests build the compiler from the seed, like `bootstrap/build.sh`, and run it on their programs. `test/crypto.rs` tests the cryptography of the runtime by C programs linked with it, and the test of `https://` uses the `openssl` command when it is there. `cargo test --test bootstrap -- --ignored` also checks that the compiler compiles itself to the same C (the fixed point). The stages of the compiler are compared with snapshots (`test/snapshots/`): after a change of a stage, `KOJI_UPDATE_SNAPSHOTS=1 cargo test --test stages` writes them again.
 
 See the [contributing guide](../CONTRIBUTING.md) for details.

@@ -51,9 +51,9 @@ All fields are required, and an object literal cannot have extra fields. Fields 
 Shape types are **nominal**: two types with the same fields are still different types. An object literal is a value of the type expected where it is written: the type of the variable, of the parameter, of the return value or of the list.
 
 ```koji
-type Celsius = { value: float }
+type Celsius = { value: decimal }
 
-type Fahrenheit = { value: float }
+type Fahrenheit = { value: decimal }
 
 immut celsius: Celsius = { value: 20.0 }
 mut fahrenheit: Fahrenheit = { value: 68.0 } // Ok
@@ -199,18 +199,18 @@ Sum types can have methods too:
 
 ```koji
 type Shape = {
-    Circle(radius: float)
-    Square(side: float)
+    Circle(radius: decimal)
+    Square(side: decimal)
 }
 
-function Shape.area(self): float {
+function Shape.area(self): decimal {
     return match (self) {
         Circle(r) => 3.14 * r * r
         Square(s) => s * s
     }
 }
 
-print(Square(2.0).area()) // 4.0
+print(Square(2.0).area()) // 4
 ```
 
 ### Methods That Change the Value
@@ -288,4 +288,4 @@ print(ana.debug()) // { name: 'Ana', age: 30 }
 
 -   Every value has `display()` (the text `print` shows) and `debug()` (the structure of the value, as written in code). Without a `display` method, both show the structure, except for strings and standard library errors, whose `display()` is readable (`'abc' is not a valid number`).
 -   Inside a list or another value, the structure is shown: `print([ana])` gives `[{ name: 'Ana', age: 30 }]`.
--   `debug` cannot be declared: it always shows the structure.
+-   `debug` cannot be declared: it always shows the structure. (An [opaque type](modules-and-imports.md#opaque-types), which hides its structure, is shown by its `display` method there too.)

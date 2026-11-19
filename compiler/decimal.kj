@@ -1,0 +1,220 @@
+// Decimal literals: `1.5` where a `decimal` is expected is exactly 15e-1. A decimal has 34
+// significant digits (std/koji/decimal.kj); a literal is kept without trailing zeros, and zero
+// is 0e-6176.
+
+// A decimal as coefficient * 10^exponent, the coefficient (up to 34 digits, more than an int
+// holds) as high * 10^17 + low.
+export type DecimalParts = {
+    negative: boolean
+    high: int
+    low: int
+    exponent: int
+}
+
+immut precision = 34
+immut smallestExponent = -6176
+immut largestExponent = 6111
+
+// A value is below 10^limit (digits of the coefficient plus the exponent).
+immut limit = 6145
+
+// The decimal that the literal `text` writes (like `-12.5e3`), or why it is not one.
+export function decimalLiteral(text: string): Result[DecimalParts, string] {
+    immut negative = text.startsWith('-')
+    immut unsigned = (if (negative) { text[1..] } else { text }).lower()
+    mut number = unsigned
+    mut exponent = 0
+
+    match (unsigned.indexOf('e')) {
+        Some(at) => {
+            number = unsigned[..at]
+            immut written = unsigned[at + 1..]
+            immut power = if (written.startsWith('+')) { written[1..] } else { written }
+
+            match (int(power)) {
+                Ok(value) => exponent = value
+                Err(_) => {
+                    if (power.startsWith('-')) { return Err(`decimal literal ${text} is too small for a decimal`) }
+
+                    return Err(`decimal literal ${text} is too large for a decimal`)
+                }
+            }
+        }
+        None => {}
+    }
+
+    // The significant digits, without the zeros before and after them.
+    mut digits = ''
+
+    for c in number {
+        if (c == '.') {
+            continue
+        }
+
+        if (digits == '' and c == '0') {
+            continue
+        }
+
+        digits += string(c)
+    }
+
+    match (number.indexOf('.')) {
+        Some(at) => exponent -= number.length() - at - 1
+        None => {}
+    }
+
+    // The zeros after the last significant digit belong to the exponent.
+    while (digits.endsWith('0')) {
+        digits = digits[..digits.length() - 1]
+        exponent += 1
+    }
+
+    if (digits == '') { return Ok({ negative: false, high: 0, low: 0, exponent: smallestExponent }) }
+
+    if (digits.length() > precision) {
+        return Err(`decimal literal ${text} has more than ${precision} significant digits, the precision of a decimal`)
+    }
+
+    if (digits.length() + exponent > limit) { return Err(`decimal literal ${text} is too large for a decimal`) }
+
+    if (exponent < smallestExponent) { return Err(`decimal literal ${text} is too small for a decimal`) }
+
+    // A large exponent takes zeros in the coefficient instead (1e6144 is 10^33 * 10^6111).
+    while (exponent > largestExponent) {
+        digits += '0'
+        exponent -= 1
+    }
+
+    immut split = if (digits.length() > 17) { digits.length() - 17 } else { 0 }
+    return Ok({ negative: negative, high: valueOf(digits[..split]), low: valueOf(digits[split..]), exponent: exponent })
+}
+
+// The int that digits write (at most 17 of them), 0 for none.
+function valueOf(digits: string): int {
+    return match (int(digits)) {
+        Ok(value) => value
+        Err(_) => 0
+    }
+}
+
+// The decimal as the IR shows it: `15e-1`.
+export function decimalText(parts: DecimalParts): string {
+    immut sign = if (parts.negative) { '-' } else { '' }
+
+    if (parts.high == 0) { return `${sign}${parts.low}e${parts.exponent}` }
+
+    immut low = string(parts.low)
+    immut zeros = '0' * (17 - low.length())
+    return `${sign}${parts.high}${zeros}${low}e${parts.exponent}`
+}
+
+// The int that `0xff` writes.
+export function hexInt(text: string): Result[int, string] {
+    immut digits = text[2..].lower()
+
+    if (digits.length() > 16 or (digits.length() == 16 and hexValue(digits.chars()[0]) >= 8)) {
+        return Err(`${text} is too large for an int`)
+    }
+
+    mut value = 0
+
+    for c in digits {
+        value = value * 16 + hexValue(c)
+    }
+
+    return Ok(value)
+}
+
+// The float that `0x1.8p1` writes (1.5 * 2^1), which it must write exactly: at most 53
+// significant bits, in the range of a float.
+export function hexFloat(text: string): Result[float, string] {
+    immut lower = text.lower()
+    immut negative = lower.startsWith('-')
+    immut unsigned = if (negative) { lower[3..] } else { lower[2..] }
+    mut digits = unsigned
+    mut exponent = 0
+
+    match (unsigned.indexOf('p')) {
+        Some(at) => {
+            digits = unsigned[..at]
+            immut written = unsigned[at + 1..]
+            immut power = if (written.startsWith('+')) { written[1..] } else { written }
+
+            match (int(power)) {
+                Ok(value) => exponent = value
+                Err(_) => return Err(`${text} is out of the range of a float`)
+            }
+        }
+        None => {}
+    }
+
+    // The digits without the point: each one after it is 4 bits below.
+    mut mantissa = ''
+
+    for c in digits {
+        if (c == '.') {
+            continue
+        }
+
+        if (mantissa == '' and c == '0') {
+            continue
+        }
+
+        mantissa += string(c)
+    }
+
+    match (digits.indexOf('.')) {
+        Some(at) => exponent -= 4 * (digits.length() - at - 1)
+        None => {}
+    }
+
+    while (mantissa.endsWith('0')) {
+        mantissa = mantissa[..mantissa.length() - 1]
+        exponent += 4
+    }
+
+    if (mantissa == '') { return Ok(if (negative) { -float(0) } else { float(0) }) }
+
+    if (mantissa.length() > 14) { return Err(`${text} has more digits than a float holds (53 bits): it would be rounded`) }
+
+    mut value = 0
+
+    for c in mantissa {
+        value = value * 16 + hexValue(c)
+    }
+
+    // An odd mantissa: its bits are the significant ones.
+    while (value % 2 == 0) {
+        value = value / 2
+        exponent += 1
+    }
+
+    mut bits = 0
+    mut rest = value
+
+    while (rest > 0) {
+        rest = rest / 2
+        bits += 1
+    }
+
+    if (bits > 53) { return Err(`${text} has more digits than a float holds (53 bits): it would be rounded`) }
+
+    if (bits + exponent > 1024) { return Err(`${text} is too large for a float`) }
+
+    if (exponent < -1074) { return Err(`${text} is too small for a float: it would be rounded`) }
+
+    // Exact: the runtime reads the text without rounding anything.
+    return match (float(text)) {
+        Ok(result) => Ok(result)
+        Err(_) => Err(`${text} is not a float`)
+    }
+}
+
+function hexValue(c: char): int {
+    immut digit = '0123456789abcdef'.indexOf(string(c).lower())
+
+    return match (digit) {
+        Some(value) => value
+        None => 0
+    }
+}
