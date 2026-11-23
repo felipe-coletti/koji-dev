@@ -1,5 +1,5 @@
 // The linker of Koji for macOS on arm64 and x86-64 (see "A linker of Koji's own" in
-// doc/design.md): the executable of Mach-O of the objects of a program and of its runtime library
+// doc/internals.md): the executable of Mach-O of the objects of a program and of its runtime library
 // (macho.kj writes them), linked with libSystem, without the linker of the system.
 //
 // The executable is position-independent, as macOS asks: __PAGEZERO, then __TEXT (the headers, the

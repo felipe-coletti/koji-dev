@@ -5,12 +5,12 @@
 // `koji:unsafe`, the pool, the accessors) are written inline here, the instructions of the
 // processor that `koji:unsafe` names as `MMachine`.
 //
-// The references are counted as in the other backends (see "Reference counting" in
-// doc/design.md): a function owns a reference to each managed local but the borrowed ones
-// (borrow.kj), retains a parameter when it starts, releases a local once read for the last time
-// (liveness.kj) or when it is given another value, moves a value read for the last time instead of
-// retaining it, and releases the locals it still holds when it returns. Which locals may hold a
-// reference at each point is known (`held`): only those are released, and a local held where
+// The references are counted (see "Counting references" in "A machine IR between the IR and the
+// processors" in doc/internals.md): a function owns a reference to each managed local but the
+// borrowed ones (borrow.kj), retains a parameter when it starts, releases a local once read for the
+// last time (liveness.kj) or when it is given another value, moves a value read for the last time
+// instead of retaining it, and releases the locals it still holds when it returns. Which locals may
+// hold a reference at each point is known (`held`): only those are released, and a local held where
 // paths meet is set to none at the end of the paths where it is not.
 
 import { Ty, Operand, Place, Target, Instruction, Terminator, IrFunction, IrProgram, StdArg, isManaged, itemOf, tyText } from 'ir.kj'

@@ -356,7 +356,7 @@ test 'printing_to_a_full_pipe_lets_the_other_tasks_run' {
 }
 
 // The runtime library built natively (`kojic library`, see "The library of the runtime built by the
-// compiler" in doc/design.md), given by its path: a program linked with it does what it does with
+// compiler" in doc/internals.md), given by its path: a program linked with it does what it does with
 // the one next to the compiler.
 test 'the_native_library_runs_programs' {
     immut directory = scratch('native-library')

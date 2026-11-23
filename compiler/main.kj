@@ -879,7 +879,7 @@ if (command == 'build') {
 }
 
 // `kojic library -o libkoji_runtime.a`: the runtime library, built natively (see "The library of the
-// runtime built by the compiler" in doc/design.md): the machine code of std/koji/ (but `koji:core`),
+// runtime built by the compiler" in doc/internals.md): the machine code of std/koji/ (but `koji:core`),
 // with `koji:prelude` and the code the backend writes for the runtime, alone in an archive.
 if (command == 'library' and args.length() == 3 and args[1] == '-o') {
     match (buildLibrary(args[2])) {

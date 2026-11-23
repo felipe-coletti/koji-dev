@@ -5353,7 +5353,7 @@ function Checker.checkBuiltinCall(mut self, name: string, args: Node[], expected
             self.checkExactly(name, types, [IntType, IntType])?
             return Ok(DecimalType)
         }
-        // Instructions of the processor (see "Instructions of the processor" in doc/design.md): the
+        // Instructions of the processor (see "Instructions of the processor" in doc/internals.md): the
         // switch between the stacks of two tasks (koji:task), where a new task starts, the control
         // words of floating point (which a new task takes), a request to valgrind.
         'unsafe.switchStacks' => {

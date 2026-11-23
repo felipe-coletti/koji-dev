@@ -1,4 +1,4 @@
-// The linker of Koji for Windows on x86-64 (see "A linker of Koji's own" in doc/design.md): the
+// The linker of Koji for Windows on x86-64 (see "A linker of Koji's own" in doc/internals.md): the
 // executable (PE32+) of the objects of COFF of a program and of its runtime library (coff.kj writes
 // them), linked with the DLLs of the system (the C library, ucrtbase, and kernel32, ws2_32 and
 // bcrypt), without the linker of the system.

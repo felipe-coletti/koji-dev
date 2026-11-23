@@ -41,3 +41,4 @@ Welcome to the **Koji documentation**. Here you will find the syntax, the types,
 ### About
 
 -   [Design Decisions](design.md)
+-   [Internals](internals.md)
