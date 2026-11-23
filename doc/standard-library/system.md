@@ -10,6 +10,9 @@ The `system` module gives access to the command line, the environment, the exit 
 -   `env(name: string) -> Option[string]`  
     The value of the environment variable `name`, or `None` if it is not set.
 
+-   `currentDirectory() -> Option[string]`  
+    The current directory of the program, or `None` if the system cannot tell it.
+
 -   `executable() -> Option[string]`  
     The path of the executable of the running program (with `kojic run`, the temporary executable it built), or `None` where the system cannot tell it.
 
@@ -21,6 +24,28 @@ The `system` module gives access to the command line, the environment, the exit 
 
 -   `capture(command: string, args: string[]) -> Result[Output, SystemError]`  
     Like `run`, but keeps what the program prints instead of showing it, and gives it with the exit code as an `Output`.
+
+-   `command(program: string, args: string[]) -> Command`  
+    A program to run, which can be given an input, a directory and variables of the environment before it runs (see [The `Command` Type](#the-command-type)).
+
+    ```koji
+    import system
+
+    mut sorting = system.command('sort', [])
+    sorting.input = 'pear\napple\n'
+    sorting.environment['LC_ALL'] = 'C'
+
+    match (sorting.output()) {
+        Ok(result) => print(result.stdout)
+        Err(error) => print(error)
+    }
+    ```
+
+-   `readInput(count: int) -> Option[string]`  
+    The next `count` bytes of the standard input, as a text (fewer at its end; bytes that are not UTF-8 become U+FFFD), or `None` when nothing is left. It reads from the same buffer as `input()`, so that a protocol can read its header lines with `input()` and a body of a known size with `readInput` (as the language server of `kojic lsp` does).
+
+-   `writeOutput(text: string)`  
+    Writes `text` on the standard output without a line break after it (`print` adds one): a prompt, a line drawn piece by piece, the messages of a protocol.
 
 ## Constants
 
@@ -48,6 +73,34 @@ The `system` module gives access to the command line, the environment, the exit 
 
     print(separator)
     ```
+
+    The compiler knows the system it compiles for, so a condition on `system.os` (the value of a `match`, or `system.os == Linux` in an `if`) is decided when the program is compiled: the branches of the other systems are not compiled, nor the functions only they call. A branch can call a [foreign function](../ffi.md) of its system that the others do not have: `epoll_create1` on Linux, `kqueue` on macOS. The condition must be in the function that makes the call (a function that calls `kqueue` with no condition is compiled on every system).
+
+-   `architecture: Architecture`  
+    The processor the program runs on:
+
+    ```koji
+    type Architecture = {
+        X64
+        Arm64
+        OtherArchitecture(name: string) // another processor, by its name: 'riscv64'
+    }
+    ```
+
+    Like `os`, a condition on it is decided when the program is compiled (the size of a record of C may depend on the processor).
+
+## The `Command` Type
+
+-   `program: string`, `args: string[]`: the program and its arguments.
+-   `input: string`: what `output()` gives it on its standard input (empty: nothing, as `capture`).
+-   `directory: string`: its current directory (`''`: that of this program).
+-   `environment: Map[string, string]`: variables set in its environment, over those of this program.
+-   `cleared: boolean`: when `true`, its environment has only the variables of `environment`.
+
+Its methods run it:
+
+-   `output() -> Result[Output, SystemError]`: like `capture`, with its input written to it while what it prints is read (a program that stops reading its input does not stop this one).
+-   `run() -> Result[int, SystemError]`: like `run`, with the terminal of this program.
 
 ## The `Output` Type
 

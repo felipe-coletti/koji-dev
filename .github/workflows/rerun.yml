@@ -1,0 +1,48 @@
+# Runs again the jobs of CI that never ran: GitHub cancels a job that waited 15 minutes for a runner
+# it could not find (as the runners of macOS on arm64 sometimes lack), with no step done. Such a job
+# is not a failure of Koji, and CI requires all of its jobs: they are run again, up to the third
+# attempt of the run. A job that failed, or was cancelled after it started (its time limit), is
+# never run again, nor a run of a commit that is no longer the last of its branch.
+name: Re-run jobs that found no runner
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  rerun:
+    if: github.event.workflow_run.conclusion == 'cancelled' || github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Run again the jobs that found no runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ "$ATTEMPT" -ge 3 ]; then
+            echo "attempt $ATTEMPT: no more"
+            exit 0
+          fi
+          last=$(gh api "repos/$REPOSITORY/branches/$BRANCH" --jq .commit.sha || echo none)
+          if [ "$last" != "$COMMIT" ]; then
+            echo "$COMMIT is no longer the last commit of $BRANCH"
+            exit 0
+          fi
+          jobs=$(gh api "repos/$REPOSITORY/actions/runs/$RUN/attempts/$ATTEMPT/jobs?per_page=100")
+          # Cancelled before any step: no runner. Any other job that did not pass: a real failure.
+          starved=$(echo "$jobs" | jq '[.jobs[] | select(.conclusion == "cancelled" and ((.steps // []) | length) == 0)] | length')
+          failed=$(echo "$jobs" | jq '[.jobs[] | select(.conclusion != "success" and .conclusion != "skipped" and (.conclusion != "cancelled" or ((.steps // []) | length) > 0))] | length')
+          echo "jobs without a runner: $starved, jobs that failed: $failed"
+          if [ "$starved" -gt 0 ] && [ "$failed" -eq 0 ]; then
+            gh run rerun "$RUN" --failed --repo "$REPOSITORY"
+          fi

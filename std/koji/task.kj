@@ -1,0 +1,952 @@
+// `koji:task`: the tasks of a program, in the library of the runtime written in Koji (std/task.kj,
+// the sockets of the runtime and so koji:tls call these functions by their names). A task
+// runs a function on a stack of its own, on the one thread of the program: it runs until it waits
+// (to be woken by another task, for a time, a socket or a job of a thread that helps) or has run
+// long enough (`koji_task_preempt`), and then the next task that is ready runs. No task runs while
+// another one does, so they share the memory of the library without locks. The first task, 0, is
+// the program itself, on the stack the system gave it.
+//
+// A task waits in `suspend`, and returns from it when something wakes it: `koji_task_wake`, its
+// socket, its time. A wait may also end early (a task woken for something it waited for before),
+// so each one waits again until what it waits for is there. When no task is ready, `poll` waits for
+// the timers and the sockets; when none can wake a task, the tasks wait for each other forever,
+// and the program stops with a panic.
+
+import system
+import { Address, CInt, CSize, allocate, distance, free, floatControl, isNull, nullAddress, offset, read, switchStacks, taskEntry, valgrind, write } from 'koji:unsafe'
+
+extern function mmap(address: Address, size: CSize, protection: CInt, flags: CInt, fd: CInt, at: int): Address
+extern function munmap(address: Address, size: CSize): CInt
+extern function mprotect(address: Address, size: CSize, protection: CInt): CInt
+extern function koji_system_errno(): CInt
+extern function clock_gettime(clock: CInt, time: Address): CInt
+extern function nanosleep(request: Address, remaining: Address): CInt
+extern function epoll_create1(flags: CInt): CInt
+extern function epoll_ctl(poller: CInt, operation: CInt, fd: CInt, event: Address): CInt
+extern function epoll_wait(poller: CInt, events: Address, capacity: CInt, milliseconds: CInt): CInt
+extern function kqueue(): CInt
+extern function kevent(poller: CInt, changes: Address, changeCount: CInt, events: Address, capacity: CInt, timeout: Address): CInt
+// Windows (kernel32).
+extern function VirtualAlloc(address: Address, size: CSize, kind: CInt, protection: CInt): Address
+extern function VirtualProtect(address: Address, size: CSize, protection: CInt, old: Address): CInt
+extern function VirtualFree(address: Address, size: CSize, kind: CInt): CInt
+extern function QueryPerformanceCounter(count: Address): CInt
+extern function QueryPerformanceFrequency(frequency: Address): CInt
+extern function Sleep(milliseconds: CInt)
+extern function WSAPoll(fds: Address, count: CInt, milliseconds: CInt): CInt
+extern function PeekNamedPipe(pipe: Address, buffer: Address, size: CInt, read: Address, available: Address, left: Address): CInt
+extern function windowsHandle(fd: CInt): Address from '_get_osfhandle'
+extern function koji_helpers_start(): int
+extern function koji_helpers_add(): boolean
+extern function koji_helpers_submit(job: Address)
+extern function koji_helpers_finished(out: Address, capacity: int): int
+extern function koji_ticks(on: boolean): boolean
+extern function koji_preempt_clear()
+
+// The stacks of the tasks. Below each, a guard that nothing may touch (16 KB, a page of any system):
+// a task that overflows its stack stops the program there instead of writing over other memory.
+immut stackGuard = 16384
+
+// Whether the processor has tasks (`switchStacks`).
+function tasksSupported(): boolean {
+    return match (system.architecture) {
+        X64 => true
+        Arm64 => true
+        OtherArchitecture(_) => false
+    }
+}
+
+// A stack of `size` bytes (a multiple of the guard): its lowest address, above the guard, or the
+// address 0. The system gives its memory as it is first used (MAP_PRIVATE, MAP_ANONYMOUS and, on
+// Linux, MAP_NORESERVE). Valgrind is told of it (VG_USERREQ__STACK_REGISTER), which keeps the
+// number it gives in the last word of the stack.
+function stackNew(size: int): Address {
+    // Windows: its memory given at once (MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE), the guard
+    // PAGE_NOACCESS.
+    if (system.os == system.Windows) {
+        immut reserved = VirtualAlloc(nullAddress(), size + stackGuard, 0x3000, 4)
+
+        if (isNull(reserved)) { return nullAddress() }
+
+        immut old = allocate(8)
+        immut guarded = VirtualProtect(reserved, stackGuard, 1, old) != 0
+        free(old)
+
+        if (not guarded) {
+            VirtualFree(reserved, 0, 0x8000)
+            return nullAddress()
+        }
+
+        return offset(reserved, stackGuard)
+    }
+
+    immut flags = match (system.os) {
+        Linux => 2 | 0x20 | 0x4000
+        _ => 2 | 0x1000
+    }
+    // PROT_READ | PROT_WRITE
+    immut block = mmap(nullAddress(), size + stackGuard, 3, flags, -1, 0)
+
+    if (distance(nullAddress(), block) == -1) { return nullAddress() }
+
+    if (mprotect(block, stackGuard, 0) != 0) {
+        munmap(block, size + stackGuard)
+        return nullAddress()
+    }
+
+    immut stack = offset(block, stackGuard)
+    immut low = distance(nullAddress(), stack)
+    write(stack, size - 8, valgrind(0x1501, low, low + size, 0))
+    return stack
+}
+
+function stackFree(stack: Address, size: int) {
+    // MEM_RELEASE
+    if (system.os == system.Windows) {
+        VirtualFree(offset(stack, -stackGuard), 0, 0x8000)
+        return
+    }
+
+    immut registered: int = read(stack, size - 8)
+    valgrind(0x1502, registered, 0, 0)
+    munmap(offset(stack, -stackGuard), size + stackGuard)
+}
+
+// The top of a new stack for `switchStacks`, which then starts `task` where `taskEntry` is: the
+// registers it restores, zero but for the task and where it returns, and the control words of
+// floating point of the current task (below the number of valgrind, aligned to 16 bytes).
+function stackStart(stack: Address, size: int, task: int): Address {
+    immut top = offset(stack, size - 16)
+
+    return match (system.architecture) {
+        // On Windows, the limits of the stack in the block of the thread too (NT_TIB: StackLimit,
+        // StackBase), which the functions of the system check.
+        X64 if (system.os == system.Windows) => {
+            immut sp = offset(top, -88)
+
+            for word in range(11) {
+                write(sp, 8 * word, 0)
+            }
+
+            write(sp, 0, floatControl())
+            write(sp, 8, stack)
+            write(sp, 16, offset(stack, size))
+            write(sp, 56, task)
+            write(sp, 72, taskEntry())
+            sp
+        }
+        X64 => {
+            // The control words, r15 to r12, rbx (the task), rbp, where it returns.
+            immut sp = offset(top, -72)
+
+            for word in range(9) {
+                write(sp, 8 * word, 0)
+            }
+
+            write(sp, 0, floatControl())
+            write(sp, 40, task)
+            write(sp, 56, taskEntry())
+            sp
+        }
+        Arm64 => {
+            // x19 (the task) to x30 (where it returns), d8 to d15, fpcr.
+            immut sp = offset(top, -176)
+
+            for word in range(22) {
+                write(sp, 8 * word, 0)
+            }
+
+            write(sp, 0, task)
+            write(sp, 88, taskEntry())
+            write(sp, 160, floatControl())
+            sp
+        }
+        OtherArchitecture(_) => nullAddress()
+    }
+}
+
+// The clock and the poller of the system (`match (system.os)`: each system compiles its own, see
+// "Code for one system" in doc/design.md). The records of C they fill are in `systemWords` (one
+// thread runs Koji, so one block serves every call).
+immut systemWords = allocate(4096)
+
+// The nanoseconds of a clock that only grows (CLOCK_MONOTONIC: 1 on Linux, 6 on macOS, 4 on the
+// BSDs), from a `struct timespec` (seconds, nanoseconds).
+extern function koji_monotonic_nanoseconds(): int {
+    // Windows: the counter of performance and its frequency.
+    if (system.os == system.Windows) {
+        QueryPerformanceCounter(systemWords)
+        QueryPerformanceFrequency(offset(systemWords, 8))
+        immut count: int = read(systemWords, 0)
+        immut frequency: int = read(systemWords, 8)
+        return count / frequency * 1000000000 + count % frequency * 1000000000 / frequency
+    }
+
+    immut clock = match (system.os) {
+        Linux => 1
+        MacOS => 6
+        _ => 4
+    }
+    clock_gettime(clock, systemWords)
+    immut seconds: int = read(systemWords, 0)
+    immut nanoseconds: int = read(systemWords, 8)
+    return seconds * 1000000000 + nanoseconds
+}
+
+// Sleeps until the monotonic clock is at `deadline` (in nanoseconds).
+extern function koji_sleep_until(deadline: int) {
+    while (true) {
+        immut left = deadline - koji_monotonic_nanoseconds()
+
+        if (left <= 0) { return }
+
+        if (system.os == system.Windows) {
+            Sleep((left + 999999) / 1000000)
+            continue
+        }
+
+        write(systemWords, 0, left / 1000000000)
+        write(systemWords, 8, left % 1000000000)
+        nanosleep(systemWords, nullAddress())
+    }
+}
+
+// The poller: a handle of the system that says which sockets are ready, each watched once (a socket
+// that becomes ready is watched no more), with the number of the socket as its token: epoll on
+// Linux, kqueue on macOS, FreeBSD and OpenBSD, none elsewhere (tasks cannot wait for sockets while
+// others run there).
+extern function koji_poller_new(): int {
+    return match (system.os) {
+        // EPOLL_CLOEXEC
+        Linux => epoll_create1(0x80000)
+        MacOS => kqueue()
+        // The sockets watched are those of `windowsWatched` (one poller: no handle).
+        Windows => 0
+        Other(name) => if (keventSize(name) > 0) { kqueue() } else { -1 }
+    }
+}
+
+// Windows: the sockets watched (twice their numbers, and 1 for those to write), until ready.
+mut windowsWatched: int[] = []
+
+// The size of a `struct kevent` of a BSD (FreeBSD has 4 more words), 0 for a system without kqueue.
+function keventSize(name: string): int {
+    return match (name) {
+        'freebsd' => 64
+        'openbsd' => 32
+        _ => 0
+    }
+}
+
+// The place of `data` in a `struct epoll_event` (after `events`, of 4 bytes): packed on x86-64.
+function epollData(): int {
+    return match (system.architecture) {
+        X64 => 4
+        _ => 8
+    }
+}
+
+// Watches `fd` until it is ready to read (or to write): 0, or -1 (errno says why).
+extern function koji_poller_watch(poller: int, fd: int, writing: boolean): int {
+    match (system.os) {
+        Linux => {
+            // EPOLLIN or EPOLLOUT, with EPOLLONESHOT; EPOLL_CTL_MOD, or EPOLL_CTL_ADD for a socket
+            // not watched yet (ENOENT).
+            write(systemWords, 0, (if (writing) { 4 } else { 1 }) | 1 << 30)
+            write(systemWords, epollData(), fd)
+
+            if (epoll_ctl(poller, 3, fd, systemWords) == 0) { return 0 }
+
+            if (koji_system_errno() != 2) { return -1 }
+
+            return epoll_ctl(poller, 1, fd, systemWords)
+        }
+        Windows => {
+            immut entry = fd * 2 + (if (writing) { 1 } else { 0 })
+
+            if (not (entry in windowsWatched)) { windowsWatched.push(entry) }
+
+            return 0
+        }
+        _ => {
+            if (keventSize(systemName()) == 0 and system.os != system.MacOS) { return -1 }
+
+            // A `struct kevent`: ident, filter (EVFILT_READ -1, EVFILT_WRITE -2) and flags (EV_ADD |
+            // EV_ONESHOT) of 16 bits each, fflags, data, udata.
+            write(systemWords, 0, fd)
+            write(systemWords, 8, ((if (writing) { -2 } else { -1 }) & 0xFFFF) | 0x11 << 16)
+            write(systemWords, 16, 0)
+            write(systemWords, 24, 0)
+
+            for word in range(4, 8) {
+                write(systemWords, 8 * word, 0)
+            }
+
+            return if (kevent(poller, systemWords, 1, nullAddress(), 0, nullAddress()) == 0) { 0 } else { -1 }
+        }
+    }
+}
+
+// Waits for the sockets watched, at most `milliseconds` (-1: as long as it takes): how many are ready
+// (0 when the time ran out or a signal came), their numbers at `ready`, or -1.
+extern function koji_poller_wait(poller: int, milliseconds: int, ready: Address, capacity: int): int {
+    immut most = if (capacity < 64) { capacity } else { 64 }
+    immut events = offset(systemWords, 64)
+
+    match (system.os) {
+        Linux => {
+            immut size = epollData() + 8
+            immut count = epoll_wait(poller, events, most, milliseconds)
+
+            if (count < 0) { return if (koji_system_errno() == 4) { 0 } else { -1 } }
+
+            for i in range(count) {
+                immut fd: int = read(events, i * size + epollData())
+                write(ready, 8 * i, fd)
+            }
+
+            return count
+        }
+        Windows => return windowsWait(milliseconds, ready, most)
+        _ => {
+            immut size = if (system.os == system.MacOS) { 32 } else { keventSize(systemName()) }
+
+            if (size == 0) { return -1 }
+
+            // A `struct timespec` for the limit, none for no limit.
+            write(systemWords, 0, milliseconds / 1000)
+            write(systemWords, 8, milliseconds % 1000 * 1000000)
+            immut limit = if (milliseconds < 0) { nullAddress() } else { systemWords }
+            immut count = kevent(poller, nullAddress(), 0, events, most, limit)
+
+            if (count < 0) { return if (koji_system_errno() == 4) { 0 } else { -1 } }
+
+            for i in range(count) {
+                immut fd: int = read(events, i * size)
+                write(ready, 8 * i, fd)
+            }
+
+            return count
+        }
+    }
+}
+
+// The name of another system ('freebsd'), '' for those that have a variant.
+function systemName(): string {
+    return match (system.os) {
+        Other(name) => name
+        _ => ''
+    }
+}
+
+// The stack of a task: 1 MB, of which the system only gives the memory a task uses (a few pages,
+// for most of them).
+immut stackSize = 1048576
+// The stacks of ended tasks kept for new ones, at most.
+immut keptStacks = 16
+// The sockets that one wait of the poller can find ready, at most.
+immut readyCapacity = 64
+// The threads that help with the calls that block, at most (koji:prelude), and where a job
+// has the task that waits for it and whether it is done.
+immut maxHelpers = 16
+immut jobTask = 72
+immut jobDone = 80
+
+// What a task is doing.
+immut running = 0
+immut ready = 1
+immut waiting = 2
+immut ended = 3
+
+type Task = {
+    // What it runs, until it starts.
+    work: Option[() => void]
+    // The lowest address of its stack (none for the task 0).
+    stack: Address
+    // A word with the top of its stack while it does not run (koji_task_switch).
+    top: Address
+    state: int
+    // Woken while it did not wait: its next wait ends at once.
+    woken: boolean
+    // Its waits so far: the timer of an earlier one does not wake it.
+    waits: int
+    // Whether its last wait ended with its time.
+    late: boolean
+}
+
+// A time a task waits for (a monotonic time in nanoseconds), in its wait number `wait`.
+type Timer = {
+    at: int
+    task: int
+    wait: int
+}
+
+// The tasks, by number: an ended one leaves its number to a new one (the list is empty before the
+// first task).
+mut tasks: Task[] = []
+// The task that runs.
+mut current = 0
+// The tasks that are ready, in turn: those of `queue` from `head`.
+mut queue: int[] = []
+mut head = 0
+// The numbers of ended tasks, for new ones.
+mut freeTasks: int[] = []
+// A task that ended, whose stack the next task to run keeps or frees (it ran on it).
+mut finished = -1
+// The stacks kept for new tasks.
+mut stacks: Address[] = []
+// The timers, a heap: the first is the earliest.
+mut timers: Timer[] = []
+// The poller of the system, made for the first socket a task waits for, the numbers of the
+// sockets ready at `readyFds`, and for each socket, the task that waits for it, or -1.
+mut poller = -1
+mut readyFds = nullAddress()
+mut socketTasks: int[] = []
+// The tasks that wait for a socket.
+mut sockets = 0
+// When the sockets and the timers were last looked at (a monotonic time in nanoseconds), and how
+// often `schedule` looks at them while tasks are ready: every millisecond.
+mut lastPoll = 0
+immut pollInterval = 1000000
+// The tasks that have not ended, the program included.
+mut alive = 1
+// The jobs of the threads that help (made for the first one): the end of the pipe the jobs done
+// come back from (watched by the poller while jobs are out), the threads, the jobs out.
+mut jobsDone = -1
+mut helpers = 0
+mut jobs = 0
+mut jobsWatched = false
+mut jobsBack = nullAddress()
+
+function newTask(stack: Address): Task {
+    return { work: None, stack: stack, top: allocate(8), state: ended, woken: false, waits: 0, late: false }
+}
+
+// The task 0, the program, the first time a function of tasks is called.
+function start() {
+    if (tasks.length() > 0) { return }
+
+    tasks.push(newTask(nullAddress()))
+    tasks[0].state = running
+}
+
+// A new task, which will run `work` when its turn comes: its number.
+extern function koji_task_spawn(work: () => void): int {
+    if (not tasksSupported()) { panic('tasks need a processor of x86-64 or arm64') }
+
+    start()
+    reap()
+    mut stack = nullAddress()
+
+    match (stacks.pop()) {
+        Some(kept) => stack = kept
+        None => {
+            stack = stackNew(stackSize)
+
+            if (isNull(stack)) { panic('there is no memory for the stack of a new task') }
+        }
+    }
+
+    mut id = tasks.length()
+
+    match (freeTasks.pop()) {
+        Some(free) => id = free
+        None => tasks.push(newTask(stack))
+    }
+
+    tasks[id].work = Some(work)
+    tasks[id].stack = stack
+    tasks[id].state = ready
+    tasks[id].woken = false
+    write(tasks[id].top, 0, stackStart(stack, stackSize, id))
+    queue.push(id)
+    alive += 1
+
+    // Two tasks: the one that runs long lets the other run (koji_task_preempt).
+    if (alive == 2 and not koji_ticks(true)) { panic('the system cannot start the clock of tasks') }
+
+    return id
+}
+
+// Where a new task starts, on its stack (koji_task_entry): it runs its work,
+// then the next task, and its stack is never used again.
+extern function koji_task_main(id: int) {
+    reap()
+    run(id)
+    tasks[id].state = ended
+    alive -= 1
+
+    if (alive == 1) { koji_ticks(false) }
+
+    finished = id
+    schedule()
+}
+
+// Runs the work of a task, which it then releases.
+function run(id: int) {
+    immut work = match (tasks[id].work) {
+        Some(found) => found
+        None => return
+    }
+
+    tasks[id].work = None
+    work()
+}
+
+// Keeps or frees the stack of the task that ended (another stack runs now).
+function reap() {
+    if (finished < 0) { return }
+
+    immut id = finished
+    finished = -1
+
+    if (stacks.length() < keptStacks) {
+        stacks.push(tasks[id].stack)
+    } else {
+        stackFree(tasks[id].stack, stackSize)
+    }
+
+    tasks[id].stack = nullAddress()
+    freeTasks.push(id)
+}
+
+// The task that runs: 0 for the program.
+extern function koji_task_current(): int {
+    return current
+}
+
+// Waits until another task wakes this one (koji_task_wake), at once if one did since its last wait.
+extern function koji_task_suspend() {
+    start()
+    suspend(-1)
+}
+
+// Makes a task that waits ready; one that does not wait will not wait next time.
+extern function koji_task_wake(id: int) {
+    if (id < 0 or id >= tasks.length()) { return }
+
+    immut state = tasks[id].state
+
+    if (state == waiting) {
+        tasks[id].state = ready
+        queue.push(id)
+        return
+    }
+
+    if (state != ended) { tasks[id].woken = true }
+}
+
+// The current task has run for a while without waiting (the clock set `koji_preempt_flag`): the
+// tasks that sockets, timers and jobs woke meanwhile, and those that are ready, run before it goes
+// on.
+extern function koji_task_preempt() {
+    koji_preempt_clear()
+
+    if (tasks.length() == 0) { return }
+
+    if (sockets + jobs > 0 or timers.length() > 0) {
+        lastPoll = koji_monotonic_nanoseconds()
+        pollReady(0)
+    }
+
+    giveWay()
+}
+
+// Lets the tasks that are ready run before the current one goes on.
+function giveWay() {
+    if (head == queue.length()) { return }
+
+    tasks[current].state = ready
+    queue.push(current)
+    schedule()
+}
+
+// Waits until the monotonic clock is at `deadline` (nanoseconds) while the other tasks run.
+extern function koji_task_sleep_until(deadline: int) {
+    start()
+
+    while (koji_monotonic_nanoseconds() < deadline) {
+        suspend(deadline)
+    }
+}
+
+// Waits until the socket `fd` is ready to read (or to write) while the other tasks run, at most
+// until `deadline` (a monotonic time in nanoseconds, or -1): 0 when it may be ready, 1 when the
+// time ran out first, -1 when the system cannot watch it (errno says why).
+extern function koji_task_wait_fd(fd: int, write: boolean, deadline: int): int {
+    start()
+
+    if (not startPoller()) { return -1 }
+
+    if (koji_poller_watch(poller, fd, write) != 0) { return -1 }
+
+    while (socketTasks.length() <= fd) {
+        socketTasks.push(-1)
+    }
+
+    if (socketTasks[fd] >= 0) { panic(`two tasks wait for the same socket (${fd})`) }
+
+    socketTasks[fd] = current
+    sockets += 1
+    immut late = suspend(deadline)
+
+    // Woken by something else (or by its time): the socket is not its to wait for anymore.
+    if (socketTasks[fd] == current) {
+        socketTasks[fd] = -1
+        sockets -= 1
+    }
+
+    if (late) { return 1 }
+
+    return 0
+}
+
+// Whether no other task is alive: the calls that block are then made by the task itself.
+extern function koji_task_alone(): boolean {
+    return alive <= 1
+}
+
+// Runs a job (koji:prelude) on a thread that helps, while the other tasks run: it returns when
+// the job is done.
+extern function koji_task_offload(job: Address) {
+    start()
+
+    if (jobsDone < 0) {
+        jobsDone = koji_helpers_start()
+
+        if (jobsDone < 0 or not startPoller()) { panic('the system cannot make the threads that help tasks') }
+
+        jobsBack = allocate(readyCapacity * 8)
+    }
+
+    // A thread for each job out, up to the most.
+    if (jobs >= helpers and helpers < maxHelpers) {
+        if (koji_helpers_add()) { helpers += 1 }
+    }
+
+    if (helpers == 0) { panic('the system cannot make the threads that help tasks') }
+
+    write(job, jobTask, current)
+    write(job, jobDone, 0)
+    jobs += 1
+    koji_helpers_submit(job)
+
+    while (true) {
+        immut done: int = read(job, jobDone)
+
+        if (done != 0) { return }
+
+        suspend(-1)
+    }
+}
+
+// The jobs that came back: done, and their tasks woken.
+function finishJobs() {
+    jobsWatched = false
+
+    while (true) {
+        immut count = koji_helpers_finished(jobsBack, readyCapacity)
+
+        if (count == 0) { return }
+
+        for i in range(count) {
+            immut job: Address = read(jobsBack, i * 8)
+            immut task: int = read(job, jobTask)
+            write(job, jobDone, 1)
+            jobs -= 1
+            koji_task_wake(task)
+        }
+    }
+}
+
+// Makes the poller, the first time: whether the system did.
+function startPoller(): boolean {
+    if (poller >= 0) { return true }
+
+    poller = koji_poller_new()
+
+    if (poller < 0) { return false }
+
+    readyFds = allocate(readyCapacity * 8)
+    return true
+}
+
+// The current task waits until it is woken, or until `deadline` (or -1): whether its time ran out.
+function suspend(deadline: int): boolean {
+    if (tasks[current].woken) {
+        tasks[current].woken = false
+        return false
+    }
+
+    tasks[current].state = waiting
+    tasks[current].waits += 1
+    tasks[current].late = false
+
+    if (deadline >= 0) { addTimer({ at: deadline, task: current, wait: tasks[current].waits }) }
+
+    schedule()
+    return tasks[current].late
+}
+
+// Runs the next task that is ready, after waiting for one when none is: it returns when the current
+// task runs again (at once if it is the next one).
+function schedule() {
+    // The tasks that sockets and timers woke meanwhile take their turn too, after those already
+    // ready: a queue of tasks that never wait does not keep them waiting.
+    if (head < queue.length() and (sockets + jobs > 0 or timers.length() > 0)) {
+        immut now = koji_monotonic_nanoseconds()
+
+        if (now - lastPoll >= pollInterval) {
+            lastPoll = now
+            pollReady(0)
+        }
+    }
+
+    while (true) {
+        if (head < queue.length()) {
+            immut next = queue[head]
+            head += 1
+
+            // The queue is used again from its start when it is empty, and copied when most of
+            // it was used.
+            if (head == queue.length()) {
+                queue = []
+                head = 0
+            } else {
+                if (head >= 256 and head * 2 >= queue.length()) {
+                    queue = queue[head..]
+                    head = 0
+                }
+            }
+
+            tasks[next].state = running
+
+            if (next == current) { return }
+
+            immut previous = current
+            current = next
+            immut to: Address = read(tasks[next].top, 0)
+            switchStacks(tasks[previous].top, to)
+            // Back on this stack: the task that ran before may have ended.
+            reap()
+            return
+        }
+
+        poll()
+        lastPoll = koji_monotonic_nanoseconds()
+    }
+}
+
+// Waits for the next timer or socket, and wakes the tasks waiting for them.
+function poll() {
+    if (timers.length() == 0 and sockets + jobs == 0) {
+        panic('every task waits for another one (for its result, a channel or a shared value), so none can go on: a deadlock')
+    }
+
+    // Only timers: the system sleeps until the first one, to the nanosecond.
+    if (sockets + jobs == 0) {
+        koji_sleep_until(timers[0].at)
+        expire()
+        return
+    }
+
+    mut milliseconds = -1
+
+    if (timers.length() > 0) {
+        immut left = timers[0].at - koji_monotonic_nanoseconds()
+        milliseconds = if (left <= 0) { 0 } else { (left + 999999) / 1000000 }
+    }
+
+    pollReady(milliseconds)
+}
+
+// Waits at most `milliseconds` (0: not at all, -1: as long as it takes) for the sockets, then wakes
+// the tasks of the sockets ready and of the timers that are due.
+function pollReady(milliseconds: int) {
+    if (sockets + jobs == 0) {
+        expire()
+        return
+    }
+
+    if (jobs > 0 and not jobsWatched) {
+        if (koji_poller_watch(poller, jobsDone, false) != 0) { panic('the system failed to wait for the threads that help tasks') }
+
+        jobsWatched = true
+    }
+
+    immut count = koji_poller_wait(poller, milliseconds, readyFds, readyCapacity)
+
+    if (count < 0) { panic('the system failed to wait for sockets') }
+
+    for i in range(count) {
+        immut fd: int = read(readyFds, i * 8)
+        wakeSocket(fd)
+    }
+
+    expire()
+}
+
+function wakeSocket(fd: int) {
+    if (fd == jobsDone) {
+        finishJobs()
+        return
+    }
+
+    if (fd < 0 or fd >= socketTasks.length()) { return }
+
+    immut id = socketTasks[fd]
+
+    if (id < 0) { return }
+
+    socketTasks[fd] = -1
+    sockets -= 1
+    koji_task_wake(id)
+}
+
+// Wakes the tasks whose time has come.
+function expire() {
+    immut now = koji_monotonic_nanoseconds()
+
+    while (timers.length() > 0 and timers[0].at <= now) {
+        immut timer = takeTimer()
+
+        if (tasks[timer.task].state == waiting and tasks[timer.task].waits == timer.wait) {
+            tasks[timer.task].late = true
+            koji_task_wake(timer.task)
+        }
+    }
+}
+
+function addTimer(timer: Timer) {
+    timers.push(timer)
+    mut at = timers.length() - 1
+
+    while (at > 0) {
+        immut parent = (at - 1) / 2
+
+        if (timers[parent].at <= timers[at].at) { break }
+
+        swapTimers(at, parent)
+        at = parent
+    }
+}
+
+// The first timer, out of the heap.
+function takeTimer(): Timer {
+    immut first = timers[0]
+    immut last = match (timers.pop()) {
+        Some(found) => found
+        None => return first
+    }
+
+    if (timers.length() == 0) { return first }
+
+    timers[0] = last
+    mut at = 0
+
+    while (true) {
+        immut left = at * 2 + 1
+        immut right = left + 1
+        mut smallest = at
+
+        if (left < timers.length() and timers[left].at < timers[smallest].at) { smallest = left }
+
+        if (right < timers.length() and timers[right].at < timers[smallest].at) { smallest = right }
+
+        if (smallest == at) { break }
+
+        swapTimers(at, smallest)
+        at = smallest
+    }
+
+    return first
+}
+
+function swapTimers(a: int, b: int) {
+    immut saved = timers[a]
+    timers[a] = timers[b]
+    timers[b] = saved
+}
+
+// WSAPoll of the sockets watched (a WSAPOLLFD each: the socket, the events POLLRDNORM or
+// POLLWRNORM, those that came): how many are ready, their numbers at `ready`, which are watched no
+// more. The pipe of the jobs done is no socket: it is looked at (PeekNamedPipe) between waits of
+// 10 ms at most; with nothing else to wait for, a sleep.
+function windowsWait(milliseconds: int, ready: Address, most: int): int {
+    immut deadline = if (milliseconds < 0) { -1 } else { koji_monotonic_nanoseconds() + milliseconds * 1000000 }
+    immut pipeEntry = jobsDone * 2
+
+    while (true) {
+        mut found = 0
+        mut kept: int[] = []
+        mut sockets: int[] = []
+
+        for entry in windowsWatched {
+            if (jobsDone >= 0 and entry == pipeEntry) {
+                if (pipeWaiting(jobsDone) and found < most) {
+                    write(ready, 8 * found, jobsDone)
+                    found += 1
+                } else {
+                    kept.push(entry)
+                }
+            } else {
+                sockets.push(entry)
+            }
+        }
+
+        immut left = if (deadline < 0) { -1 } else { (deadline - koji_monotonic_nanoseconds() + 999999) / 1000000 }
+        immut piped = kept.length() > 0
+        immut span = if (found > 0) { 0 } else { if (piped and (left < 0 or left > 10)) { 10 } else { if (left < 0) { -1 } else { left } } }
+
+        if (sockets.length() > 0) {
+            immut fds = allocate(16 * sockets.length())
+
+            for i in range(sockets.length()) {
+                write(fds, 16 * i, sockets[i] / 2)
+                write(fds, 16 * i + 8, if (sockets[i] % 2 == 1) { 0x10 } else { 0x100 })
+            }
+
+            immut answer = WSAPoll(fds, sockets.length(), span)
+
+            if (answer < 0) {
+                free(fds)
+                return -1
+            }
+
+            for i in range(sockets.length()) {
+                immut events: int = read(fds, 16 * i + 8)
+
+                if ((events >> 16) & 0xFFFF != 0 and found < most) {
+                    write(ready, 8 * found, sockets[i] / 2)
+                    found += 1
+                } else {
+                    kept.push(sockets[i])
+                }
+            }
+
+            free(fds)
+        } else {
+            if (span > 0) { Sleep(span) }
+        }
+
+        windowsWatched = kept
+
+        if (found > 0 or span == 0 and not piped) { return found }
+
+        if (deadline >= 0 and koji_monotonic_nanoseconds() >= deadline) { return 0 }
+
+        if (span < 0) { return 0 }
+    }
+
+    return 0
+}
+
+// Whether bytes wait in a pipe of the C library of Windows.
+function pipeWaiting(fd: int): boolean {
+    immut waiting = allocate(8)
+    write(waiting, 0, 0)
+    PeekNamedPipe(windowsHandle(fd), nullAddress(), 0, nullAddress(), waiting, nullAddress())
+    immut available: int = read(waiting, 0)
+    free(waiting)
+    return available & 0xFFFFFFFF > 0
+}

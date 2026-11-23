@@ -1,6 +1,6 @@
 // `koji:text`: the strings of the runtime, in the library of the runtime written in Koji (C calls
 // these functions by their names). A string is immutable text with a count of references, laid
-// out for C (runtime/prelude.h): the count, the length in bytes, the bytes its block holds, then
+// out for C (koji:prelude): the count, the length in bytes, the bytes its block holds, then
 // the UTF-8 bytes. A function gives a new reference to the string it returns; it reads the strings
 // it is given, but those it takes (`take`: the caller gives its reference).
 
@@ -12,7 +12,8 @@ extern function memcpy(target: Address, source: Address, size: CSize): Address
 extern function koji_memory_give(block: Address, words: int)
 extern function memcmp(a: Address, b: Address, size: CSize): CInt
 extern function memchr(bytes: Address, value: CInt, size: CSize): Address
-extern function memmem(haystack: Address, haystackSize: CSize, needle: Address, needleSize: CSize): Address
+// `memmem`, by the library (koji:windows: Windows has none).
+extern function koji_find_bytes(haystack: Address, haystackSize: CSize, needle: Address, needleSize: CSize): Address
 
 extern function koji_string_concat(a: string, b: string): string {
     immut sizeA = stringSize(a)
@@ -110,15 +111,17 @@ extern function koji_string_compare(a: string, b: string): CInt {
 }
 
 extern function koji_string_from_int(value: int): string {
-    // The magnitude, `int.min` too, and the number of its digits.
-    immut nothing: U128 = 0
-    immut magnitude = if (value < 0) { nothing - wide(value, -1) } else { wide(value, 0) }
+    // On the value made negative (`int.min` has no positive): its digits, at most 19.
+    immut negative = if (value < 0) { value } else { -value }
     mut count = 1
-    mut limit: U128 = 10
+    mut limit = -10
 
-    while (count < 20 and magnitude >= limit) {
+    while (negative <= limit) {
         count += 1
-        limit = limit * 10
+
+        if (count == 19) { break }
+
+        limit *= 10
     }
 
     immut sign = if (value < 0) { 1 } else { 0 }
@@ -127,13 +130,13 @@ extern function koji_string_from_int(value: int): string {
 
     if (value < 0) { write(bytes, 0, byte(45)) }
 
-    // The digits, from the last one.
-    mut rest = magnitude
+    // The digits, from the last one (a remainder of a negative value is negative or zero).
+    mut rest = negative
     mut at = count + sign - 1
 
     while (at >= sign) {
         immut quotient = rest / 10
-        write(bytes, at, byte(48 + lowWord(rest - quotient * 10)))
+        write(bytes, at, byte(48 + quotient * 10 - rest))
         rest = quotient
         at -= 1
     }
@@ -239,7 +242,7 @@ extern function koji_string_contains_char(haystack: string, c: char): boolean {
 function containsText(haystack: string, needle: string): boolean {
     if (stringSize(needle) == 0) { return true }
 
-    immut found = memmem(stringBytes(haystack), stringSize(haystack), stringBytes(needle), stringSize(needle))
+    immut found = koji_find_bytes(stringBytes(haystack), stringSize(haystack), stringBytes(needle), stringSize(needle))
     return distance(stringBytes(haystack), found) >= 0
 }
 
@@ -249,37 +252,41 @@ function containsText(haystack: string, needle: string): boolean {
 extern function koji_string_hash(text: string): int {
     immut bytes = stringBytes(text)
     immut size = stringSize(text)
-    mut hash: U128 = 0
+    mut hash = 0
     mut at = 0
 
     while (at + 8 <= size) {
         immut chunk: int = read(bytes, at)
-        hash = mixed(hash, wide(chunk, 0))
+        hash = mixedWord(hash, chunk)
         at += 8
     }
 
     if (at < size) {
         // The last bytes, little-endian, with zeros after them.
-        mut chunk: U128 = 0
+        mut chunk = 0
         mut i = size - 1
 
         while (i >= at) {
             immut b: byte = read(bytes, i)
-            chunk = (chunk << 8) | wide(int(b), 0)
+            chunk = chunk << 8 | int(b)
             i -= 1
         }
 
-        hash = mixed(hash, chunk)
+        hash = mixedWord(hash, chunk)
     }
 
-    return lowWord(mixed(hash, wide(size, 0)))
+    return mixedWord(hash, size)
 }
 
 // (rotate_left(hash, 5) ^ word) * K, in 64 bits.
 export function mixed(hash: U128, chunk: U128): U128 {
-    immut mask = wide(-1, 0)
-    immut rotated = ((hash << 5) | (hash >> 59)) & mask
-    return wordProduct(rotated ^ chunk, wide(0x517CC1B727220A95, 0)) & mask
+    return wide(mixedWord(lowWord(hash), lowWord(chunk)), 0)
+}
+
+// The same on the words themselves (the shifts of an int keep 64 bits; the product wraps around).
+function mixedWord(hash: int, chunk: int): int {
+    immut rotated = hash << 5 | (hash >> 59) & 0x1F
+    return lowWord(wordProduct(wide(rotated ^ chunk, 0), wide(0x517CC1B727220A95, 0)))
 }
 
 // The code of a character: U+FFFD for a code that is none (above U+10FFFF, or a surrogate).
@@ -808,7 +815,7 @@ function hexAt(digits: Address, at: int, count: int): int {
 }
 
 // The block of a string: 3 words (its count of references, its size and the bytes its block holds,
-// a multiple of 8), then its bytes, from the pool for a short one (runtime/prelude.h makes them).
+// a multiple of 8), then its bytes, from the pool for a short one.
 
 // A new string of the bytes `bytes[..size]` (bytes that are not UTF-8 become U+FFFD).
 extern function koji_string_new(bytes: Address, size: CSize): string {
@@ -829,3 +836,4 @@ extern function koji_string_free(text: Address) {
     immut capacity: int = read(text, 16)
     koji_memory_give(text, 3 + capacity / 8)
 }
+

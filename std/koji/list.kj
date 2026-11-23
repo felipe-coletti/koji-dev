@@ -1,5 +1,5 @@
 // `koji:list`: lists, in the library of the runtime written in Koji (C calls these functions by
-// their names). A list is a block of 6 words (runtime/prelude.h): its count of references, the type
+// their names). A list is a block of 6 words (koji:prelude): its count of references, the type
 // of its items (a `KojiElementType`, whose functions retain, release, show, compare and hash an
 // item), the words of an item (1, or 2 for a decimal), the address of the items, their number, and
 // the words that the block of the items holds. Two variables share a list until one of them changes
@@ -8,7 +8,7 @@
 import { Address, CInt, CSize, Location, Never, U128, blankString, distance, lowWord, nullAddress, offset, panicAt, read, stringBytes, stringSize, wide, write } from 'koji:unsafe'
 import { mixed } from 'koji:text'
 
-// The blocks of the pool, and the functions of the type of the items (runtime/prelude.h).
+// The blocks of the pool, and the functions of the type of the items (koji:prelude).
 extern function koji_memory_take(words: int): Address
 extern function koji_memory_give(block: Address, words: int)
 extern function koji_memory_resize(block: Address, words: int, newWords: int): Address
@@ -201,6 +201,24 @@ extern function koji_list_set(variable: Address, index: int, value: Address, her
 
 // `items.push(value)`.
 extern function koji_list_push(variable: Address, value: Address) {
+    // Most often: a list of its own, of items of a word, with room for one more.
+    immut own: Address = read(variable, 0)
+    immut references: int = read(own, 0)
+    immut count = lengthOf(own)
+
+    if (references == 1 and strideOf(own) == 1 and count < capacityOf(own)) {
+        immut kind = elementOf(own)
+
+        if (koji_element_size(kind) == 8) {
+            immut place = offset(itemsOf(own), count * 8)
+            immut word: int = read(value, 0)
+            write(place, 0, word)
+            write(own, 32, count + 1)
+            koji_element_retain(kind, place)
+            return
+        }
+    }
+
     immut list = unshared(variable)
     makeRoom(list, 1)
     immut length = lengthOf(list)
@@ -306,6 +324,30 @@ extern function koji_list_concat(a: Address, b: Address): Address {
     return joined
 }
 
+// `a + b`, where the caller gives its reference to `a` (it read `a` for the last time): when no
+// one else sees `a`, the items of `b` are added to it in place, and its block grows by doubling,
+// so that a list built piece by piece (`out = out + bytes`) costs a constant time per item.
+extern function koji_list_append(a: Address, b: Address): Address {
+    immut references: int = read(a, 0)
+
+    if (references != 1 or distance(a, b) == 0) {
+        immut joined = koji_list_concat(a, b)
+
+        if (references == 1) { koji_list_free(a) } else { write(a, 0, references - 1) }
+
+        return joined
+    }
+
+    immut lengthA = lengthOf(a)
+    immut lengthB = lengthOf(b)
+    immut size = strideOf(a) * 8
+    makeRoom(a, lengthB)
+    memcpy(offset(itemsOf(a), lengthA * size), itemsOf(b), lengthB * size)
+    write(a, 32, lengthA + lengthB)
+    retainItems(a, lengthA, lengthA + lengthB)
+    return a
+}
+
 // `items[start..end]`, where a missing bound is the start or the end of the list.
 extern function koji_list_slice(list: Address, hasStart: boolean, start: int, hasEnd: boolean, end: int, here: Location): Address {
     immut length = lengthOf(list)
@@ -380,7 +422,7 @@ extern function koji_list_repr(list: Address): string {
 
 // `items.join(separator)`, for a list of strings: their size first, then their bytes. A slot holds
 // the address of a string, whose size is its second word and whose bytes follow its third
-// (runtime/prelude.h); the list keeps them alive.
+// (koji:prelude); the list keeps them alive.
 extern function koji_list_join(list: Address, separator: string): string {
     immut length = lengthOf(list)
     immut gap = stringSize(separator)

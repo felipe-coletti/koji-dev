@@ -1,4 +1,4 @@
-// Programs for comparing the checkers (test/bootstrap.rs): each one is a file, and they are
+// Programs for the snapshots of the checker (test/stages.kj): each one is a file, and they are
 // separated by a line with four dashes. Most of them have a type error.
 ----
 function test() {
@@ -944,3 +944,20 @@ match (decimal(1)) {
     1.5 => print(1)
     _ => print(2)
 }
+----
+assert(1 + 1 == 2, 'arithmetic')
+
+test 'checked like a function' {
+    immut x: int = 3
+    assert(x > 2)
+}
+----
+assert(3)
+----
+assert(true, 4)
+----
+function assert(value: int) {
+    print(value)
+}
+
+assert(5)

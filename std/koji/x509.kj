@@ -15,6 +15,7 @@
 //
 // Everything here is public: nothing needs constant time.
 
+import system
 import { Address, CInt, CSize, allocate, free, isNull, newString, nullAddress, offset, read, stringBytes, stringSize, write } from 'koji:unsafe'
 import { digest, digestSize } from 'koji:sha'
 import { verifyPkcs1, verifyPss } from 'koji:rsa'
@@ -31,9 +32,10 @@ extern function fclose(file: Address): CInt
 extern function opendir(path: Address): Address
 extern function readdir(directory: Address): Address
 extern function closedir(directory: Address): CInt
-extern function koji_directory_entry_name(entry: Address): Address
 extern function realloc(block: Address, size: CSize): Address
 extern function time(place: Address): int
+// Windows (ucrtbase): `time` is `_time64` there.
+extern function windowsTime(place: Address): int from '_time64'
 
 // The results of a verification: why a chain is not trusted.
 export immut trusted = 0
@@ -1427,6 +1429,9 @@ function addFile(mut authorities: Authority[], path: string): boolean {
 
 // The certificates of the files of a directory.
 function addDirectory(mut authorities: Authority[], path: string) {
+    // Windows: no directories of certificates (its own are in its store; the list built in serves).
+    if (system.os == system.Windows) { return }
+
     immut cPath = cString(path)
     immut directory = opendir(cPath)
     free(cPath)
@@ -1440,7 +1445,7 @@ function addDirectory(mut authorities: Authority[], path: string) {
 
         if (isNull(entry)) { break }
 
-        immut name = textOfC(koji_directory_entry_name(entry))
+        immut name = textOfC(entryName(entry))
 
         if (not name.startsWith('.')) { names.push(name) }
     }
@@ -1691,7 +1696,7 @@ export function verifyChain(chain: Certificate[], authorities: Authority[], host
 
 // The seconds since 1970, now.
 export function now(): int {
-    return time(nullAddress())
+    return if (system.os == system.Windows) { windowsTime(nullAddress()) } else { time(nullAddress()) }
 }
 
 // The certificates of the DER at `bytes` one after the other (`size` bytes), each copied.
@@ -1751,4 +1756,14 @@ extern function koji_x509_authority_count(builtIn: CInt): int {
     if (builtIn == 1) { return builtInAuthorities().length() }
 
     return trustedAuthorities().length()
+}
+
+// The name of an entry of `readdir`: where `d_name` is in a `struct dirent` of the system.
+function entryName(entry: Address): Address {
+    return offset(entry, match (system.os) {
+        Linux => 19
+        MacOS => 21
+        Windows => 19
+        Other(name) => if (name == 'netbsd') { 13 } else { if (name == 'freebsd' or name == 'openbsd') { 24 } else { 19 } }
+    })
 }

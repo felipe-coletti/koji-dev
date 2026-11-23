@@ -1,0 +1,113 @@
+// The bits of constants, as the processors hold them: a float of 64 bits (IEEE 754) and a decimal
+// (koji_decimal_literal of the prelude), for the native backend and its machine IR.
+
+foreign 'm' {
+    function frexp(value: float, mut exponent: CInt): float
+}
+
+// The 8 bytes of a float (IEEE 754, little-endian), from its mantissa and exponent (frexp).
+export function floatBits(number: float): byte[] {
+    mut bytes: byte[] = []
+
+    if (number == float(0)) {
+        for i in range(8) {
+            bytes.push(0)
+        }
+
+        return bytes
+    }
+
+    immut negative = number < float(0)
+    immut magnitude = if (negative) { -number } else { number }
+    mut exponent = 0
+    immut fraction = frexp(magnitude, mut exponent)
+    // magnitude = fraction * 2^exponent, fraction in [0.5, 1): 1.f * 2^(exponent - 1).
+    mut biased = exponent - 1 + 1023
+    mut mantissa = int(fraction * float(9007199254740992))
+
+    if (biased <= 0) {
+        // Subnormal: the mantissa shifted, the exponent 0.
+        mantissa = int(fraction * float(9007199254740992)) >> (1 - biased)
+        biased = 0
+    } else {
+        mantissa -= 4503599627370496
+    }
+
+    // The 52 bits of the mantissa, then 11 of the exponent, then the sign.
+    for i in range(6) {
+        bytes.push(byte(mantissa >> (8 * i) & 0xFF))
+    }
+
+    bytes.push(byte((mantissa >> 48 & 0x0F) | (biased & 0x0F) << 4))
+    bytes.push(byte((biased >> 4 & 0x7F) | (if (negative) { 0x80 } else { 0 })))
+    return bytes
+}
+
+// The bits of a float as a word.
+export function floatWord(number: float): int {
+    immut bytes = floatBits(number)
+    mut word = 0
+
+    for i in range(8) {
+        word = word | int(bytes[i]) << (8 * i)
+    }
+
+    return word
+}
+
+// The 16 bytes of a decimal constant (koji_decimal_literal of the prelude): the coefficient
+// (high * 10^17 + low) in its low 113 bits, then the exponent plus 6176, then the sign; computed in
+// limbs of 16 bits.
+export function decimalBits(negative: boolean, high: int, low: int, exponent: int): byte[] {
+    mut limbs = [0, 0, 0, 0, 0, 0, 0, 0]
+    // 10^17 in limbs of 16 bits.
+    immut ten17 = limbsOf(100000000000000000)
+    immut highLimbs = limbsOf(high)
+
+    for i in range(4) {
+        mut carry = 0
+
+        for j in range(4) {
+            if (i + j >= 8) { continue }
+
+            immut product = highLimbs[i] * ten17[j] + limbs[i + j] + carry
+            limbs[i + j] = product & 0xFFFF
+            carry = product >> 16
+        }
+
+        mut k = i + 4
+
+        while (carry > 0 and k < 8) {
+            immut sum = limbs[k] + carry
+            limbs[k] = sum & 0xFFFF
+            carry = sum >> 16
+            k += 1
+        }
+    }
+
+    immut lowLimbs = limbsOf(low)
+    mut carry = 0
+
+    for i in range(8) {
+        immut sum = limbs[i] + (if (i < 4) { lowLimbs[i] } else { 0 }) + carry
+        limbs[i] = sum & 0xFFFF
+        carry = sum >> 16
+    }
+
+    // The exponent (14 bits) from bit 49 of the high word, then the sign: in limbs 7 (bits 112
+    // to 127) and 6 (bits 96 to 111).
+    immut biased = exponent + 6176
+    limbs[7] = (limbs[7] & 0x1) | (biased & 0x3FFF) << 1 | (if (negative) { 0x8000 } else { 0 })
+    mut bytes: byte[] = []
+
+    for limb in limbs {
+        bytes.push(byte(limb & 0xFF))
+        bytes.push(byte(limb >> 8))
+    }
+
+    return bytes
+}
+
+function limbsOf(number: int): int[] {
+    return [number & 0xFFFF, number >> 16 & 0xFFFF, number >> 32 & 0xFFFF, number >> 48 & 0xFFFF]
+}

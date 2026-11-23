@@ -2,7 +2,7 @@
 // operating system (see doc/standard-library/system.md). `exit` is checked by the compiler, which
 // calls `leave` here (a function of Koji cannot say that it never returns).
 
-import { Address, CInt, CSize, allocate, free, isNull, newString, nullAddress, offset, read, stringBytes, stringSize, write } from 'koji:unsafe'
+import { Address, CInt, CSize, Location, allocate, free, isNull, newString, nullAddress, offset, read, stringBytes, stringSize, write } from 'koji:unsafe'
 import { cString, cText, hasNul, isUtf8, textOf } from 'koji:core'
 
 // The C library.
@@ -17,20 +17,40 @@ extern function posix_spawn_file_actions_destroy(actions: Address): CInt
 extern function posix_spawn_file_actions_adddup2(actions: Address, fd: CInt, target: CInt): CInt
 extern function posix_spawn_file_actions_addclose(actions: Address, fd: CInt): CInt
 extern function posix_spawn_file_actions_addopen(actions: Address, fd: CInt, path: Address, flags: CInt, mode: CInt): CInt
-extern function waitpid(pid: CInt, status: Address, options: CInt): CInt
+extern function posix_spawn_file_actions_addchdir_np(actions: Address, path: Address): CInt
+extern function signal(number: CInt, handler: Address): Address
+extern function koji_blocking_waitpid(pid: CInt, status: Address, options: CInt): CInt
 extern function pipe(fds: Address): CInt
 extern function close(fd: CInt): CInt
 // `read` of C, with one buffer (`read` is that of `koji:unsafe` here).
 extern function readv(fd: CInt, buffers: Address, count: CInt): int
-extern function poll(fds: Address, count: CSize, timeout: CInt): CInt
+extern function writev(fd: CInt, buffers: Address, count: CInt): int
+extern function koji_blocking_poll(fds: Address, count: CSize, timeout: CInt): CInt
 extern function realloc(memory: Address, size: CSize): Address
+extern function getcwd(buffer: Address, size: CSize): Address
 
-// What the system gives in different ways: small inline functions of the prelude (runtime/prelude.h).
+// What the system gives in different ways: small inline functions of the prelude (koji:prelude).
 extern function koji_system_argument_count(): int
 extern function koji_system_argument(index: int): Address
 extern function koji_system_errno(): CInt
 extern function koji_system_environment(): Address
-extern function koji_system_executable_into(buffer: Address, size: int): int
+extern function readlink(path: Address, buffer: Address, size: CSize): int
+extern function executablePathInto(buffer: Address, size: Address): CInt from '_NSGetExecutablePath'
+// Windows (kernel32).
+extern function GetModuleFileNameA(module: Address, buffer: Address, size: CInt): CInt
+extern function CreateProcessA(application: Address, commandLine: Address, processAttributes: Address, threadAttributes: Address, inherit: CInt, flags: CInt, environment: Address, directory: Address, startup: Address, information: Address): CInt
+extern function CreatePipe(reading: Address, writing: Address, attributes: Address, size: CInt): CInt
+extern function SetHandleInformation(handle: Address, mask: CInt, flags: CInt): CInt
+extern function CreateFileA(name: Address, access: CInt, share: CInt, attributes: Address, disposition: CInt, flags: CInt, template: Address): Address
+extern function CloseHandle(handle: Address): CInt
+extern function GetLastError(): CInt
+extern function PeekNamedPipe(pipe: Address, buffer: Address, size: CInt, read: Address, available: Address, left: Address): CInt
+extern function ReadFile(file: Address, buffer: Address, size: CInt, read: Address, overlapped: Address): CInt
+extern function WriteFile(file: Address, buffer: Address, size: CInt, written: Address, overlapped: Address): CInt
+extern function Sleep(milliseconds: CInt)
+// The standard input and output, of the library (std/koji/output.kj): the buffer of `input`.
+extern function koji_read_bytes(count: int, here: Location, status: Address): string
+extern function koji_write(text: string, here: Location)
 
 export type OperatingSystem = {
     Linux
@@ -38,6 +58,13 @@ export type OperatingSystem = {
     Windows
     // Another system, by its name: 'freebsd'.
     Other(name: string)
+}
+
+export type Architecture = {
+    X64
+    Arm64
+    // Another processor, by the name the system gives it: 'riscv64'.
+    OtherArchitecture(name: string)
 }
 
 export type SystemError = {
@@ -67,6 +94,9 @@ export type Output = {
 // The operating system the program runs on.
 export immut os = systemNamed()
 
+// The processor the program runs on.
+export immut architecture = architectureNamed()
+
 // The command-line arguments of the program, after the program itself.
 export function args(): string[] {
     mut found: string[] = []
@@ -76,6 +106,23 @@ export function args(): string[] {
     }
 
     return found
+}
+
+// The next `count` bytes of the standard input, as a text (fewer at its end; bytes that are not
+// UTF-8 become U+FFFD), or `None` when nothing is left. It reads from the same buffer as
+// `input()`: a protocol can read lines with one and a body of known size with the other.
+export function readInput(count: int, here: Location): Option[string] {
+    immut status = allocate(8)
+    write(status, 0, 0)
+    immut text = koji_read_bytes(count, here, status)
+    immut ended: int = read(status, 0)
+    free(status)
+    return if (ended == 1) { None } else { Some(text) }
+}
+
+// Writes `text` on the standard output, without a line break after it (`print` adds one).
+export function writeOutput(text: string, here: Location) {
+    koji_write(text, here)
 }
 
 // The value of the environment variable `name` (`None` if it is not set, or not UTF-8).
@@ -95,6 +142,26 @@ export function env(name: string): Option[string] {
     return Some(newString(value, size))
 }
 
+// The current directory of this program, or `None` when the system cannot tell it.
+export function currentDirectory(): Option[string] {
+    mut size = 4096
+
+    while (size <= 1048576) {
+        immut buffer = allocate(size)
+
+        if (not isNull(getcwd(buffer, size))) {
+            immut path = textOf(buffer, strlen(buffer))
+            free(buffer)
+            return Some(path)
+        }
+
+        free(buffer)
+        size = size * 2
+    }
+
+    return None
+}
+
 // The path of the executable of this program, or `None` where the system cannot tell it (read
 // once, as the system may say it no longer exists later).
 mut executableKnown: Option[string][] = []
@@ -110,7 +177,7 @@ function executablePath(): Option[string] {
 
     while (true) {
         immut buffer = allocate(size)
-        immut length = koji_system_executable_into(buffer, size)
+        immut length = executableInto(buffer, size)
 
         if (length >= 0) {
             immut path = textOf(buffer, length)
@@ -134,32 +201,94 @@ function leave(code: int) {
     exit(clamped)
 }
 
-// Runs `command` with the terminal of this program and waits for it: its exit code.
-export function run(command: string, args: string[]): Result[int, SystemError] {
-    immut started = spawn(command, args, false)?
+// A program to run, and how: what it reads, in which directory, with which environment.
+export type Command = {
+    program: string
+    args: string[]
+    // What it reads on its standard input (with `output`; empty: nothing).
+    input: string
+    // Its current directory ('': that of this program).
+    directory: string
+    // Variables of its environment, set over those of this program (or alone, when `cleared`).
+    environment: Map[string, string]
+    cleared: boolean
+}
+
+// The command that runs `program` with `args`, as `run` and `capture` do.
+export function command(program: string, args: string[]): Command {
+    return { program: program, args: args, input: '', directory: '', environment: [:], cleared: false }
+}
+
+// Runs the command with the terminal of this program and waits for it: its exit code.
+function Command.run(self): Result[int, SystemError] {
+    immut started = spawn(self, false)?
     return Ok(wait(started.pid))
 }
 
-// Runs `command` and keeps what it prints (it reads nothing).
-export function capture(command: string, args: string[]): Result[Output, SystemError] {
-    immut started = spawn(command, args, true)?
-    immut printed = readBoth(started.stdout, started.stderr)
+// Runs the command, gives it its input, and keeps what it prints.
+function Command.output(self): Result[Output, SystemError] {
+    immut started = spawn(self, true)?
+    immut printed = readBoth(started.stdout, started.stderr, started.stdin, self.input)
     immut status = wait(started.pid)
     return Ok({ status: status, stdout: printed[0], stderr: printed[1] })
 }
 
-// A program started, with the pipes of its outputs when they are kept.
+// Runs `command` with the terminal of this program and waits for it: its exit code.
+export function run(program: string, args: string[]): Result[int, SystemError] {
+    return command(program, args).run()
+}
+
+// Runs `command` and keeps what it prints (it reads nothing).
+export function capture(program: string, args: string[]): Result[Output, SystemError] {
+    return command(program, args).output()
+}
+
+// A program started, with the pipes of its outputs when they are kept, and of its input when it
+// is given one (-1 otherwise).
 type Started = {
     pid: int
     stdout: int
     stderr: int
+    stdin: int
 }
 
-function spawn(command: string, args: string[], captured: boolean): Result[Started, SystemError] {
-    if (hasNul(command)) { return Err(Io(command, 'nul byte found in provided data')) }
+// The variables of the environment of the command, `NAME=value`.
+function environmentOf(given: Command): string[] {
+    mut found: string[] = []
 
-    for arg in args {
-        if (hasNul(arg)) { return Err(Io(command, 'nul byte found in provided data')) }
+    if (not given.cleared) {
+        immut variables = koji_system_environment()
+        mut i = 0
+
+        while (true) {
+            immut each: Address = read(variables, 8 * i)
+
+            if (isNull(each)) { break }
+
+            immut text = cText(each)
+            immut name = text.split('=')[0]
+
+            if (not given.environment.has(name)) { found.push(text) }
+
+            i += 1
+        }
+    }
+
+    for name in given.environment.keys() {
+        found.push(`${name}=${given.environment[name]}`)
+    }
+
+    return found
+}
+
+function spawn(given: Command, captured: boolean): Result[Started, SystemError] {
+    if (os == Windows) { return windowsSpawn(given, captured) }
+
+    immut command = given.program
+    immut args = given.args
+
+    for text in [command, given.directory, given.input] + args {
+        if (hasNul(text)) { return Err(Io(command, 'nul byte found in provided data')) }
     }
 
     // The arguments of C: the program, then `args`, then NULL.
@@ -172,12 +301,15 @@ function spawn(command: string, args: string[], captured: boolean): Result[Start
 
     write(argv, (args.length() + 1) * 8, nullAddress())
 
-    // The actions of the child: its outputs to the pipes, its input from /dev/null.
+    // The actions of the child: its outputs to the pipes, its input from a pipe or /dev/null, its
+    // directory.
     immut actions = allocate(256)
     posix_spawn_file_actions_init(actions)
-    immut pipes = allocate(16)
+    immut pipes = allocate(24)
     mut stdout = -1
     mut stderr = -1
+    mut stdin = -1
+    immut fed = captured and given.input != ''
 
     if (captured) {
         pipe(pipes)
@@ -186,9 +318,20 @@ function spawn(command: string, args: string[], captured: boolean): Result[Start
         stderr = readInt32(pipes, 8)
         immut stdoutEnd = readInt32(pipes, 4)
         immut stderrEnd = readInt32(pipes, 12)
-        immut devNull = cString('/dev/null')
-        posix_spawn_file_actions_addopen(actions, 0, devNull, 0, 0)
-        free(devNull)
+
+        if (fed) {
+            pipe(offset(pipes, 16))
+            stdin = readInt32(pipes, 20)
+            immut stdinEnd = readInt32(pipes, 16)
+            posix_spawn_file_actions_adddup2(actions, stdinEnd, 0)
+            posix_spawn_file_actions_addclose(actions, stdinEnd)
+            posix_spawn_file_actions_addclose(actions, stdin)
+        } else {
+            immut devNull = cString('/dev/null')
+            posix_spawn_file_actions_addopen(actions, 0, devNull, 0, 0)
+            free(devNull)
+        }
+
         posix_spawn_file_actions_adddup2(actions, stdoutEnd, 1)
         posix_spawn_file_actions_adddup2(actions, stderrEnd, 2)
 
@@ -197,11 +340,42 @@ function spawn(command: string, args: string[], captured: boolean): Result[Start
         }
     }
 
+    if (given.directory != '') {
+        immut directory = cString(given.directory)
+        posix_spawn_file_actions_addchdir_np(actions, directory)
+        free(directory)
+    }
+
+    // The environment: that of this program, or one of its own.
+    mut variables = koji_system_environment()
+    mut written: string[] = []
+    immut changed = given.cleared or given.environment.length() > 0
+
+    if (changed) {
+        written = environmentOf(given)
+        variables = allocate((written.length() + 1) * 8)
+
+        for i in range(written.length()) {
+            write(variables, i * 8, cString(written[i]))
+        }
+
+        write(variables, written.length() * 8, nullAddress())
+    }
+
     immut pid = allocate(8)
     immut program: Address = read(argv, 0)
-    immut code = posix_spawnp(pid, program, actions, nullAddress(), argv, koji_system_environment())
+    immut code = posix_spawnp(pid, program, actions, nullAddress(), argv, variables)
     posix_spawn_file_actions_destroy(actions)
     free(actions)
+
+    if (changed) {
+        for i in range(written.length()) {
+            immut each: Address = read(variables, i * 8)
+            free(each)
+        }
+
+        free(variables)
+    }
 
     for i in range(args.length() + 1) {
         immut each: Address = read(argv, i * 8)
@@ -217,6 +391,8 @@ function spawn(command: string, args: string[], captured: boolean): Result[Start
         close(readInt32(pipes, 12))
     }
 
+    if (fed) { close(readInt32(pipes, 16)) }
+
     free(pipes)
 
     if (code != 0) {
@@ -225,10 +401,12 @@ function spawn(command: string, args: string[], captured: boolean): Result[Start
             close(stderr)
         }
 
+        if (fed) { close(stdin) }
+
         return Err(failure(command, code))
     }
 
-    return Ok({ pid: started, stdout: stdout, stderr: stderr })
+    return Ok({ pid: started, stdout: stdout, stderr: stderr, stdin: stdin })
 }
 
 // The error of a program that could not start, from the error of the system.
@@ -246,7 +424,7 @@ function wait(pid: int): int {
     immut status = allocate(8)
 
     // EINTR: a signal interrupted the wait.
-    while (waitpid(pid, status, 0) < 0 and koji_system_errno() == 4) {}
+    while (koji_blocking_waitpid(pid, status, 0) < 0 and koji_system_errno() == 4) {}
 
     immut code = readInt32(status, 0)
     free(status)
@@ -256,17 +434,260 @@ function wait(pid: int): int {
     return (code >> 8) & 0xFF
 }
 
-// What the two pipes give until both end, read as they fill (a program blocks on a full pipe).
-function readBoth(stdout: int, stderr: int): string[] {
-    immut fds = allocate(16)
+// Windows: the program by CreateProcessA, its command line made of the arguments quoted as the C
+// library of Windows reads them; captured, its outputs to pipes (their ends that read are not
+// inherited) and its input from NUL, or from a pipe large enough for the input given, written
+// whole before its outputs are read. The handle of the process stands for its number.
+function windowsSpawn(given: Command, captured: boolean): Result[Started, SystemError] {
+    immut command = given.program
+    mut line = windowsQuoted(command)
+
+    for arg in given.args {
+        line += ' ' + windowsQuoted(arg)
+    }
+
+    // SECURITY_ATTRIBUTES (inherited), STARTUPINFOA, PROCESS_INFORMATION, the ends of two pipes.
+    immut attributes = allocate(24)
+    writeInt32(attributes, 0, 24)
+    write(attributes, 8, 0)
+    writeInt32(attributes, 16, 1)
+    immut startup = allocate(104)
+
+    for word in range(13) {
+        write(startup, 8 * word, 0)
+    }
+
+    writeInt32(startup, 0, 104)
+    immut information = allocate(24)
+    immut ends = allocate(48)
+    mut input = nullAddress()
+    immut fed = captured and given.input != ''
+
+    if (captured) {
+        CreatePipe(ends, offset(ends, 8), attributes, 0)
+        CreatePipe(offset(ends, 16), offset(ends, 24), attributes, 0)
+        immut stdoutRead: Address = read(ends, 0)
+        immut stderrRead: Address = read(ends, 16)
+        SetHandleInformation(stdoutRead, 1, 0)
+        SetHandleInformation(stderrRead, 1, 0)
+        if (fed) {
+            CreatePipe(offset(ends, 32), offset(ends, 40), attributes, stringSize(given.input) + 4096)
+            immut stdinWrite: Address = read(ends, 40)
+            SetHandleInformation(stdinWrite, 1, 0)
+            input = read(ends, 32)
+        } else {
+            immut nul = cString('NUL')
+            // GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, OPEN_EXISTING.
+            input = CreateFileA(nul, 0x80000000, 3, attributes, 3, 0, nullAddress())
+            free(nul)
+        }
+
+        // STARTF_USESTDHANDLES, and the handles.
+        writeInt32(startup, 60, 0x100)
+        write(startup, 80, input)
+        immut stdoutWrite: Address = read(ends, 8)
+        immut stderrWrite: Address = read(ends, 24)
+        write(startup, 88, stdoutWrite)
+        write(startup, 96, stderrWrite)
+    }
+
+    // The environment: NAME=value, each ended by 0, then 0.
+    mut block = nullAddress()
+
+    if (given.cleared or given.environment.length() > 0) {
+        immut variables = environmentOf(given)
+        mut size = 1
+
+        for each in variables {
+            size += stringSize(each) + 1
+        }
+
+        block = allocate(size)
+        mut at = 0
+
+        for each in variables {
+            immut length = stringSize(each)
+
+            for i in range(length) {
+                immut letter: byte = read(stringBytes(each), i)
+                write(block, at + i, letter)
+            }
+
+            write(block, at + length, byte(0))
+            at += length + 1
+        }
+
+        write(block, at, byte(0))
+    }
+
+    immut directory = if (given.directory == '') { nullAddress() } else { cString(given.directory) }
+    immut cLine = cString(line)
+    immut made = CreateProcessA(nullAddress(), cLine, nullAddress(), nullAddress(), 1, 0, block, directory, startup, information) != 0
+    immut error = if (made) { 0 } else { GetLastError() }
+    free(cLine)
+
+    if (not isNull(block)) { free(block) }
+
+    if (not isNull(directory)) { free(directory) }
+    free(startup)
+    free(attributes)
+    mut stdout = -1
+    mut stderr = -1
+
+    if (captured) {
+        immut stdoutWrite: Address = read(ends, 8)
+        immut stderrWrite: Address = read(ends, 24)
+        CloseHandle(stdoutWrite)
+        CloseHandle(stderrWrite)
+        CloseHandle(input)
+
+        // The input, whole in the pipe, then its end.
+        if (fed) {
+            immut stdinWrite: Address = read(ends, 40)
+
+            if (made) {
+                immut count = allocate(8)
+                WriteFile(stdinWrite, stringBytes(given.input), stringSize(given.input), count, nullAddress())
+                free(count)
+            }
+
+            CloseHandle(stdinWrite)
+        }
+
+        immut stdoutRead: int = read(ends, 0)
+        immut stderrRead: int = read(ends, 16)
+        stdout = stdoutRead
+        stderr = stderrRead
+    }
+
+    free(ends)
+
+    if (not made) {
+        free(information)
+
+        if (captured) {
+            CloseHandle(windowsHandle(stdout))
+            CloseHandle(windowsHandle(stderr))
+        }
+
+        // ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND; ERROR_ACCESS_DENIED.
+        if (error == 2 or error == 3) { return Err(NotFound(command)) }
+
+        if (error == 5) { return Err(PermissionDenied(command)) }
+
+        return Err(Io(command, `os error ${error}`))
+    }
+
+    immut process: int = read(information, 0)
+    immut thread: Address = read(information, 8)
+    CloseHandle(thread)
+    free(information)
+    return Ok({ pid: process, stdout: stdout, stderr: stderr, stdin: -1 })
+}
+
+function windowsHandle(value: int): Address {
+    return offset(nullAddress(), value)
+}
+
+// An argument as CommandLineToArgvW reads it back: in quotes when it has a space, a tab or a quote
+// (or is empty), its quotes and the backslashes before them escaped.
+function windowsQuoted(arg: string): string {
+    if (arg != '' and not (' ' in arg) and not ('\t' in arg) and not ('"' in arg)) { return arg }
+
+    mut out = '"'
+    mut slashes = 0
+
+    for c in arg.chars() {
+        if (c == '\\') {
+            slashes += 1
+            continue
+        }
+
+        if (c == '"') {
+            out += '\\' * (2 * slashes + 1) + '"'
+        } else {
+            out += '\\' * slashes + string(c)
+        }
+
+        slashes = 0
+    }
+
+    return out + '\\' * (2 * slashes) + '"'
+}
+
+// Windows: what the two pipes give until both end, read as they fill (PeekNamedPipe, then ReadFile
+// of what waits; a sleep of a millisecond when neither has anything).
+function windowsReadBoth(stdout: int, stderr: int): string[] {
     mut buffers = [allocate(4096), allocate(4096)]
     mut sizes = [0, 0]
     mut capacities = [4096, 4096]
     mut open = [true, true]
     immut pipes = [stdout, stderr]
+    immut words = allocate(16)
 
     while (open[0] or open[1]) {
-        // A `struct pollfd` for each open pipe: its fd, POLLIN and the events that happened.
+        mut any = false
+
+        for i in range(2) {
+            if (not open[i]) { continue }
+
+            write(words, 0, 0)
+
+            if (PeekNamedPipe(windowsHandle(pipes[i]), nullAddress(), 0, nullAddress(), words, nullAddress()) == 0) {
+                open[i] = false
+                CloseHandle(windowsHandle(pipes[i]))
+                continue
+            }
+
+            immut available = readInt32(words, 0)
+
+            if (available <= 0) { continue }
+
+            if (capacities[i] - sizes[i] < available) {
+                capacities[i] = capacities[i] * 2 + available
+                buffers[i] = realloc(buffers[i], capacities[i])
+            }
+
+            write(words, 8, 0)
+            ReadFile(windowsHandle(pipes[i]), offset(buffers[i], sizes[i]), available, offset(words, 8), nullAddress())
+            sizes[i] += readInt32(words, 8)
+            any = true
+        }
+
+        if (not any and (open[0] or open[1])) { Sleep(1) }
+    }
+
+    free(words)
+    mut texts: string[] = []
+
+    for i in range(2) {
+        texts.push(textOf(buffers[i], sizes[i]))
+        free(buffers[i])
+    }
+
+    return texts
+}
+
+// What the two pipes give until both end, read as they fill (a program blocks on a full pipe),
+// while `input` is written to the pipe `stdin` (when it is not -1) as it takes it: a program that
+// stops reading makes the rest of it fail, not this one (SIGPIPE is ignored while it is written).
+function readBoth(stdout: int, stderr: int, stdin: int, input: string): string[] {
+    if (os == Windows) { return windowsReadBoth(stdout, stderr) }
+
+    immut fds = allocate(24)
+    mut buffers = [allocate(4096), allocate(4096)]
+    mut sizes = [0, 0]
+    mut capacities = [4096, 4096]
+    mut open = [true, true]
+    immut pipes = [stdout, stderr]
+    mut feeding = stdin >= 0
+    mut fed = 0
+    // SIG_IGN, and the handler it replaces.
+    immut handler = if (feeding) { signal(13, offset(nullAddress(), 1)) } else { nullAddress() }
+
+    while (open[0] or open[1]) {
+        // A `struct pollfd` for each open pipe: its fd, POLLIN (or POLLOUT for the input) and the
+        // events that happened.
         mut count = 0
         mut which: int[] = []
 
@@ -279,7 +700,14 @@ function readBoth(stdout: int, stderr: int): string[] {
             count += 1
         }
 
-        if (poll(fds, count, -1) < 0) {
+        if (feeding) {
+            writeInt32(fds, count * 8, stdin)
+            writeInt32(fds, count * 8 + 4, 4)
+            which.push(2)
+            count += 1
+        }
+
+        if (koji_blocking_poll(fds, count, -1) < 0) {
             if (koji_system_errno() == 4) { continue }
 
             break
@@ -290,6 +718,27 @@ function readBoth(stdout: int, stderr: int): string[] {
             if (readInt32(fds, slot * 8 + 4) >> 16 == 0) { continue }
 
             immut i = which[slot]
+
+            if (i == 2) {
+                // At most 512 bytes, which a pipe that can be written takes without waiting.
+                immut size = if (stringSize(input) - fed < 512) { stringSize(input) - fed } else { 512 }
+                immut vector = allocate(16)
+                write(vector, 0, offset(stringBytes(input), fed))
+                write(vector, 8, size)
+                immut put = writev(stdin, vector, 1)
+                free(vector)
+
+                if (put < 0 and koji_system_errno() == 4) { continue }
+
+                if (put > 0) { fed += put }
+
+                if (put <= 0 or fed >= stringSize(input)) {
+                    feeding = false
+                    close(stdin)
+                }
+
+                continue
+            }
 
             if (capacities[i] - sizes[i] < 4096) {
                 capacities[i] *= 2
@@ -315,6 +764,10 @@ function readBoth(stdout: int, stderr: int): string[] {
         }
     }
 
+    if (feeding) { close(stdin) }
+
+    if (stdin >= 0) { signal(13, handler) }
+
     free(fds)
     mut texts: string[] = []
 
@@ -328,6 +781,9 @@ function readBoth(stdout: int, stderr: int): string[] {
 
 // The system, from the name `uname` gives (the first field of its record, on every system).
 function systemNamed(): OperatingSystem {
+    // Windows has no `uname` (the native backend knows the system it compiles for).
+    if (os == Windows) { return Windows }
+
     immut buffer = allocate(4096)
     uname(buffer)
     immut name = cText(buffer)
@@ -337,6 +793,60 @@ function systemNamed(): OperatingSystem {
         'Linux' => Linux
         'Darwin' => MacOS
         _ => Other(name.lower())
+    }
+}
+
+// The path of the executable in `buffer` (`size` bytes): its length, or -2 when the buffer is too
+// small, or -1 where the system cannot tell it.
+function executableInto(buffer: Address, size: int): int {
+    match (os) {
+        Linux => {
+            immut path = cString('/proc/self/exe')
+            immut length = readlink(path, buffer, size)
+            free(path)
+
+            if (length < 0) { return -1 }
+
+            return if (length == size) { -2 } else { length }
+        }
+        MacOS => {
+            immut room = allocate(8)
+            write(room, 0, size)
+            immut failed = executablePathInto(buffer, room)
+            free(room)
+            return if (failed != 0) { -2 } else { strlen(buffer) }
+        }
+        Windows => {
+            immut length = GetModuleFileNameA(nullAddress(), buffer, size)
+
+            if (length <= 0) { return -1 }
+
+            return if (length >= size) { -2 } else { length }
+        }
+        _ => return -1
+    }
+}
+
+// The processor, from the name `uname` gives (the fifth field of its record, whose fields have 65
+// bytes on Linux, 256 on macOS).
+function architectureNamed(): Architecture {
+    if (os == Windows) { return X64 }
+
+    immut buffer = allocate(4096)
+    uname(buffer)
+    immut field = match (os) {
+        MacOS => 256
+        _ => 65
+    }
+    immut name = cText(offset(buffer, 4 * field))
+    free(buffer)
+
+    return match (name) {
+        'x86_64' => X64
+        'amd64' => X64
+        'aarch64' => Arm64
+        'arm64' => Arm64
+        _ => OtherArchitecture(name)
     }
 }
 

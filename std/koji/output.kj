@@ -3,17 +3,32 @@
 // Koji (C calls these functions by their names). The writes go to the system at once, a line in
 // one call, as Rust's output flushed at each line did.
 
-import { Address, CInt, Location, Never, allocate, isNull, locationAddress, newString, nullAddress, offset, read, stringBytes, stringSize, write } from 'koji:unsafe'
+import { Address, CInt, CSize, Location, Never, allocate, free, isNull, locationAddress, newString, nullAddress, offset, read, stringBytes, stringSize, write } from 'koji:unsafe'
 import { cString, cText, isUtf8 } from 'koji:core'
+import system
 
 extern function writev(fd: CInt, buffers: Address, count: CInt): int
 extern function strerror(code: CInt): Address
 extern function exit(code: CInt): Never
 extern function fdopen(fd: CInt, mode: Address): Address
-extern function getline(line: Address, capacity: Address, stream: Address): int
+extern function koji_blocking_getline(line: Address, capacity: Address, stream: Address): int
 extern function ferror(stream: Address): CInt
+extern function koji_blocking_fread(target: Address, size: CSize, count: CSize, file: Address): CSize
 extern function clearerr(stream: Address)
-extern function koji_system_errno(): CInt
+// The place of errno (under names of their own: <errno.h> declares them otherwise).
+extern function errnoPlace(): Address from '__errno_location'
+extern function errnoPlaceBsd(): Address from '__error'
+// Windows (ucrtbase), and the library there (koji:windows).
+extern function errnoPlaceWindows(): Address from '_errno'
+extern function windowsFdopen(fd: CInt, mode: Address): Address from '_fdopen'
+extern function koji_windows_writev(fd: CInt, buffers: Address, count: CInt): int
+// With other tasks alive (koji:task), a write that could wait is made by a thread that helps.
+extern function koji_task_alone(): boolean
+extern function koji_task_current(): int
+extern function koji_task_suspend()
+extern function koji_task_wake(id: int)
+extern function koji_output_ready(fd: int): boolean
+extern function koji_blocking_writev(fd: CInt, buffers: Address, count: CInt): int
 
 // Two buffers for `writev` (their addresses and sizes), and a line break.
 immut buffers = allocate(32)
@@ -23,6 +38,12 @@ immut readMode = cString('r')
 // address, then its capacity).
 mut input = nullAddress()
 immut line = zeroed(16)
+// The bytes at most that a write to a pipe ready for it takes without waiting, all at once (PIPE_BUF).
+immut atomicWrite = 4096
+// Whether a task is writing (with other tasks alive, one at a time, so that their texts neither mix
+// nor change order), and the tasks waiting for their turn.
+mut writing = false
+mut writers: int[] = []
 
 function zeroed(size: int): Address {
     immut block = allocate(size)
@@ -53,6 +74,18 @@ extern function koji_std_panic(text: string, here: Location): Never {
     end('panic', here, text)
 }
 
+// An `assert` that failed: the condition as written, the message given (or ''), and the values of
+// the two sides of a comparison (`details`, or '').
+extern function koji_std_assert(condition: string, message: string, details: string, here: Location): Never {
+    mut text = 'assertion failed'
+
+    if (condition != '') { text += `: ${condition}` }
+
+    if (message != '') { text += ` (${message})` }
+
+    end('panic', here, text + details)
+}
+
 // The panics of the generated code (overflow, division by zero...), with a text of C.
 extern function koji_panic(here: Location, text: Address): Never {
     end('panic', here, cText(text))
@@ -71,13 +104,46 @@ extern function koji_fail(here: Location, text: string): Never {
 // Ends the program with `panic: main.kj:12: message` (or `error: ...`) on the standard error, and
 // the exit code 1.
 function end(kind: string, here: Location, text: string): Never {
-    written(2, `${kind}: ${cText(locationAddress(here))}: ${text}`, true)
+    writtenNow(2, `${kind}: ${cText(locationAddress(here))}: ${text}`, true)
     exit(1)
 }
 
 // Writes the bytes of `text`, and a line break when `ending`, to `fd`: 0, or the error of the
-// system (-1 when it wrote nothing).
+// system (-1 when it wrote nothing). With other tasks alive, a text waits for those before it, and a
+// write that could wait (the output is a pipe that is full, or the text is long) is made by a thread
+// that helps, so the other tasks go on.
 function written(fd: int, text: string, ending: boolean): int {
+    if (koji_task_alone() and not writing) { return writtenNow(fd, text, ending) }
+
+    while (writing) {
+        writers.push(koji_task_current())
+        koji_task_suspend()
+    }
+
+    writing = true
+    immut code = writtenNow(fd, text, ending)
+    writing = false
+    immut waiting = writers
+    writers = []
+
+    for id in waiting {
+        koji_task_wake(id)
+    }
+
+    return code
+}
+
+// `writev` of the buffers, by the system (on Windows, a write each).
+function writevNow(fd: int, count: int): int {
+    return if (system.os == system.Windows) { koji_windows_writev(fd, buffers, count) } else { writev(fd, buffers, count) }
+}
+
+// The standard input as a stream of C.
+function inputStream(): Address {
+    return if (system.os == system.Windows) { windowsFdopen(0, readMode) } else { fdopen(0, readMode) }
+}
+
+function writtenNow(fd: int, text: string, ending: boolean): int {
     mut at = stringBytes(text)
     mut size = stringSize(text)
     mut breakSize = if (ending) { 1 } else { 0 }
@@ -97,7 +163,8 @@ function written(fd: int, text: string, ending: boolean): int {
             count += 1
         }
 
-        immut done = writev(fd, buffers, count)
+        immut alone = koji_task_alone()
+        immut done = if (alone or (size + breakSize <= atomicWrite and koji_output_ready(fd))) { writevNow(fd, count) } else { koji_blocking_writev(fd, buffers, count) }
 
         if (done < 0) {
             immut code = koji_system_errno()
@@ -142,7 +209,7 @@ extern function koji_read_line(prompt: string, here: Location, status: Address):
         if (code != 0) { end('panic', here, `cannot write output: ${message(code)}`) }
     }
 
-    if (isNull(input)) { input = fdopen(0, readMode) }
+    if (isNull(input)) { input = inputStream() }
 
     // A standard input that is closed is empty, as in Rust.
     if (isNull(input)) {
@@ -151,7 +218,7 @@ extern function koji_read_line(prompt: string, here: Location, status: Address):
     }
 
     clearerr(input)
-    immut size = getline(line, offset(line, 8), input)
+    immut size = koji_blocking_getline(line, offset(line, 8), input)
 
     if (size < 0) {
         immut code = koji_system_errno()
@@ -175,7 +242,67 @@ extern function koji_read_line(prompt: string, here: Location, status: Address):
     return newString(bytes, last)
 }
 
+// `system.readInput(count)`: up to `count` bytes of the standard input (fewer at its end), from the
+// buffer `input` reads too, as a text (bytes that are not UTF-8 become U+FFFD); `status` becomes 1
+// when nothing is left.
+extern function koji_read_bytes(count: int, here: Location, status: Address): string {
+    if (isNull(input)) { input = inputStream() }
+
+    if (isNull(input) or count <= 0) {
+        write(status, 0, if (count <= 0) { 0 } else { 1 })
+        return ''
+    }
+
+    immut block = allocate(count)
+    mut done = 0
+
+    while (done < count) {
+        immut got = koji_blocking_fread(offset(block, done), 1, count - done, input)
+
+        if (got == 0) {
+            immut code = koji_system_errno()
+
+            if (ferror(input) != 0 and code != 9) { end('panic', here, `cannot read input: ${message(code)}`) }
+
+            break
+        }
+
+        done += got
+    }
+
+    if (done == 0) { write(status, 0, 1) }
+
+    immut text = newString(block, done)
+    free(block)
+    return text
+}
+
+// `system.writeOutput(text)`: the text on the standard output, without a line break after it.
+extern function koji_write(text: string, here: Location) {
+    immut code = written(1, text, false)
+
+    if (code != 0) { end('panic', here, `cannot write output: ${message(code)}`) }
+}
+
 function isLineEnd(bytes: Address, at: int): boolean {
     immut b: byte = read(bytes, at)
     return b == 10 or b == 13
+}
+
+// errno, the error of the last call of the system that failed (for every module: C calls it by its
+// name): the int of C at the place each system gives.
+extern function koji_system_errno(): CInt {
+    immut place = match (system.os) {
+        Linux => errnoPlace()
+        Windows => errnoPlaceWindows()
+        _ => errnoPlaceBsd()
+    }
+    mut value = 0
+
+    for i in range(4) {
+        immut part: byte = read(place, 3 - i)
+        value = value << 8 | int(part)
+    }
+
+    return if (value >= 0x80000000) { value - 0x100000000 } else { value }
 }

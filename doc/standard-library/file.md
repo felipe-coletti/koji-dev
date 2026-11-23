@@ -30,6 +30,12 @@ The `file` module provides functionality for working with files. It is written i
     }
     ```
 
+-   `removeDir(path: string) -> Result[void, FileError]`  
+    Removes the directory at `path`, which must be empty.
+
+-   `setPermissions(path: string, mode: int) -> Result[void, FileError]`  
+    Sets the permissions of the file at `path`, as the bits of Unix (`0x1ED` is `rwxr-xr-x`, 0755 in octal: an executable).
+
 ## Directories
 
 -   `list(path: string) -> Result[string[], FileError]`  
@@ -48,6 +54,12 @@ The `file` module provides functionality for working with files. It is written i
 
 -   `write(text: string) -> Result[void, FileError]`  
     Writes `text` to the file. The file must have been opened with `Write` or `Append`.
+
+-   `readBytes() -> Result[byte[], FileError]`  
+    Reads the entire contents of the file as bytes, whatever they are (an image, a program, text in another encoding). The file must have been opened with `Read`.
+
+-   `writeBytes(bytes: byte[]) -> Result[void, FileError]`  
+    Writes the bytes to the file. The file must have been opened with `Write` or `Append`.
 
 -   `close() -> void`  
     Closes the file. It consumes the variable: using it afterwards is a compile error.

@@ -1,0 +1,1680 @@
+// The native backend: the machine code of x86-64 for the IR, in an object file of ELF (Linux), which
+// Koji's linker (or the system's) links with the runtime library, without a C compiler. Each function goes
+// through the machine IR (see "A machine IR between the IR and the processors" in doc/design.md):
+// lowered (mirlower.kj), its registers allocated (mirregs.kj), encoded (x64.kj); this file lays out
+// the object: the data of the program (its strings, its globals, the descriptions of its records),
+// the code of the runtime written by the backend (the switch between stacks, the threads, the stubs
+// the library calls), the jobs of the `blocking` functions, and the sections, symbols and
+// relocations of ELF.
+//
+// Functions follow the convention of System V (integers and addresses in rdi, rsi, rdx, rcx,
+// r8 and r9, floats in xmm0 to xmm7, a decimal or a U128 in two registers, the rest on the stack),
+// as the runtime calls closures. A `mut` parameter is a value given
+// with its own reference, and the address where the function writes its last value, after the
+// other parameters.
+
+import { reusedLoads, foldedCopies } from 'mirloads.kj'
+import { Ty, Operand, IrProgram, IrExtern, IrForC } from 'ir.kj'
+import { globalsSeen } from 'globals.kj'
+import { borrowedParams, constantGlobals } from 'borrow.kj'
+import { inlineSmall, targetPlatform } from 'inline.kj'
+import { reachableFunctions } from 'target.kj'
+import { mirRefusal, lowerMir, MirContext } from 'mirlower.kj'
+import { MValue, MAddress, MCallee, MInstruction, MTerminator, MFunctionCode, mirText } from 'mir.kj'
+import { MBuilder, builder } from 'mircode.kj'
+import { allocate } from 'mirregs.kj'
+import { emitX64, x64Registers } from 'x64.kj'
+import { emitA64, a64Registers } from 'a64.kj'
+import { MachSymbol, MachRelocation, machObject } from 'macho.kj'
+import { coffObject } from 'coff.kj'
+import system
+
+immut rsi = 6
+immut rdi = 7
+immut equal = 4
+// Relocations of x86-64.
+immut absolute64 = 1
+immut pc32 = 2
+immut plt32 = 4
+type Relocation = {
+    at: int
+    // An external symbol, or a section (`.text`, `.data`, `.rodata`, `.bss`).
+    symbol: string
+    kind: int
+    addend: int
+}
+
+// A place in the code (a call, a `lea`) or in the data (an address) of a function of the program,
+// written once every function has its place.
+type FunctionUse = {
+    at: int
+    target: int
+    inData: boolean
+    // The kind of the relocation of the code (see `EmittedUse`): 0 on x86-64, patched.
+    kind: int
+}
+
+// An argument of a call.
+type Argument = {
+    // `value` (`operand` of type `ty`), `int` (`number`), `local` (the address of the local
+    // `number`), `slot` (the address of the word of the frame at `number`), `word` (the word of the
+    // frame at `number`), `symbol` (the address of `name`, of the library), `rodata` and `data`
+    // (the address of `number` in them), `record` (the description of the record `number`),
+    // `function` (the address of the function `number` of the program).
+    kind: string
+    operand: Operand
+    ty: Ty
+    number: int
+    name: string
+}
+
+type Native = {
+    program: IrProgram
+    code: byte[]
+    rodata: byte[]
+    data: byte[]
+    bss: int
+    relocations: Relocation[]
+    dataRelocations: Relocation[]
+    uses: FunctionUse[]
+    starts: int[]
+    texts: Map[string, int]
+    strings: int[]
+    globals: int[]
+    records: int[]
+    // The `blocking` functions of foreign blocks called: the places of their jobs' code.
+    trampolines: Map[string, int]
+    trampolineUses: Relocation[]
+    // Whether the object is for arm64, else x86-64; for macOS (a Mach-O), Windows (COFF), else
+    // Linux (an ELF).
+    arm: boolean
+    macos: boolean
+    windows: boolean
+    // For each function, the globals it may see (globals.kj).
+    seen: Set[int][]
+    // For each function, its borrowed parameters, and the globals that never change (borrow.kj):
+    // the caller keeps a borrowed parameter alive, so the function holds no reference of its own.
+    borrowed: boolean[][]
+    constants: boolean[]
+    // Where the code of the jobs of `blocking` functions starts (after the functions of records).
+    trampolineStart: int
+}
+
+// The object file of a program, or why the native backend cannot make it yet.
+export function generateNative(given: IrProgram): Result[byte[], string] {
+    // The small functions inlined where they are called (inline.kj).
+    immut program = inlineSmall(given)
+
+    mut native: Native = {
+        program: program, code: [], rodata: [], data: [], bss: 0, relocations: [], dataRelocations: [], uses: [], starts: [], texts: [:], strings: [], globals: [], records: [],
+        trampolines: [:], trampolineUses: [], seen: globalsSeen(program), borrowed: borrowedParams(program), constants: constantGlobals(program), trampolineStart: 0, arm: targetPlatform() % 3 == 1, macos: targetPlatform() / 3 == 1, windows: targetPlatform() / 3 == 2
+    }
+
+    // The strings of the program: blocks of strings that are never freed (their count of
+    // references starts at 2^62).
+    for text in program.strings {
+        native.alignData(8)
+        native.strings.push(native.data.length())
+        immut bytes = utf8(text)
+        native.dataWord(4611686018427387904)
+        native.dataWord(bytes.length())
+        native.dataWord(bytes.length())
+        native.appendData(bytes)
+        native.data.push(0)
+    }
+
+    for global in program.globals {
+        native.globals.push(native.bss)
+        native.bss += 8 * words(global.ty)
+    }
+
+    native.recordDescriptions()
+
+    // The functions the program may call on its system (target.kj); the others have no code.
+    immut reachable = reachableFunctions(program, targetPlatform())
+
+    // Each function through the machine IR (mir.kj): lowered, its registers allocated, encoded.
+    for id in range(program.functions.length()) {
+        if (reachable[id]) {
+            immut refused = mirRefusal(program, id)
+
+            if (refused != '') { return Err(`the native backend does not support ${program.functions[id].name} yet: ${refused}`) }
+
+            native.generateMir(id)
+        } else {
+            native.starts.push(native.code.length())
+        }
+    }
+
+    // The code after the functions keeps every word in the frame.
+
+    immut extras = native.recordFunctions()
+    native.trampolineStart = native.code.length()
+    native.trampolineCode()
+
+    // The symbols others link to: `main` for a program, where the runtime starts (with argc and argv,
+    // already in rdi and rsi) then the program; for the library, `koji_library_init`, which runs its
+    // modules, and the functions C calls by their names (`extern function name(...) { ... }`).
+    immut mainStart = native.code.length()
+    mut exported: Export[] = []
+
+    if (program.library) {
+        for found in program.forC {
+            exported.push(native.forC(found))
+        }
+
+        mut init = builder('koji_library_init', [], [])
+        init.add(MCall(MFunction(program.main), [], []))
+        init.end(MReturn([]), -1)
+        immut start = native.emitCode(init.code())
+        exported.push({ name: 'koji_library_init', at: start, size: native.code.length() - start, section: 1 })
+
+        for each in native.runtimeCode() {
+            exported.push(each)
+        }
+    } else {
+        // The runtime first (with argc and argv), then the program. `kojic test`: the number of the
+        // test to run, the last argument (taken from argc).
+        mut code = builder('main', [false, false], [false])
+        immut count = code.params[0]
+        immut arguments = code.params[1]
+
+        if (program.testing) {
+            immut held = code.slot(8)
+            immut address = code.register(false)
+            immut selected = code.register(false)
+            code.add(MStore(MSlot(held, 0), MReg(count), 8))
+            code.add(MAddressOf(address, MSlot(held, 0)))
+            code.add(MCall(MExternal('koji_test_argument'), [MReg(address), MReg(arguments)], [selected]))
+            code.add(MStore(MSymbol('koji_test_selected', 0), MReg(selected), 8))
+            code.add(MLoad(count, MSlot(held, 0), 4))
+        }
+
+        code.add(MCall(MExternal('koji_init'), [MReg(count), MReg(arguments)], []))
+        code.add(MCall(MFunction(program.main), [], []))
+        code.end(MReturn([MImm(0)]), -1)
+        native.emitCode(code.code())
+        exported.push({ name: 'main', at: mainStart, size: native.code.length() - mainStart, section: 1 })
+
+        // Windows starts a program at its entry, with no arguments: those of C from the C library
+        // (ucrtbase), `main` with them, then `exit` with its result (which writes out the buffers
+        // of C).
+        if (native.windows) {
+            mut entry = builder('koji_windows_start', [], [])
+            immut pointer = entry.register(false)
+            immut argc = entry.register(false)
+            immut argv = entry.register(false)
+            immut result = entry.register(false)
+            entry.add(MCall(MVariadic('_configure_narrow_argv', 1), [MImm(1)], []))
+            entry.add(MCall(MVariadic('_initialize_narrow_environment', 0), [], []))
+            entry.add(MCall(MVariadic('__p___argc', 0), [], [pointer]))
+            entry.add(MLoad(argc, MBase(pointer, 0), 4))
+            entry.add(MCall(MVariadic('__p___argv', 0), [], [pointer]))
+            entry.add(MLoad(argv, MBase(pointer, 0), 8))
+            entry.add(MCall(MExternal('main'), [MReg(argc), MReg(argv)], [result]))
+            entry.add(MCall(MVariadic('exit', 1), [MReg(result)], []))
+            entry.end(MUnreachable, -1)
+            exported.push(native.exportCode(entry))
+        }
+    }
+
+    // The places of the functions, in the code and in the data.
+    for use in native.uses {
+        immut target = native.starts[use.target]
+
+        if (use.inData) {
+            native.dataRelocations.push({ at: use.at, symbol: '.text', kind: absolute64, addend: target })
+        } else {
+            if (use.kind == 0) {
+                native.patch32(use.at, target - (use.at + 4))
+            } else {
+                native.relocations.push({ at: use.at, symbol: '.text', kind: use.kind, addend: target })
+            }
+        }
+    }
+
+    if (native.macos) { return Ok(machOf(native, extras, exported)) }
+
+    if (native.windows) { return Ok(coffOf(native, extras, exported)) }
+
+    return Ok(elfObject(native, mainStart, extras, exported))
+}
+
+// A symbol of the object that others link to: its name, place and size in the code.
+type Export = {
+    name: string
+    at: int
+    size: int
+    // 1 for a function (.text), 3 for data (.data).
+    section: int
+}
+
+// The part of the runtime that the native library writes as machine code and data itself: the switch between the stacks of tasks and where a new task
+// starts (code of the processor); the heads of the pool and whether it is off, and the test `kojic
+// test` runs; the descriptions of the items of each built-in type (their functions in
+// koji:prelude); the functions that call through the address of another (of a description, a
+// record type, a closure); and the threads of the runtime. All but the first two are functions of
+// the machine IR.
+function Native.runtimeCode(mut self): Export[] {
+    mut exported: Export[] = []
+
+    if (self.arm) {
+        // Saves x19 to x30, d8 to d15 and fpcr below the stack, its top at `save` (x0); goes on
+        // with the stack at `to` (x1), restoring them from it (the layout of stackStart in
+        // std/koji/task.kj).
+        exported.push(self.stub('koji_task_switch', wordBytes([
+            0xD102C3FF, 0xA90053F3, 0xA9015BF5, 0xA90263F7, 0xA9036BF9, 0xA90473FB, 0xA9057BFD, 0x6D0627E8, 0x6D072FEA, 0x6D0837EC, 0x6D093FEE,
+            0xD53B4409, 0xF90053E9, 0x910003E9, 0xF9000009, 0x9100003F, 0xF94053E9, 0xD51B4409,
+            0xA94053F3, 0xA9415BF5, 0xA94263F7, 0xA9436BF9, 0xA94473FB, 0xA9457BFD, 0x6D4627E8, 0x6D472FEA, 0x6D4837EC, 0x6D493FEE,
+            0x9102C3FF, 0xD65F03C0
+        ])))
+        // A new task: koji_task_main(task), the task in x19: mov x0, x19; bl koji_task_main; brk 1
+        immut entry = self.code.length()
+        self.bytes(wordBytes([0xAA1303E0]))
+        self.relocation('koji_task_main', 283, 0)
+        self.bytes(wordBytes([0x94000000, 0xD4200020]))
+        exported.push({ name: 'koji_task_entry', at: entry, size: self.code.length() - entry, section: 1 })
+    } else {
+        // Saves the registers that calls keep, the control words of floating point, and the top of
+        // the stack at `save` (rdi); goes on with the stack at `to` (rsi), restoring them from it.
+        // On Windows, the limits of the stack in the block of the thread (StackBase at gs:8,
+        // StackLimit at gs:16) too: push qword [gs:8]; push qword [gs:16]; ...; pop qword [gs:16];
+        // pop qword [gs:8].
+        immut windowsSwitch = [
+            0x55, 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57,
+            0x65, 0xFF, 0x34, 0x25, 0x08, 0x00, 0x00, 0x00, 0x65, 0xFF, 0x34, 0x25, 0x10, 0x00, 0x00, 0x00,
+            0x48, 0x83, 0xEC, 0x08, 0x0F, 0xAE, 0x1C, 0x24, 0xD9, 0x7C, 0x24, 0x04,
+            0x48, 0x89, 0x27, 0x48, 0x89, 0xF4,
+            0x0F, 0xAE, 0x14, 0x24, 0xD9, 0x6C, 0x24, 0x04, 0x48, 0x83, 0xC4, 0x08,
+            0x65, 0x8F, 0x04, 0x25, 0x10, 0x00, 0x00, 0x00, 0x65, 0x8F, 0x04, 0x25, 0x08, 0x00, 0x00, 0x00,
+            0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C, 0x5B, 0x5D, 0xC3
+        ]
+        exported.push(self.stub('koji_task_switch', if (self.windows) { windowsSwitch } else { [
+            0x55, 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57,
+            0x48, 0x83, 0xEC, 0x08, 0x0F, 0xAE, 0x1C, 0x24, 0xD9, 0x7C, 0x24, 0x04,
+            0x48, 0x89, 0x27, 0x48, 0x89, 0xF4,
+            0x0F, 0xAE, 0x14, 0x24, 0xD9, 0x6C, 0x24, 0x04, 0x48, 0x83, 0xC4, 0x08,
+            0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C, 0x5B, 0x5D, 0xC3
+        ] }))
+        // A new task: koji_task_main(task), the task in rbx (koji_task_stack_start), on an aligned
+        // stack.
+        immut entry = self.code.length()
+        self.bytes([0x48, 0x89, 0xDF, 0x48, 0x83, 0xE4, 0xF0, 0xE8])
+        self.relocation('koji_task_main', plt32, -4)
+        self.int32(0)
+        self.bytes([0x0F, 0x0B])
+        exported.push({ name: 'koji_task_entry', at: entry, size: self.code.length() - entry, section: 1 })
+    }
+
+    // The data: the heads of the pool (18 words), whether it is off, the test to run (-1).
+    self.alignData(8)
+    immut pool = self.data.length()
+
+    for word in range(18) {
+        self.dataWord(0)
+    }
+
+    exported.push({ name: 'koji_pool', at: pool, size: 144, section: 3 })
+    immut off = self.data.length()
+    self.dataWord(0)
+    exported.push({ name: 'koji_pool_off', at: off, size: 8, section: 3 })
+    immut selected = self.data.length()
+    self.dataWord(-1)
+    exported.push({ name: 'koji_test_selected', at: selected, size: 8, section: 3 })
+
+    exported.push(self.addressFunction('koji_pool_heads', 'koji_pool'))
+    exported.push(self.loadFunction('koji_pool_is_off', MSymbol('koji_pool_off', 0), 1))
+    exported.push(self.loadFunction('koji_test_index', MSymbol('koji_test_selected', 0), 8))
+    mut switchOff = builder('koji_pool_switch_off', [], [])
+    switchOff.add(MStore(MSymbol('koji_pool_off', 0), MImm(1), 1))
+    switchOff.end(MReturn([]), -1)
+    exported.push(self.exportCode(switchOff))
+    // The variable of C `environ`, through the table of the linker (on macOS, its address from
+    // _NSGetEnviron).
+    mut environment = builder('koji_system_environment', [], [false])
+    immut place = environment.register(false)
+    immut value = environment.register(false)
+
+    if (self.macos) { environment.add(MCall(MExternal('_NSGetEnviron'), [], [place])) }
+
+    if (self.windows) { environment.add(MCall(MVariadic('__p__environ', 0), [], [place])) }
+
+    if (not self.macos and not self.windows) { environment.add(MLoad(place, MGot('environ'), 8)) }
+
+    environment.add(MLoad(value, MBase(place, 0), 8))
+    environment.end(MReturn([MReg(value)]), -1)
+    exported.push(self.exportCode(environment))
+
+    // A description of items (KojiElementType): its size, then its functions retain, release,
+    // repr, equal, compare, hash and display (0 for none).
+    immut counted = ['retain', 'release', 'repr', 'equal', '', 'hash', '']
+    immut ordered = ['', '', 'repr', 'equal', 'compare', 'hash', '']
+    immut descriptions: Map[string, int] = ['int': 8, 'float': 8, 'decimal': 16, 'u128': 16, 'bool': 1, 'char': 4, 'byte': 1, 'string': 8, 'list': 8, 'record': 8, 'map': 8, 'closure': 8, 'void': 0]
+
+    for kind in ['int', 'float', 'decimal', 'u128', 'bool', 'char', 'byte', 'string', 'list', 'record', 'map', 'closure', 'void'] {
+        self.alignData(8)
+        immut at = self.data.length()
+        self.dataWord(descriptions[kind])
+        immut functions = if (kind in ['list', 'record', 'map', 'closure']) { counted } else { if (kind == 'void') { ['', '', 'repr', 'equal', '', 'hash', ''] } else { ordered } }
+
+        for i in range(7) {
+            mut part = functions[i]
+
+            if (kind == 'string' and (i == 0 or i == 1 or i == 4 or i == 6)) { part = ['retain', 'release', '', '', 'compare', '', 'display'][i] }
+
+            if (kind == 'char' and i == 6) { part = 'display' }
+
+            immut word = self.data.length()
+            self.dataWord(0)
+
+            if (part != '') { self.dataRelocations.push({ at: word, symbol: `koji_${part}_${kind}`, kind: absolute64, addend: 0 }) }
+        }
+
+        exported.push({ name: `koji_element_${kind}`, at: at, size: 64, section: 3 })
+    }
+
+    // The functions of a description, for an item at an address (and another): through its words.
+    mut size = builder('koji_element_size', [false], [false])
+    immut found = size.register(false)
+    size.add(MLoad(found, MBase(size.params[0], 0), 8))
+    size.end(MReturn([MReg(found)]), -1)
+    exported.push(self.exportCode(size))
+
+    for named in [['koji_element_counted', '16'], ['koji_element_orderable', '40']] {
+        immut offset = if (named[1] == '16') { 16 } else { 40 }
+        mut code = builder(named[0], [false], [false])
+        immut word = code.register(false)
+        immut result = code.register(false)
+        code.add(MLoad(word, MBase(code.params[0], offset), 8))
+        code.add(MSet(result, 'ne', MReg(word), MImm(0)))
+        code.end(MReturn([MReg(result)]), -1)
+        exported.push(self.exportCode(code))
+    }
+
+    // Retain and release: none when the items hold no references.
+    for named in ['koji_element_retain', 'koji_element_release'] {
+        immut offset = if (named == 'koji_element_retain') { 8 } else { 16 }
+        mut code = builder(named, [false, false], [])
+        immut called = code.register(false)
+        immut call = code.newBlock()
+        immut none = code.newBlock()
+        code.add(MLoad(called, MBase(code.params[0], offset), 8))
+        code.end(MBranch('eq', MReg(called), MImm(0), none, call), call)
+        code.add(MCall(MIndirect(MReg(called)), [MReg(code.params[1])], []))
+        code.end(MReturn([]), none)
+        code.end(MReturn([]), -1)
+        exported.push(self.exportCode(code))
+    }
+
+    immut through: Map[string, int[]] = ['koji_element_repr': [24, 1], 'koji_element_hash': [48, 1], 'koji_element_equal': [32, 2], 'koji_element_compare': [40, 2]]
+
+    for named in ['koji_element_repr', 'koji_element_hash', 'koji_element_equal', 'koji_element_compare'] {
+        immut offset = through[named][0]
+        immut items = through[named][1]
+        mut classes = [false]
+
+        for i in range(items) {
+            classes.push(false)
+        }
+
+        mut code = builder(named, classes, [false])
+        immut called = code.register(false)
+        immut result = code.register(false)
+        mut args: MValue[] = []
+
+        for i in range(items) {
+            args.push(MReg(code.params[1 + i]))
+        }
+
+        code.add(MLoad(called, MBase(code.params[0], offset), 8))
+        code.add(MCall(MIndirect(MReg(called)), args, [result]))
+        code.end(MReturn([MReg(result)]), -1)
+        exported.push(self.exportCode(code))
+    }
+
+    // The display, or else the repr.
+    mut text = builder('koji_element_text', [false, false], [false])
+    immut shown = text.register(false)
+    immut written = text.register(false)
+    immut call = text.newBlock()
+    immut repr = text.newBlock()
+    text.add(MLoad(shown, MBase(text.params[0], 56), 8))
+    text.end(MBranch('eq', MReg(shown), MImm(0), repr, call), repr)
+    text.add(MLoad(shown, MBase(text.params[0], 24), 8))
+    text.end(MJump(call), call)
+    text.add(MCall(MIndirect(MReg(shown)), [MReg(text.params[1])], [written]))
+    text.end(MReturn([MReg(written)]), -1)
+    exported.push(self.exportCode(text))
+
+    // `call(comparison, a, b)`.
+    mut before = builder('koji_call_before', [false, false, false, false], [false])
+    immut answer = before.register(false)
+    before.add(MCall(MIndirect(MReg(before.params[0])), [MReg(before.params[1]), MReg(before.params[2]), MReg(before.params[3])], [answer]))
+    before.end(MReturn([MReg(answer)]), -1)
+    exported.push(self.exportCode(before))
+
+    // The code of a closure with its environment and the two items at addresses, by their types.
+    for kind in ['int', 'string', 'list', 'record', 'map', 'closure', 'float', 'bool', 'byte', 'char', 'decimal', 'u128'] {
+        mut code = builder(`koji_before_${kind}`, [false, false, false], [false])
+        immut closure = code.params[0]
+        immut called = code.register(false)
+        immut environment = code.register(false)
+        immut result = code.register(false)
+        code.add(MLoad(called, MBase(closure, 8), 8))
+        code.add(MLoad(environment, MBase(closure, 16), 8))
+        mut args = [MReg(environment)]
+        immut width = match (kind) {
+            'bool' => 1
+            'byte' => 1
+            'char' => 4
+            _ => 8
+        }
+        immut wide = kind == 'decimal' or kind == 'u128'
+
+        for item in [code.params[1], code.params[2]] {
+            immut low = code.register(kind == 'float')
+            code.add(MLoad(low, MBase(item, 0), width))
+            args.push(MReg(low))
+
+            if (wide) {
+                immut high = code.register(false)
+                code.add(MLoad(high, MBase(item, 8), 8))
+                args.push(MReg(high))
+            }
+        }
+
+        if (wide) { code.add(MPairs([1, 3], if (kind == 'u128') { [1, 3] } else { [] })) }
+
+        code.add(MCall(MIndirect(MReg(called)), args, [result]))
+        code.end(MReturn([MReg(result)]), -1)
+        exported.push(self.exportCode(code))
+    }
+
+    // Records: a reference more; a reference less, the last one freeing it by its type
+    // (`free`, its word 3); the text of an opaque one (`display`, its word 4).
+    mut retain = builder('koji_record_retain', [false], [])
+    retain.add(MRetain(MReg(retain.params[0])))
+    retain.end(MReturn([]), -1)
+    exported.push(self.exportCode(retain))
+
+    for name in ['koji_record_release', 'koji_record_drop'] {
+        mut code = builder(name, [false], [])
+        code.add(MRelease(MReg(code.params[0]), 'record'))
+        code.end(MReturn([]), -1)
+        exported.push(self.exportCode(code))
+    }
+
+    mut display = builder('koji_record_shown', [false], [false])
+    immut kind = display.register(false)
+    immut shownCode = display.register(false)
+    immut string = display.register(false)
+    display.add(MLoad(kind, MBase(display.params[0], 8), 8))
+    display.add(MLoad(shownCode, MBase(kind, 32), 8))
+    display.add(MCall(MIndirect(MReg(shownCode)), [MReg(display.params[0])], [string]))
+    display.end(MReturn([MReg(string)]), -1)
+    exported.push(self.exportCode(display))
+
+    for each in self.threadsCode() {
+        exported.push(each)
+    }
+
+    return exported
+}
+
+// The function of the C library that gives the address of errno.
+function Native.errnoFunction(self): string {
+    return if (self.macos) { '__error' } else { if (self.windows) { '_errno' } else { '__errno_location' } }
+}
+
+// The bytes of instructions of 4 bytes (arm64), little-endian.
+function wordBytes(words: int[]): int[] {
+    mut bytes: int[] = []
+
+    for each in words {
+        for i in range(4) {
+            bytes.push((each >> (8 * i)) & 0xFF)
+        }
+    }
+
+    return bytes
+}
+
+// A function of the machine IR, emitted and exported under its name.
+function Native.exportCode(mut self, code: MBuilder): Export {
+    immut start = self.emitCode(code.code())
+    return { name: code.name, at: start, size: self.code.length() - start, section: 1 }
+}
+
+// A function that gives the address of a symbol.
+function Native.addressFunction(mut self, name: string, symbol: string): Export {
+    mut code = builder(name, [], [false])
+    immut address = code.register(false)
+    code.add(MAddressOf(address, MSymbol(symbol, 0)))
+    code.end(MReturn([MReg(address)]), -1)
+    return self.exportCode(code)
+}
+
+// A function that reads `width` bytes at an address.
+function Native.loadFunction(mut self, name: string, at: MAddress, width: int): Export {
+    mut code = builder(name, [], [false])
+    immut value = code.register(false)
+    code.add(MLoad(value, at, width))
+    code.end(MReturn([MReg(value)]), -1)
+    return self.exportCode(code)
+}
+
+// The threads of the runtime (see "The threads of the runtime" in doc/design.md), code that runs no
+// Koji: the threads that help with the calls that block, each taking jobs (a KojiJob: its code, 6 arguments, its result, errno, the task that waits, done) from a pipe
+// and giving them back through another; the thread that ticks for preemption; the job of each call
+// that blocks of the library, and running a job (on this thread when the task is alone). Their
+// state, which koji:prelude starts and stops: the pipes of the jobs, whether the clock ticks, the
+// pipe that wakes it, and `koji_preempt_flag`, which it sets.
+function Native.threadsCode(mut self): Export[] {
+    mut exported: Export[] = []
+    self.alignData(8)
+    immut flag = self.data.length()
+    self.dataWord(0)
+    exported.push({ name: 'koji_preempt_flag', at: flag, size: 8, section: 3 })
+    // Words: the pipe of the jobs (read, write), of the jobs done, whether the clock ticks, the pipe
+    // that wakes it (-1 for none).
+    immut state = self.data.length()
+
+    for word in [-1, -1, -1, -1, 0, -1, -1] {
+        self.dataWord(word)
+    }
+
+    exported.push({ name: 'koji_threads_state', at: state, size: 56, section: 3 })
+    mut clear = builder('koji_preempt_clear', [], [])
+    clear.add(MStore(MSymbol('koji_preempt_flag', 0), MImm(0), 4))
+    clear.end(MReturn([]), -1)
+    exported.push(self.exportCode(clear))
+    exported.push(self.addressFunction('koji_threads_place', 'koji_threads_state'))
+
+    // A thread that helps (its argument the state): read a job (8 bytes) from the pipe, run it,
+    // keep errno in it, write it to the pipe of the jobs done; an end of the pipe or an error but
+    // EINTR ends the thread.
+    mut helper = builder('koji_helper', [false], [false])
+    immut held = helper.slot(8)
+    immut taking = helper.newBlock()
+    immut got = helper.newBlock()
+    immut short = helper.newBlock()
+    immut failed = helper.newBlock()
+    immut give = helper.newBlock()
+    immut unwritten = helper.newBlock()
+    immut done = helper.newBlock()
+    immut job = helper.register(false)
+    helper.end(MJump(taking), taking)
+    immut pipe = helper.register(false)
+    immut address = helper.register(false)
+    immut count = helper.register(false)
+    helper.add(MLoad(pipe, MBase(helper.params[0], 0), 4))
+    helper.add(MAddressOf(address, MSlot(held, 0)))
+    helper.add(MCall(self.c('read', 3), [MReg(pipe), MReg(address), MImm(8)], [count]))
+    helper.end(MBranch('eq', MReg(count), MImm(8), got, short), short)
+    helper.end(MBranch('ge', MReg(count), MImm(0), done, failed), failed)
+    self.unlessInterrupted(mut helper, taking, done)
+    helper.block = got
+    helper.order.push(got)
+    immut called = helper.register(false)
+    immut place = helper.register(false)
+    immut error = helper.register(false)
+    helper.add(MLoad(job, MSlot(held, 0), 8))
+    helper.add(MLoad(called, MBase(job, 0), 8))
+    helper.add(MCall(MIndirect(MReg(called)), [MReg(job)], []))
+    helper.add(MCall(self.c(self.errnoFunction(), 0), [], [place]))
+    helper.add(MLoad(error, MBase(place, 0), 4))
+    helper.add(MUnary(error, 'sext32', MReg(error), -1))
+    helper.add(MStore(MBase(job, 64), MReg(error), 8))
+    helper.end(MJump(give), give)
+    immut back = helper.register(false)
+    immut where = helper.register(false)
+    immut wrote = helper.register(false)
+    helper.add(MStore(MSlot(held, 0), MReg(job), 8))
+    helper.add(MLoad(back, MBase(helper.params[0], 24), 4))
+    helper.add(MAddressOf(where, MSlot(held, 0)))
+    helper.add(MCall(self.c('write', 3), [MReg(back), MReg(where), MImm(8)], [wrote]))
+    helper.end(MBranch('ge', MReg(wrote), MImm(0), taking, unwritten), unwritten)
+    self.unlessInterrupted(mut helper, give, taking)
+    helper.block = done
+    helper.order.push(done)
+    helper.end(MReturn([MImm(0)]), -1)
+    exported.push(self.exportCode(helper))
+
+    // The thread that ticks (its argument the state): stopped, it waits for a byte of its pipe;
+    // ticking, it sleeps 10 ms and sets the flag.
+    mut ticker = builder('koji_ticker', [false], [false])
+    immut oneByte = ticker.slot(8)
+    immut time = ticker.slot(16)
+    immut tick = ticker.newBlock()
+    immut wait = ticker.newBlock()
+    immut unread = ticker.newBlock()
+    immut sleep = ticker.newBlock()
+    immut raise = ticker.newBlock()
+    immut stopped = ticker.newBlock()
+    ticker.end(MJump(tick), tick)
+    immut running = ticker.register(false)
+    ticker.add(MLoad(running, MBase(ticker.params[0], 32), 8))
+    ticker.end(MBranch('ne', MReg(running), MImm(0), sleep, wait), wait)
+    immut wake = ticker.register(false)
+    immut buffer = ticker.register(false)
+    immut read = ticker.register(false)
+    ticker.add(MLoad(wake, MBase(ticker.params[0], 40), 4))
+    ticker.add(MAddressOf(buffer, MSlot(oneByte, 0)))
+    ticker.add(MCall(self.c('read', 3), [MReg(wake), MReg(buffer), MImm(1)], [read]))
+    ticker.end(MBranch('ge', MReg(read), MImm(0), tick, unread), unread)
+    self.unlessInterrupted(mut ticker, tick, stopped)
+    ticker.block = sleep
+    ticker.order.push(sleep)
+    immut span = ticker.register(false)
+    immut still = ticker.register(false)
+    ticker.add(MStore(MSlot(time, 0), MImm(0), 8))
+    ticker.add(MStore(MSlot(time, 8), MImm(10000000), 8))
+    ticker.add(MAddressOf(span, MSlot(time, 0)))
+
+    if (self.windows) {
+        ticker.add(MCall(MVariadic('Sleep', 1), [MImm(10)], []))
+    } else {
+        ticker.add(MCall(MExternal('nanosleep'), [MReg(span), MImm(0)], []))
+    }
+
+    ticker.add(MLoad(still, MBase(ticker.params[0], 32), 8))
+    ticker.end(MBranch('eq', MReg(still), MImm(0), tick, raise), raise)
+    ticker.add(MStore(MSymbol('koji_preempt_flag', 0), MImm(1), 4))
+    ticker.end(MJump(tick), stopped)
+    ticker.end(MReturn([MImm(0)]), -1)
+    exported.push(self.exportCode(ticker))
+    // On Windows, a thread starts by its convention: at an adapter that calls the code of Koji.
+    if (self.windows) {
+        exported.push(self.windowsAdapter('koji_helper_start', 'koji_helper'))
+        exported.push(self.windowsAdapter('koji_ticker_start', 'koji_ticker'))
+    }
+
+    exported.push(self.addressFunction('koji_helper_code', if (self.windows) { 'koji_helper_start' } else { 'koji_helper' }))
+    exported.push(self.addressFunction('koji_ticker_code', if (self.windows) { 'koji_ticker_start' } else { 'koji_ticker' }))
+
+    // A job: run here when the task is alone (koji_task_alone), else by a thread that helps while
+    // the task waits (koji_task_offload), errno then the job's: its result.
+    mut blocking = builder('koji_task_blocking', [false], [false])
+    immut given = blocking.params[0]
+    immut alone = blocking.register(false)
+    immut here = blocking.newBlock()
+    immut away = blocking.newBlock()
+    immut finished = blocking.newBlock()
+    blocking.add(MCall(MExternal('koji_task_alone'), [], [alone]))
+    blocking.add(MBinary(alone, 'and', MReg(alone), MImm(0xFF), -1))
+    blocking.end(MBranch('eq', MReg(alone), MImm(0), away, here), here)
+    immut run = blocking.register(false)
+    blocking.add(MLoad(run, MBase(given, 0), 8))
+    blocking.add(MCall(MIndirect(MReg(run)), [MReg(given)], []))
+    blocking.end(MJump(finished), away)
+    immut errno = blocking.register(false)
+    immut kept = blocking.register(false)
+    blocking.add(MCall(MExternal('koji_task_offload'), [MReg(given)], []))
+    blocking.add(MCall(self.c(self.errnoFunction(), 0), [], [errno]))
+    blocking.add(MLoad(kept, MBase(given, 64), 4))
+    blocking.add(MStore(MBase(errno, 0), MReg(kept), 4))
+    blocking.end(MJump(finished), finished)
+    immut result = blocking.register(false)
+    blocking.add(MLoad(result, MBase(given, 56), 8))
+    blocking.end(MReturn([MReg(result)]), -1)
+    exported.push(self.exportCode(blocking))
+
+    // The calls that block of the library (std/file.kj, std/system.kj): the function of C, its
+    // arguments, and whether it gives an `int` of C (sign-extended into the result of the job).
+    immut calls: Map[string, int[]] = ['getline': [3, 0], 'fread': [4, 0], 'waitpid': [3, 1], 'poll': [3, 1], 'fopen': [2, 0], 'readv': [3, 0], 'writev': [3, 0], 'opendir': [1, 0], 'readdir': [1, 0], 'access': [2, 1], 'unlink': [1, 1], 'mkdir': [2, 1]]
+
+    for name in ['getline', 'fread', 'waitpid', 'poll', 'fopen', 'readv', 'writev', 'opendir', 'readdir', 'access', 'unlink', 'mkdir'] {
+        immut shape = calls[name]
+        // The code of the job: the function with the arguments of the job, its result in it.
+        mut code = builder(`koji_job_${name}`, [false], [])
+        mut args: MValue[] = []
+
+        for i in range(shape[0]) {
+            immut arg = code.register(false)
+            code.add(MLoad(arg, MBase(code.params[0], 8 + 8 * i), 8))
+            args.push(MReg(arg))
+        }
+
+        immut value = code.register(false)
+        code.add(MCall(self.job(name, shape[0]), args, [value]))
+
+        if (shape[1] == 1) { code.add(MUnary(value, 'sext32', MReg(value), -1)) }
+
+        code.add(MStore(MBase(code.params[0], 56), MReg(value), 8))
+        code.end(MReturn([]), -1)
+        exported.push(self.exportCode(code))
+        // The function the library calls: the job in its frame (the arguments, the rest zero),
+        // then koji_task_blocking.
+        mut classes: boolean[] = []
+
+        for i in range(shape[0]) {
+            classes.push(false)
+        }
+
+        mut call = builder(`koji_blocking_${name}`, classes, [false])
+        immut frame = call.slot(96)
+        immut jobCode = call.register(false)
+        immut address = call.register(false)
+        immut answer = call.register(false)
+        call.add(MAddressOf(jobCode, MSymbol(`koji_job_${name}`, 0)))
+        call.add(MStore(MSlot(frame, 0), MReg(jobCode), 8))
+
+        for i in range(10) {
+            call.add(MStore(MSlot(frame, 8 + 8 * i), if (i < shape[0]) { MReg(call.params[i]) } else { MImm(0) }, 8))
+        }
+
+        call.add(MAddressOf(address, MSlot(frame, 0)))
+        call.add(MCall(MExternal('koji_task_blocking'), [MReg(address)], [answer]))
+        call.end(MReturn([MReg(answer)]), -1)
+        exported.push(self.exportCode(call))
+    }
+
+    return exported
+}
+
+// A function of C: on Windows, by its convention (as a variadic one, see callForeign of
+// mirlower.kj), under the name of the C library of Windows (`read` is `_read`).
+function Native.c(self, name: string, count: int): MCallee {
+    if (not self.windows) { return MExternal(name) }
+
+    immut renamed = match (name) {
+        'read' => '_read'
+        'write' => '_write'
+        'access' => '_access'
+        'unlink' => '_unlink'
+        'mkdir' => '_mkdir'
+        other => other
+    }
+    return MVariadic(renamed, count)
+}
+
+// The function a job of a call that blocks calls: on Windows, those C has not there are functions of
+// the library (std/koji/windows.kj), and `poll` is WSAPoll.
+function Native.job(self, name: string, count: int): MCallee {
+    if (not self.windows) { return MExternal(name) }
+
+    return match (name) {
+        'getline' => MExternal('koji_windows_getline')
+        'readv' => MExternal('koji_windows_readv')
+        'writev' => MExternal('koji_windows_writev')
+        'opendir' => MExternal('koji_windows_opendir')
+        'readdir' => MExternal('koji_windows_readdir')
+        'waitpid' => MExternal('koji_windows_waitpid')
+        'poll' => MVariadic('WSAPoll', count)
+        other => self.c(other, count)
+    }
+}
+
+// The start of a thread on Windows (its argument in rcx), for the code of Koji (System V, its
+// argument in rdi): rsi, rdi and xmm6 to xmm15, which Windows keeps across calls and the code of
+// Koji does not, saved around the call.
+function Native.windowsAdapter(mut self, name: string, target: string): Export {
+    while (self.code.length() % 16 != 0) {
+        self.code.push(0xCC)
+    }
+
+    immut at = self.code.length()
+    // push rsi; push rdi; sub rsp, 168
+    self.bytes([0x56, 0x57, 0x48, 0x81, 0xEC, 0xA8, 0x00, 0x00, 0x00])
+
+    // movdqu [rsp + 16 * i], xmm(6 + i)
+    for i in range(10) {
+        self.saveXmm(6 + i, 16 * i, 0x7F)
+    }
+
+    // mov rdi, rcx; call target
+    self.bytes([0x48, 0x89, 0xCF, 0xE8])
+    self.relocation(target, plt32, -4)
+    self.int32(0)
+
+    for i in range(10) {
+        self.saveXmm(6 + i, 16 * i, 0x6F)
+    }
+
+    // add rsp, 168; pop rdi; pop rsi; ret
+    self.bytes([0x48, 0x81, 0xC4, 0xA8, 0x00, 0x00, 0x00, 0x5F, 0x5E, 0xC3])
+    return { name: name, at: at, size: self.code.length() - at, section: 1 }
+}
+
+// movdqu [rsp + offset], xmm (opcode 0x7F), or movdqu xmm, [rsp + offset] (0x6F).
+function Native.saveXmm(mut self, register: int, offset: int, opcode: int) {
+    self.code.push(0xF3)
+
+    if (register >= 8) { self.code.push(0x44) }
+
+    self.bytes([0x0F, opcode, 0x84 | (register & 7) << 3, 0x24])
+    self.int32(offset)
+}
+
+// The open block of a call that failed: again (`again`) when errno is EINTR, else `otherwise`.
+function Native.unlessInterrupted(mut self, mut code: MBuilder, again: int, otherwise: int) {
+    immut place = code.register(false)
+    immut error = code.register(false)
+    code.add(MCall(self.c(self.errnoFunction(), 0), [], [place]))
+    code.add(MLoad(error, MBase(place, 0), 4))
+    code.end(MBranch('eq', MReg(error), MImm(4), again, otherwise), -1)
+}
+
+// A function of the runtime of these bytes, aligned on 16 bytes.
+function Native.stub(mut self, name: string, code: int[]): Export {
+    while (self.code.length() % 16 != 0) {
+        self.code.push(0xCC)
+    }
+
+    immut at = self.code.length()
+    self.bytes(code)
+    return { name: name, at: at, size: code.length(), section: 1 }
+}
+
+// A function C calls by its name: its arguments of the types of C made words (an `int`
+// sign-extended, a `bool` or a byte in its low byte), the function called, then the strings it
+// took released (their references were the caller's).
+function Native.forC(mut self, found: IrForC): Export {
+    immut routine = self.program.functions[found.function]
+    mut classes: boolean[] = []
+    mut pairs: int[] = []
+    mut alignedPairs: int[] = []
+    mut owners: int[] = []
+
+    for param in range(routine.params) {
+        immut ty = routine.locals[param].ty
+
+        if (words(ty) == 2) {
+            if (ty == U128Ty) { alignedPairs.push(classes.length()) }
+
+            pairs.push(classes.length())
+            classes.push(false)
+            owners.push(param)
+        }
+
+        classes.push(ty == FloatTy)
+        owners.push(param)
+    }
+
+    immut results = if (routine.returns == VoidTy) { [] } else { if (words(routine.returns) == 2) { [false, false] } else { [routine.returns == FloatTy] } }
+    mut code = builder(found.name, classes, results)
+    code.pairs = pairs
+    code.aligned = alignedPairs
+    mut args: MValue[] = []
+
+    for i in range(code.params.length()) {
+        immut value = code.params[i]
+        immut param = owners[i]
+        immut c = if (param < found.params.length() and (i == 0 or owners[i - 1] != param)) { found.params[param] } else { '' }
+
+        match (c) {
+            'int' => code.add(MUnary(value, 'sext32', MReg(value), -1))
+            'bool' => code.add(MBinary(value, 'and', MReg(value), MImm(0xFF), -1))
+            'uint8_t' => code.add(MBinary(value, 'and', MReg(value), MImm(0xFF), -1))
+            'uint32_t' => code.add(MBinary(value, 'and', MReg(value), MImm(0xFFFFFFFF), -1))
+            _ => {}
+        }
+
+        args.push(MReg(value))
+    }
+
+    mut returned: int[] = []
+
+    for float in results {
+        returned.push(code.register(float))
+    }
+
+    if (pairs.length() > 0) { code.add(MPairs(pairs, alignedPairs)) }
+
+    code.add(MCall(MFunction(found.function), args, returned))
+
+    for param in range(found.taken.length()) {
+        if (found.taken[param]) {
+            for i in range(owners.length()) {
+                if (owners[i] == param) { code.add(MRelease(args[i], 'string')) }
+            }
+        }
+    }
+
+    mut values: MValue[] = []
+
+    for each in returned {
+        values.push(MReg(each))
+    }
+
+    code.end(MReturn(values), -1)
+    immut start = self.emitCode(code.code())
+    return { name: found.name, at: start, size: self.code.length() - start, section: 1 }
+}
+
+function words(ty: Ty): int {
+    return match (ty) {
+        DecimalTy => 2
+        U128Ty => 2
+        _ => 1
+    }
+}
+
+// The runtime's name for the values of a managed type (`string` in `koji_string_retain`).
+function managed(ty: Ty): Option[string] {
+    return match (ty) {
+        StrTy => Some('string')
+        ListTy(_) => Some('list')
+        RecordTy(_) => Some('record')
+        MapTy(_, _) => Some('map')
+        SetTy(_) => Some('map')
+        FunctionTy(_, _) => Some('closure')
+        _ => None
+    }
+}
+
+function elementName(ty: Ty): string {
+    return match (ty) {
+        IntTy => 'koji_element_int'
+        FloatTy => 'koji_element_float'
+        DecimalTy => 'koji_element_decimal'
+        BoolTy => 'koji_element_bool'
+        CharTy => 'koji_element_char'
+        ByteTy => 'koji_element_byte'
+        U128Ty => 'koji_element_u128'
+        StrTy => 'koji_element_string'
+        ListTy(_) => 'koji_element_list'
+        RecordTy(_) => 'koji_element_record'
+        MapTy(_, _) => 'koji_element_map'
+        SetTy(_) => 'koji_element_map'
+        FunctionTy(_, _) => 'koji_element_closure'
+        VoidTy => 'koji_element_void'
+    }
+}
+
+function value(operand: Operand, ty: Ty): Argument {
+    return { kind: 'value', operand: operand, ty: ty, number: 0, name: '' }
+}
+
+function argument(kind: string, number: int): Argument {
+    return { kind: kind, operand: IntOp(0), ty: IntTy, number: number, name: '' }
+}
+
+// The descriptions of the records (KojiRecordType of the prelude), in .data: for each variant, its
+// name, its fields (their names, the descriptions of their types, of their records, and their
+// places when one is of two words), then the type.
+function Native.recordDescriptions(mut self) {
+    immut records = self.program.records
+
+    // Their places first: a field can be of a record described later.
+    mut places: int[] = []
+
+    for id in range(records.length()) {
+        immut record = records[id]
+        mut size = 40 + 48 * record.variants.length()
+
+        for variant in record.variants {
+            size += 32 * variant.fields.length() + 8
+        }
+
+        self.alignData(8)
+        places.push(self.data.length())
+
+        for i in range(size) {
+            self.data.push(0)
+        }
+    }
+
+    self.records = places
+
+    for id in range(records.length()) {
+        immut record = records[id]
+        immut base = places[id]
+        // The type: name, variant count, variants, free, display.
+        immut variants = base + 40
+        mut next = variants + 48 * record.variants.length()
+        self.pointerToText(base, record.name.split('[')[0])
+        self.patchData(base + 8, record.variants.length())
+        self.pointerToData(base + 16, variants)
+
+        for index in range(record.variants.length()) {
+            immut variant = record.variants[index]
+            immut at = variants + 48 * index
+
+            match (variant.name) {
+                Some(name) => self.pointerToText(at, name)
+                None => {}
+            }
+
+            immut count = variant.fields.length()
+            self.patchData(at + 8, count)
+
+            if (count == 0) { continue }
+
+            immut names = next
+            immut types = names + 8 * count
+            immut nested = types + 8 * count
+            immut offsets = nested + 8 * count
+            next = offsets + 8 * (count + 1)
+            self.pointerToData(at + 16, names)
+            self.pointerToData(at + 24, types)
+            self.pointerToData(at + 32, nested)
+            mut word = 0
+            mut wide = false
+
+            for field in range(count) {
+                immut ty = variant.fields[field].ty
+                self.pointerToText(names + 8 * field, variant.fields[field].name)
+                self.dataRelocations.push({ at: types + 8 * field, symbol: elementName(ty), kind: absolute64, addend: 0 })
+
+                match (ty) {
+                    RecordTy(inner) => self.pointerToData(nested + 8 * field, places[inner])
+                    _ => {}
+                }
+
+                self.patchData(offsets + 8 * field, word)
+                word += words(ty)
+
+                if (words(ty) > 1) { wide = true }
+            }
+
+            self.patchData(offsets + 8 * count, word)
+
+            if (wide) { self.pointerToData(at + 40, offsets) }
+        }
+    }
+}
+
+// The functions that free the records of each type (the function of its description): the managed
+// fields of its variant released, then its block back to the pool (inline, unless the pool is off
+// or the block is large); and the text of an opaque record without a function to show it. Where
+// each starts.
+function Native.recordFunctions(mut self): int[] {
+    immut records = self.program.records
+    mut starts: int[] = []
+
+    for id in range(records.length()) {
+        immut record = records[id]
+        mut code = builder(`free ${record.name}`, [false], [])
+        immut held = code.params[0]
+        immut tag = code.register(false)
+        code.add(MLoad(tag, MBase(held, 16), 8))
+        // Many variants: a table of jumps, by the variant.
+        immut table = record.variants.length() >= 4
+        mut blocks: int[] = []
+
+        if (table) {
+            for index in range(record.variants.length()) {
+                blocks.push(code.newBlock())
+            }
+
+            immut none = code.newBlock()
+            code.end(MSwitch(MReg(tag), blocks, none), none)
+            code.end(MReturn([]), blocks[0])
+        }
+
+        for index in range(record.variants.length()) {
+            immut fields = record.variants[index].fields
+            // The block after this variant: the next one's (or that of the next test).
+            mut following = if (index + 1 < blocks.length()) { blocks[index + 1] } else { -1 }
+
+            if (not table) {
+                immut mine = code.newBlock()
+                following = code.newBlock()
+                code.end(MBranch('eq', MReg(tag), MImm(index), mine, following), mine)
+            }
+            mut word = 0
+
+            for field in fields {
+                match (managed(field.ty)) {
+                    Some(kind) => {
+                        immut value = code.register(false)
+                        code.add(MLoad(value, MBase(held, 24 + 8 * word), 8))
+                        code.add(MRelease(MReg(value), kind))
+                    }
+                    None => {}
+                }
+
+                word += words(field.ty)
+            }
+
+            immut size = 3 + word
+
+            if (size <= 16) {
+                immut off = code.register(false)
+                immut give = code.newBlock()
+                immut slow = code.newBlock()
+                code.add(MLoad(off, MSymbol('koji_pool_off', 0), 1))
+                code.end(MBranch('ne', MReg(off), MImm(0), slow, give), give)
+                immut head = code.register(false)
+                code.add(MLoad(head, MSymbol('koji_pool', 8 * size), 8))
+                code.add(MStore(MBase(held, 0), MReg(head), 8))
+                code.add(MStore(MSymbol('koji_pool', 8 * size), MReg(held), 8))
+                code.end(MReturn([]), slow)
+            }
+
+            code.add(MCall(MExternal('koji_pool_give'), [MReg(held), MImm(size)], []))
+
+            code.end(MReturn([]), following)
+        }
+
+        if (not table) { code.end(MReturn([]), -1) }
+        immut start = self.emitCode(code.code())
+        starts.push(start)
+        self.patchDataFunction(self.records[id] + 24, start)
+
+        if (not record.opaque) { continue }
+
+        match (record.display) {
+            Some(display) => self.dataUse(self.records[id] + 32, display)
+            None => {
+                immut text = `<${record.name}>`
+                mut shown = builder(`show ${record.name}`, [false], [false])
+                immut address = shown.register(false)
+                immut result = shown.register(false)
+                shown.add(MAddressOf(address, MText(text)))
+                shown.add(MCall(MExternal('koji_string_new'), [MReg(address), MImm(utf8(text).length())], [result]))
+                shown.end(MReturn([MReg(result)]), -1)
+                self.patchDataFunction(self.records[id] + 32, self.emitCode(shown.code()))
+            }
+        }
+    }
+
+    return starts
+}
+
+// The code of the jobs of the `blocking` functions called: it calls the function of the library
+// with the arguments of the job, and keeps its result in the job.
+function Native.trampolineCode(mut self) {
+    for use in self.trampolineUses {
+        if (self.trampolines.has(use.symbol)) { continue }
+
+        immut declared = match (self.externOf(use.symbol)) {
+            Some(found) => found
+            None => continue
+        }
+
+        mut code = builder(`job ${declared.name}`, [false], [])
+        immut job = code.params[0]
+        mut args: MValue[] = []
+
+        for i in range(declared.params.length()) {
+            immut value = code.register(declared.params[i] == 'double')
+            code.add(MLoad(value, MBase(job, 8 + 8 * i), 8))
+            args.push(MReg(value))
+        }
+
+        immut result = code.register(declared.returns == 'double')
+        code.add(MCall(self.c(declared.symbol, args.length()), args, if (declared.returns == 'void') { [] } else { [result] }))
+
+        match (declared.returns) {
+            'int' => code.add(MUnary(result, 'sext32', MReg(result), -1))
+            'bool' => code.add(MBinary(result, 'and', MReg(result), MImm(0xFF), -1))
+            'uint8_t' => code.add(MBinary(result, 'and', MReg(result), MImm(0xFF), -1))
+            'uint32_t' => code.add(MBinary(result, 'and', MReg(result), MImm(0xFFFFFFFF), -1))
+            _ => {}
+        }
+
+        if (declared.returns != 'void') { code.add(MStore(MBase(job, 56), MReg(result), 8)) }
+
+        code.end(MReturn([]), -1)
+        self.trampolines[use.symbol] = self.emitCode(code.code())
+    }
+
+    // The references to them: relocations to their places in the code.
+    for use in self.trampolineUses {
+        immut target = match (self.trampolines.get(use.symbol)) {
+            Some(found) => found
+            None => 0
+        }
+        self.relocations.push({ at: use.at, symbol: '.text', kind: use.kind, addend: target + use.addend })
+    }
+}
+
+// An address in .data of a function that is at `offset` of the code (known now).
+function Native.patchDataFunction(mut self, at: int, offset: int) {
+    self.dataRelocations.push({ at: at, symbol: '.text', kind: absolute64, addend: offset })
+}
+
+function Native.dataUse(mut self, at: int, target: int) {
+    self.uses.push({ at: at, target: target, inData: true, kind: 0 })
+}
+
+function Native.pointerToText(mut self, at: int, text: string) {
+    immut offset = self.text(text)
+    self.dataRelocations.push({ at: at, symbol: '.rodata', kind: absolute64, addend: offset })
+}
+
+function Native.pointerToData(mut self, at: int, target: int) {
+    self.dataRelocations.push({ at: at, symbol: '.data', kind: absolute64, addend: target })
+}
+
+// Functions
+
+// A function through the machine IR: lowered (mirlower.kj), its registers allocated (mirregs.kj),
+// encoded for x86-64 (x64.kj), then put in the object: its code, its relocations, its calls of
+// functions of the program and its texts.
+function Native.generateMir(mut self, id: int) {
+    immut routine = self.program.functions[id]
+    immut preemptible = routine.file != 'task' and not self.program.library
+    immut context: MirContext = { globals: self.globals, strings: self.strings, records: self.records, borrowed: self.borrowed, constants: self.constants, seen: self.seen }
+    immut code = lowerMir(self.program, id, context, preemptible)
+
+    // KOJI_MIR_DUMP=name: the machine IR of the function `name`, printed.
+    if (system.env('KOJI_MIR_DUMP') == Some(routine.name)) {
+        for line in mirText(code) {
+            print(line)
+        }
+    }
+    self.starts.push(self.emitCode(code))
+}
+
+// A function of the machine IR, its registers allocated and encoded, put in the object: its code, its
+// relocations, its calls of functions of the program and its texts. Where it starts.
+function Native.emitCode(mut self, given: MFunctionCode): int {
+    immut code = reusedLoads(foldedCopies(given))
+    immut emitted = if (self.arm) { emitA64(code, allocate(code, a64Registers), self.macos) } else { emitX64(code, allocate(code, x64Registers), self.windows) }
+    immut start = self.code.length()
+
+    append(mut self.code, emitted.code)
+
+    for relocation in emitted.relocations {
+        // The code of the job of a function that blocks (see `trampolineCode`).
+        if (relocation.symbol.startsWith('trampoline:')) {
+            immut name = relocation.symbol['trampoline:'.length()..relocation.symbol.length()]
+            self.trampolineUses.push({ at: start + relocation.at, symbol: name, kind: relocation.kind, addend: relocation.addend })
+            continue
+        }
+
+        self.relocations.push({ at: start + relocation.at, symbol: relocation.symbol, kind: relocation.kind, addend: relocation.addend })
+    }
+
+    for call in emitted.calls {
+        self.uses.push({ at: start + call.at, target: call.target, inData: false, kind: call.kind })
+    }
+
+    for use in emitted.texts {
+        immut offset = self.text(use.text)
+
+        if (use.kind == 0) {
+            self.relocations.push({ at: start + use.at, symbol: '.rodata', kind: pc32, addend: offset - 4 })
+        } else {
+            self.relocations.push({ at: start + use.at, symbol: '.rodata', kind: use.kind, addend: offset })
+        }
+    }
+
+    return start
+}
+
+function Native.externOf(self, name: string): Option[IrExtern] {
+    for each in self.program.externs {
+        if (each.name == name) { return Some(each) }
+    }
+
+    return None
+}
+
+function Native.relocation(mut self, symbol: string, kind: int, addend: int) {
+    self.relocations.push({ at: self.code.length(), symbol: symbol, kind: kind, addend: addend })
+}
+
+function Native.bytes(mut self, values: int[]) {
+
+    for each in values {
+        self.code.push(byte(each))
+    }
+}
+
+// A string of C in .rodata (each once): its offset.
+function Native.text(mut self, text: string): int {
+    match (self.texts.get(text)) {
+        Some(offset) => return offset
+        None => {}
+    }
+
+    immut offset = self.rodata.length()
+    self.appendRodata(utf8(text))
+    self.rodata.push(0)
+    self.texts[text] = offset
+    return offset
+}
+
+// The code and the data, changed in place (a function given `mut self.code` would get a copy).
+function Native.int32(mut self, number: int) {
+    for i in range(4) {
+        self.code.push(byte(number >> (8 * i) & 0xFF))
+    }
+}
+
+function Native.patch32(mut self, at: int, number: int) {
+    for i in range(4) {
+        self.code[at + i] = byte(number >> (8 * i) & 0xFF)
+    }
+}
+
+function Native.dataWord(mut self, number: int) {
+    for i in range(8) {
+        self.data.push(byte(number >> (8 * i) & 0xFF))
+    }
+}
+
+function Native.patchData(mut self, at: int, number: int) {
+    for i in range(8) {
+        self.data[at + i] = byte(number >> (8 * i) & 0xFF)
+    }
+}
+
+function Native.alignData(mut self, size: int) {
+    while (self.data.length() % size != 0) {
+        self.data.push(0)
+    }
+}
+
+function Native.appendData(mut self, bytes: byte[]) {
+    for each in bytes {
+        self.data.push(each)
+    }
+}
+
+function Native.appendRodata(mut self, bytes: byte[]) {
+    for each in bytes {
+        self.rodata.push(each)
+    }
+}
+
+// Constants
+
+// Bytes
+
+function utf8(text: string): byte[] {
+    mut bytes: byte[] = []
+
+    for c in text {
+        immut code = c.code()
+
+        if (code < 0x80) {
+            bytes.push(byte(code))
+            continue
+        }
+
+        if (code < 0x800) {
+            bytes.push(byte(0xC0 | code >> 6))
+            bytes.push(byte(0x80 | code & 0x3F))
+            continue
+        }
+
+        if (code < 0x10000) {
+            bytes.push(byte(0xE0 | code >> 12))
+            bytes.push(byte(0x80 | code >> 6 & 0x3F))
+            bytes.push(byte(0x80 | code & 0x3F))
+            continue
+        }
+
+        bytes.push(byte(0xF0 | code >> 18))
+        bytes.push(byte(0x80 | code >> 12 & 0x3F))
+        bytes.push(byte(0x80 | code >> 6 & 0x3F))
+        bytes.push(byte(0x80 | code & 0x3F))
+    }
+
+    return bytes
+}
+
+function putBytes(mut out: byte[], number: int, count: int) {
+    for i in range(count) {
+        out.push(byte(number >> (8 * i) & 0xFF))
+    }
+}
+
+function putWord(mut out: byte[], number: int) {
+    putBytes(mut out, number, 8)
+}
+
+function putInt32(mut out: byte[], number: int) {
+    putBytes(mut out, number, 4)
+}
+
+// Adds the bytes at the end, in place (`out` read for the last time: see `koji_list_append`).
+function append(mut out: byte[], bytes: byte[]) {
+    out = out + bytes
+}
+
+type Section = {
+    name: string
+    kind: int
+    flags: int
+    bytes: byte[]
+    size: int
+    link: int
+    info: int
+    alignment: int
+    entry: int
+}
+
+type Symbol = {
+    name: string
+    info: int
+    section: int
+    value: int
+    size: int
+}
+
+// The relocatable object of COFF (coff.kj), with the symbols of the one of Mach-O.
+function coffOf(native: Native, extras: int[], exported: Export[]): byte[] {
+    immut symbols = machSymbols(native, extras, exported)
+    return coffObject(native.code, native.rodata, native.data, native.bss, symbols, machRelocations(native))
+}
+
+// The relocatable object of Mach-O (macho.kj) of the code and data: the functions named as in Koji
+// (local), the frees of records, and the symbols it defines for others.
+function machOf(native: Native, extras: int[], exported: Export[]): byte[] {
+    return machObject(native.arm, native.code, native.rodata, native.data, native.bss, machSymbols(native, extras, exported), machRelocations(native))
+}
+
+function machSymbols(native: Native, extras: int[], exported: Export[]): MachSymbol[] {
+    mut symbols: MachSymbol[] = []
+
+    for id in range(native.starts.length()) {
+        // Not those without code (not called on the platform).
+        immut end = if (id + 1 < native.starts.length()) { native.starts[id + 1] } else { if (extras.length() > 0) { extras[0] } else { native.trampolineStart } }
+
+        if (end == native.starts[id]) { continue }
+
+        immut name = native.program.functions[id].name
+        symbols.push({ name: if (name == '') { `koji_f${id}` } else { name }, section: 1, value: native.starts[id], global: false })
+    }
+
+    for i in range(extras.length()) {
+        symbols.push({ name: `free ${native.program.records[i].name}`, section: 1, value: extras[i], global: false })
+    }
+
+    for each in exported {
+        symbols.push({ name: each.name, section: each.section, value: each.at, global: true })
+    }
+
+    return symbols
+}
+
+function machRelocations(native: Native): MachRelocation[] {
+    mut relocations: MachRelocation[] = []
+
+    for relocation in native.relocations {
+        relocations.push({ section: 1, at: relocation.at, symbol: relocation.symbol, kind: relocation.kind, addend: relocation.addend })
+    }
+
+    for relocation in native.dataRelocations {
+        relocations.push({ section: 3, at: relocation.at, symbol: relocation.symbol, kind: 257, addend: relocation.addend })
+    }
+
+    return relocations
+}
+
+// The relocatable object of ELF64 (x86-64) of the code and data.
+function elfObject(native: Native, mainStart: int, extras: int[], exported: Export[]): byte[] {
+    // The sections: 1 .text, 2 .rodata, 3 .data, 4 .bss, then the relocations and the tables.
+    immut sectionIndex: Map[string, int] = ['.text': 1, '.rodata': 2, '.data': 3, '.bss': 4]
+    mut symbols: Symbol[] = [{ name: '', info: 0, section: 0, value: 0, size: 0 }]
+
+    // The sections as local symbols (STT_SECTION: symbol i is section i), the file of the local
+    // symbols (STT_FILE, absolute: named the same for every program, so that the linker does not
+    // name it after the object, a temporary file, and builds the same program the same), then the
+    // functions (local, STT_FUNC), then the global ones.
+    for i in range(1, 5) {
+        symbols.push({ name: '', info: 3, section: i, value: 0, size: 0 })
+    }
+
+    symbols.push({ name: 'koji', info: 4, section: 0xFFF1, value: 0, size: 0 })
+
+    for id in range(native.starts.length()) {
+        immut end = if (id + 1 < native.starts.length()) { native.starts[id + 1] } else { if (extras.length() > 0) { extras[0] } else { mainStart } }
+        // Named as in Koji (`Lexer.advance`), for profilers and debuggers; not those without code.
+        if (end == native.starts[id]) { continue }
+
+        immut name = native.program.functions[id].name
+        symbols.push({ name: if (name == '') { `koji_f${id}` } else { name }, info: 2, section: 1, value: native.starts[id], size: end - native.starts[id] })
+    }
+
+    // The functions that free records (and show opaque ones), by the name of their type.
+    for i in range(extras.length()) {
+        immut end = if (i + 1 < extras.length()) { extras[i + 1] } else { native.trampolineStart }
+        symbols.push({ name: `free ${native.program.records[i].name}`, info: 2, section: 1, value: extras[i], size: end - extras[i] })
+    }
+
+    immut firstGlobal = symbols.length()
+    mut external: Map[string, int] = [:]
+
+    // The symbols it defines for others (a relocation to one of them uses it, not another undefined).
+    for each in exported {
+        external[each.name] = symbols.length()
+        symbols.push({ name: each.name, info: if (each.section == 1) { 0x12 } else { 0x11 }, section: each.section, value: each.at, size: each.size })
+    }
+
+    for relocation in native.relocations + native.dataRelocations {
+        if (sectionIndex.has(relocation.symbol) or external.has(relocation.symbol)) { continue }
+
+        external[relocation.symbol] = symbols.length()
+        symbols.push({ name: relocation.symbol, info: 0x10, section: 0, value: 0, size: 0 })
+    }
+
+    // The relocations: offset, (symbol << 32) | type, addend.
+    immut rela = relocationBytes(native.relocations, sectionIndex, external, native.arm)
+    immut relaData = relocationBytes(native.dataRelocations, sectionIndex, external, native.arm)
+    mut strtab: byte[] = [0]
+    mut symtab: byte[] = []
+
+    for symbol in symbols {
+        mut name = 0
+
+        if (symbol.name != '') {
+            name = strtab.length()
+            append(mut strtab, utf8(symbol.name))
+            strtab.push(0)
+        }
+
+        putInt32(mut symtab, name)
+        symtab.push(byte(symbol.info))
+        symtab.push(0)
+        putBytes(mut symtab, symbol.section, 2)
+        putWord(mut symtab, symbol.value)
+        putWord(mut symtab, symbol.size)
+    }
+
+    mut sections: Section[] = [
+        { name: '', kind: 0, flags: 0, bytes: [], size: 0, link: 0, info: 0, alignment: 0, entry: 0 },
+        // SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR.
+        { name: '.text', kind: 1, flags: 6, bytes: native.code, size: native.code.length(), link: 0, info: 0, alignment: 16, entry: 0 },
+        { name: '.rodata', kind: 1, flags: 2, bytes: native.rodata, size: native.rodata.length(), link: 0, info: 0, alignment: 8, entry: 0 },
+        // SHF_ALLOC | SHF_WRITE.
+        { name: '.data', kind: 1, flags: 3, bytes: native.data, size: native.data.length(), link: 0, info: 0, alignment: 8, entry: 0 },
+        // SHT_NOBITS.
+        { name: '.bss', kind: 8, flags: 3, bytes: [], size: native.bss, link: 0, info: 0, alignment: 16, entry: 0 },
+        // SHT_RELA, linked to .symtab (7), for .text (1) and .data (3); SHF_INFO_LINK.
+        { name: '.rela.text', kind: 4, flags: 0x40, bytes: rela, size: rela.length(), link: 7, info: 1, alignment: 8, entry: 24 },
+        { name: '.rela.data', kind: 4, flags: 0x40, bytes: relaData, size: relaData.length(), link: 7, info: 3, alignment: 8, entry: 24 },
+        // SHT_SYMTAB, its strings in .strtab (8), the first global symbol.
+        { name: '.symtab', kind: 2, flags: 0, bytes: symtab, size: symtab.length(), link: 8, info: firstGlobal, alignment: 8, entry: 24 },
+        { name: '.strtab', kind: 3, flags: 0, bytes: strtab, size: strtab.length(), link: 0, info: 0, alignment: 1, entry: 0 },
+        // No executable stack.
+        { name: '.note.GNU-stack', kind: 1, flags: 0, bytes: [], size: 0, link: 0, info: 0, alignment: 1, entry: 0 },
+        { name: '.shstrtab', kind: 3, flags: 0, bytes: [], size: 0, link: 0, info: 0, alignment: 1, entry: 0 }
+    ]
+    mut shstrtab: byte[] = [0]
+    mut names: int[] = []
+
+    for section in sections {
+        if (section.name == '') {
+            names.push(0)
+            continue
+        }
+
+        names.push(shstrtab.length())
+        append(mut shstrtab, utf8(section.name))
+        shstrtab.push(0)
+    }
+
+    immut last = sections.length() - 1
+    sections[last].bytes = shstrtab
+    sections[last].size = shstrtab.length()
+
+    // The header (64 bytes), the contents of the sections, then their headers.
+    mut out: byte[] = []
+    mut offsets: int[] = [0]
+    mut body: byte[] = []
+
+    for i in range(1, sections.length()) {
+        while ((64 + body.length()) % 16 != 0) {
+            body.push(0)
+        }
+
+        offsets.push(64 + body.length())
+
+        if (sections[i].kind != 8) { append(mut body, sections[i].bytes) }
+    }
+
+    while ((64 + body.length()) % 8 != 0) {
+        body.push(0)
+    }
+
+    immut headers = 64 + body.length()
+    // e_ident: ELF, 64 bits, little-endian, version 1, System V.
+    out = out + [0x7F, 0x45, 0x4C, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    putBytes(mut out, 1, 2)
+    // EM_X86_64, or EM_AARCH64.
+    putBytes(mut out, if (native.arm) { 183 } else { 62 }, 2)
+    putInt32(mut out, 1)
+    putWord(mut out, 0)
+    putWord(mut out, 0)
+    putWord(mut out, headers)
+    putInt32(mut out, 0)
+    putBytes(mut out, 64, 2)
+    putBytes(mut out, 0, 2)
+    putBytes(mut out, 0, 2)
+    putBytes(mut out, 64, 2)
+    putBytes(mut out, sections.length(), 2)
+    putBytes(mut out, last, 2)
+    append(mut out, body)
+
+    for i in range(sections.length()) {
+        immut section = sections[i]
+        putInt32(mut out, names[i])
+        putInt32(mut out, section.kind)
+        putWord(mut out, section.flags)
+        putWord(mut out, 0)
+        putWord(mut out, if (i == 0) { 0 } else { offsets[i] })
+        putWord(mut out, section.size)
+        putInt32(mut out, section.link)
+        putInt32(mut out, section.info)
+        putWord(mut out, section.alignment)
+        putWord(mut out, section.entry)
+    }
+
+    return out
+}
+
+// The relocations: offset, (symbol << 32) | type, addend (a word of an address R_AARCH64_ABS64 on
+// arm64).
+function relocationBytes(relocations: Relocation[], sectionIndex: Map[string, int], external: Map[string, int], arm: boolean): byte[] {
+    mut bytes: byte[] = []
+
+    for relocation in relocations {
+        immut symbol = match (sectionIndex.get(relocation.symbol)) {
+            Some(section) => section
+            None => external[relocation.symbol]
+        }
+        putWord(mut bytes, relocation.at)
+        immut kind = if (arm and relocation.kind == absolute64) { 257 } else { relocation.kind }
+        putWord(mut bytes, symbol << 32 | kind)
+        putWord(mut bytes, relocation.addend)
+    }
+
+    return bytes
+}

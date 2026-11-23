@@ -1,0 +1,340 @@
+// Code for one system (see "Code for one system" in doc/design.md): a condition on `system.os` or
+// `system.architecture`, globals of std/system.kj, is a constant once the platform (the system and
+// the processor) is known. For a platform, the values that come from those globals (their variants,
+// comparisons of them with a variant, and what they decide) are folded, so each branch on them goes
+// one way, and the blocks the others led to are not reached. The native backend keeps the blocks of
+// the platform it compiles for (inline.kj).
+
+import { Operand, IrFunction, IrProgram } from 'ir.kj'
+import { changes } from 'borrow.kj'
+import { successors } from 'liveness.kj'
+
+// The systems and the processors: the variants of `OperatingSystem` (Linux, MacOS, Windows, Other)
+// and of `Architecture` (X64, Arm64, OtherArchitecture), in order. A platform is one of each:
+// `system * architectureCount + architecture`.
+immut architectureCount = 3
+
+// A function on one system: the blocks it reaches, and where each block goes when the system decides
+// it (-1 when it does not).
+export type Folded = {
+    reached: boolean[]
+    goes: int[]
+    // What is known of each local on the platform: a flag (a comparison with `system.os`), a number
+    // (the tag of its variant).
+    flags: Option[boolean][]
+    numbers: Option[int][]
+}
+
+// The globals `system.os` and `system.architecture` (-1 for none).
+export type Platformed = {
+    system: int
+    architecture: int
+}
+
+// What is known of a local on the platform (each local given one value only).
+type Known = {
+    // The global whose value it is (`system.os` or `system.architecture`), or -1.
+    system: int[]
+    numbers: Option[int][]
+    flags: Option[boolean][]
+    // A record of a variant without fields, made there.
+    variants: int[]
+}
+
+// `routine` on the platform `platform`, the globals being `globals`.
+export function foldFor(routine: IrFunction, globals: Platformed, platform: int): Folded {
+    immut count = routine.blocks.length()
+    mut goes: int[] = []
+
+    for block in range(count) {
+        goes.push(-1)
+    }
+
+    mut flags: Option[boolean][] = []
+    mut numbers: Option[int][] = []
+
+    if (globals.system >= 0 or globals.architecture >= 0) {
+        immut known = facts(routine, globals, platform)
+        flags = known.flags
+        numbers = known.numbers
+
+        for block in range(count) {
+            match (routine.blocks[block].terminator) {
+                BranchT(condition, thenBlock, elseBlock) => {
+                    match (flagOf(known, condition)) {
+                        Some(flag) => goes[block] = if (flag) { thenBlock } else { elseBlock }
+                        None => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // The blocks reached from the first.
+    mut reached: boolean[] = []
+
+    for block in range(count) {
+        reached.push(false)
+    }
+
+    mut pending: int[] = if (count > 0) { [0] } else { [] }
+
+    while (pending.length() > 0) {
+        immut block = pending.pop()
+
+        match (block) {
+            Some(current) => {
+                if (reached[current]) { continue }
+
+                reached[current] = true
+                immut next = if (goes[current] >= 0) { [goes[current]] } else { successors(routine.blocks[current].terminator) }
+
+                for target in next {
+                    if (not reached[target]) { pending.push(target) }
+                }
+            }
+            None => {}
+        }
+    }
+
+    return { reached: reached, goes: goes, flags: flags, numbers: numbers }
+}
+
+// Whether the function reads `system.os` or `system.architecture` (only then can its blocks depend on
+// the platform).
+export function readsSystem(routine: IrFunction, globals: Platformed): boolean {
+    if (globals.system < 0 and globals.architecture < 0) { return false }
+
+    for block in routine.blocks {
+        for instruction in block.instructions {
+            match (instruction) {
+                CopyIns(_, GlobalOp(id)) => {
+                    if (isPlatformGlobal(globals, id)) { return true }
+                }
+                BinaryIns(_, _, GlobalOp(id), _, _) => {
+                    if (isPlatformGlobal(globals, id)) { return true }
+                }
+                BinaryIns(_, _, _, GlobalOp(id), _) => {
+                    if (isPlatformGlobal(globals, id)) { return true }
+                }
+                UnaryIns(_, _, GlobalOp(id), _) => {
+                    if (isPlatformGlobal(globals, id)) { return true }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    return false
+}
+
+function isPlatformGlobal(globals: Platformed, id: int): boolean {
+    return id >= 0 and (id == globals.system or id == globals.architecture)
+}
+
+// The variant of a platform global on the platform.
+function variantOn(globals: Platformed, id: int, platform: int): int {
+    return if (id == globals.system) { platform / architectureCount } else { platform % architectureCount }
+}
+
+function facts(routine: IrFunction, globals: Platformed, platform: int): Known {
+    immut locals = routine.locals.length()
+    mut writes: int[] = []
+    mut known: Known = { system: [], numbers: [], flags: [], variants: [] }
+
+    for local in range(locals) {
+        writes.push(0)
+        known.system.push(-1)
+        known.numbers.push(None)
+        known.flags.push(None)
+        known.variants.push(-1)
+    }
+
+    for block in routine.blocks {
+        for instruction in block.instructions {
+            for local in changes(instruction) {
+                writes[local] += 1
+            }
+        }
+    }
+
+    // Until nothing changes (a value is known once what it is made from is).
+    mut changed = true
+
+    while (changed) {
+        changed = false
+
+        for block in routine.blocks {
+            for instruction in block.instructions {
+                immut dest = match (instruction) {
+                    CopyIns(LocalPlace(id), _) => id
+                    UnaryIns(id, _, _, _) => id
+                    BinaryIns(id, _, _, _, _) => id
+                    RecordNewIns(id, _, _) => id
+                    _ => continue
+                }
+
+                if (writes[dest] != 1) { continue }
+
+                immut before = describe(known, dest)
+
+                match (instruction) {
+                    CopyIns(_, GlobalOp(id)) => {
+                        if (isPlatformGlobal(globals, id)) { known.system[dest] = id }
+                    }
+                    CopyIns(_, value) => {
+                        known.system[dest] = globalOf(known, value, globals)
+
+                        known.numbers[dest] = numberOf(known, value)
+                        known.flags[dest] = flagOf(known, value)
+
+                        match (value) {
+                            LocalOp(source) => known.variants[dest] = known.variants[source]
+                            _ => {}
+                        }
+                    }
+                    RecordNewIns(_, variant, fields) => {
+                        if (fields.length() == 0) { known.variants[dest] = variant }
+                    }
+                    UnaryIns(_, 'RecordTag', value, _) => {
+                        immut id = globalOf(known, value, globals)
+
+                        if (id >= 0) { known.numbers[dest] = Some(variantOn(globals, id, platform)) }
+                    }
+                    UnaryIns(_, 'Not', value, _) => {
+                        match (flagOf(known, value)) {
+                            Some(flag) => known.flags[dest] = Some(not flag)
+                            None => {}
+                        }
+                    }
+                    BinaryIns(_, op, left, right, _) => {
+                        immut equal = op.endsWith('(Equal)')
+
+                        if (op.startsWith('IntCompare(') and (equal or op.endsWith('(NotEqual)'))) {
+                            match (numberOf(known, left)) {
+                                Some(a) => {
+                                    match (numberOf(known, right)) {
+                                        Some(b) => known.flags[dest] = Some((a == b) == equal)
+                                        None => {}
+                                    }
+                                }
+                                None => {}
+                            }
+                        }
+
+                        if (op.startsWith('RecordCompare(') and (equal or op.endsWith('(NotEqual)'))) {
+                            immut leftGlobal = globalOf(known, left, globals)
+                            immut rightGlobal = globalOf(known, right, globals)
+                            immut id = if (leftGlobal >= 0) { leftGlobal } else { rightGlobal }
+                            immut variant = if (leftGlobal >= 0) { variantOf(known, right) } else { if (rightGlobal >= 0) { variantOf(known, left) } else { -1 } }
+
+                            if (variant >= 0) { known.flags[dest] = Some((variant == variantOn(globals, id, platform)) == equal) }
+                        }
+                    }
+                    _ => {}
+                }
+
+                if (describe(known, dest) != before) { changed = true }
+            }
+        }
+    }
+
+    return known
+}
+
+// What is known of a local, as text (to see whether it changed).
+function describe(known: Known, local: int): string {
+    return `${known.system[local]} ${known.numbers[local]} ${known.flags[local]} ${known.variants[local]}`
+}
+
+// The platform global an operand is the value of, or -1.
+function globalOf(known: Known, value: Operand, globals: Platformed): int {
+    return match (value) {
+        GlobalOp(id) => if (isPlatformGlobal(globals, id)) { id } else { -1 }
+        LocalOp(id) => known.system[id]
+        _ => -1
+    }
+}
+
+function numberOf(known: Known, value: Operand): Option[int] {
+    return match (value) {
+        IntOp(number) => Some(number)
+        LocalOp(id) => known.numbers[id]
+        _ => None
+    }
+}
+
+function flagOf(known: Known, value: Operand): Option[boolean] {
+    return match (value) {
+        BoolOp(flag) => Some(flag)
+        LocalOp(id) => known.flags[id]
+        _ => None
+    }
+}
+
+function variantOf(known: Known, value: Operand): int {
+    return match (value) {
+        LocalOp(id) => known.variants[id]
+        _ => -1
+    }
+}
+
+// The globals of the platform in a program.
+export function platformGlobals(program: IrProgram): Platformed {
+    return { system: program.systemGlobal, architecture: program.architectureGlobal }
+}
+
+// The functions a program may call on the platform `platform` (-1: on any, every branch kept):
+// from `main`, the functions C calls and the `display` methods C shows values with, through the
+// calls, closures and drops of the blocks reached there.
+export function reachableFunctions(program: IrProgram, platform: int): boolean[] {
+    immut globals = platformGlobals(program)
+    immut count = program.functions.length()
+    mut reached: boolean[] = []
+
+    for id in range(count) {
+        reached.push(false)
+    }
+
+    mut pending: int[] = [program.main]
+
+    for found in program.forC {
+        pending.push(found.function)
+    }
+
+    for record in program.records {
+        match (record.display) {
+            Some(code) => pending.push(code)
+            None => {}
+        }
+    }
+
+    while (pending.length() > 0) {
+        immut id = match (pending.pop()) {
+            Some(next) => next
+            None => break
+        }
+
+        if (reached[id]) { continue }
+
+        reached[id] = true
+        immut routine = program.functions[id]
+        immut blocks = if (platform >= 0 and readsSystem(routine, globals)) { foldFor(routine, globals, platform).reached } else { [] }
+
+        for block in range(routine.blocks.length()) {
+            if (blocks.length() > 0 and not blocks[block]) { continue }
+
+            for instruction in routine.blocks[block].instructions {
+                match (instruction) {
+                    CallIns(_, callee, _, _, _) => pending.push(callee)
+                    MakeClosureIns(_, code, _) => pending.push(code)
+                    DropIns(_, dropper) => pending.push(dropper)
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    return reached
+}

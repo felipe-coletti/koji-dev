@@ -28,6 +28,9 @@ Welcome to the **Koji documentation**. Here you will find the syntax, the types,
 -   [Error Handling](error-handling.md)
 -   [Values and Memory](memory.md)
 -   [Modules and Imports](modules-and-imports.md)
+-   [Foreign Functions](ffi.md)
+-   [Packages](packages.md)
+-   [Testing](testing.md)
 
 ### Reference
 

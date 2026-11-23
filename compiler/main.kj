@@ -7,31 +7,49 @@ import system
 import time
 import { tokenize, dump } from 'lexer.kj'
 import parser from 'parser.kj'
-import { dumpTypes, check, checkLibrary, Program } from 'checker.kj'
-import { lower } from 'lower.kj'
+import { dumpTypes, check, checkLibrary } from 'checker.kj'
+import { lower, lowerTests } from 'lower.kj'
 import { IrProgram, programText } from 'ir.kj'
-import { generate } from 'cgen.kj'
+import { generateNative } from 'native.kj'
+import { inlineSmall, targetPlatform } from 'inline.kj'
+import { machArchive } from 'macho.kj'
+import { machArchiveObjects, linkMach } from 'machlink.kj'
+import { archive, archiveNamed, archiveObjects, linkExecutable, sharedName, sharedSymbols } from 'linker.kj'
+import { coffGlobals } from 'coff.kj'
+import { linkWindows } from 'pelink.kj'
+import { serve } from 'lsp.kj'
+import { initModule, addModule, updateModules } from 'packages.kj'
+
+// The version of Koji: of the language, its standard library and this compiler.
+immut version = '0.1.0'
 
 immut usage = [
-    'kojic - the Koji programming language (the compiler written in Koji)',
+    `kojic ${version} - the Koji programming language (the compiler written in Koji)`,
     '',
     'Usage:',
     '    kojic run <file.kj> [arguments]   check, compile and run a program',
     '    kojic check <file.kj>             only check syntax and types',
+    '    kojic test [file.kj | dir]...     run the tests (`test` blocks) of files (default: .)',
+    '    kojic lsp                         a language server for editors (on stdin and stdout)',
     '    kojic build <file.kj> [options]   compile a program to an executable',
     '        -o <output>                   the executable (default: the file name without .kj)',
-    '        --emit c                      write the generated C instead',
     '        --emit ir                     write the intermediate representation instead',
+    '        --emit object                 write the object file of the native backend instead',
     '    kojic dump tokens <file.kj>       show the tokens of a file (for comparing compilers)',
     '    kojic dump ast <file.kj>          show the syntax tree of a file',
     '    kojic dump types <file.kj>        show what the checker finds (types, moves...)',
     '    kojic dump ir <file.kj>           show the intermediate representation',
-    '    kojic dump c <file.kj>            show the generated C',
-    '    kojic dump library                show the C of the library of the runtime written in Koji',
+    '    kojic dump inlined <file.kj>      the same, as the native backend gets it (inlined)',
+    '    kojic dump inlined library        its IR, as the native backend gets it',
+    '    kojic init <module>               make a koji.mod for the module (github.com/ana/agenda)',
+    '    kojic add <module>[@version]      require a module, at its latest version or the one given',
+    '    kojic update [module]             require the latest versions of the modules (or of one)',
+    '    kojic version                     show the version of Koji',
     '    kojic help                        show this message',
     '',
     'To build an executable, kojic needs the runtime library (libkoji_runtime.a): next to kojic,',
-    'or where the environment variable KOJI_RUNTIME says. KOJI_CC names the C compiler (default: cc).'
+    'or where the environment variable KOJI_RUNTIME says. KOJI_TARGET compiles for another platform',
+    '(x64, arm64, macos-x64, macos-arm64, windows-x64).'
 ].join('\n')
 
 // The text of a system error (the one of the runtime).
@@ -85,15 +103,16 @@ function dumpStage(stage: string, name: string) {
         'ir' => {
             match (lowered(name)) {
                 Ok(program) => print(programText(program).join('\n'))
-                Err(message) => print(`error: ${message}`)
+                Err(message) => print(`error: ${message.split('\n')[0]}`)
             }
 
             return
         }
-        'c' => {
+        // The IR the native backend generates code from: small functions inlined (inline.kj).
+        'inlined' => {
             match (lowered(name)) {
-                Ok(program) => print(generate(program).join('\n'))
-                Err(message) => print(`error: ${message}`)
+                Ok(program) => print(programText(inlineSmall(program)).join('\n'))
+                Err(message) => print(`error: ${message.split('\n')[0]}`)
             }
 
             return
@@ -135,7 +154,7 @@ type Build = {
     emit: string
 }
 
-// The options of `kojic build <file.kj> [-o <output>] [--emit c|ir]`.
+// The options of `kojic build <file.kj> [-o <output>] [--emit c|ir|object]`.
 function buildOptions(args: string[]): Build {
     mut source: Option[string] = None
     mut output: Option[string] = None
@@ -152,14 +171,20 @@ function buildOptions(args: string[]): Build {
             continue
         }
 
+        // The native backend (compiler/native.kj): the only one (as before, for scripts).
+        if (arg == '--native') {
+            emit = 'native'
+            continue
+        }
+
         if (arg == '--emit') {
-            if (i < args.length() and (args[i] == 'c' or args[i] == 'ir')) {
+            if (i < args.length() and (args[i] == 'ir' or args[i] == 'object')) {
                 emit = args[i]
                 i += 1
                 continue
             }
 
-            printError(`--emit takes 'c' or 'ir'\n\n${usage}`)
+            printError(`--emit takes 'ir' or 'object'\n\n${usage}`)
 
             system.exit(2)
         }
@@ -188,7 +213,6 @@ function buildOptions(args: string[]): Build {
     immut chosen = match (output) {
         Some(chosen) => chosen
         None => match (emit) {
-            'c' => `${stem}.c`
             'ir' => `${stem}.ir`
             _ => stem
         }
@@ -197,8 +221,10 @@ function buildOptions(args: string[]): Build {
 }
 
 // The libraries a program needs from the system besides the C library: the mathematics (`math.h`).
+// The libraries of the system that programs link: the mathematics of C, and the threads that help
+// tasks with the calls that block (in the C library itself on recent systems).
 function systemLibraries(): string[] {
-    return ['-lm']
+    return ['-lm', '-lpthread']
 }
 
 function variable(name: string, otherwise: string): string {
@@ -211,7 +237,9 @@ function variable(name: string, otherwise: string): string {
 // A new path in the temporary directory, ending with `extension`: named after the time, with a
 // number after it if that name is taken.
 function temporary(extension: string): string {
-    immut directory = variable('TMPDIR', '/tmp')
+    // TMPDIR; on Windows, TEMP or TMP (which have no /tmp).
+    immut fallback = if (system.os == system.Windows) { variable('TEMP', variable('TMP', '.')) } else { '/tmp' }
+    immut directory = variable('TMPDIR', fallback)
     immut unique = string(time.now()).replace('.', '')
     mut name = path.join(directory, `kojic-${unique}${extension}`)
     mut count = 1
@@ -246,35 +274,323 @@ function runtimeLibrary(): Option[string] {
     }
 }
 
-// Compiles the C of a program to `output` with the system's C compiler, linked with the runtime.
-function compileC(source: string, output: string): Result[void, string] {
+// The executable of the machine code of the native backend: its object file, linked with the runtime
+// by the linker of the system (the C compiler only links: there is no C).
+function linkNative(program: IrProgram, output: string): Result[void, string] {
+    immut object = match (generateNative(program)) {
+        Ok(bytes) => bytes
+        Err(message) => return Err(`compile error: ${message}`)
+    }
     immut runtime = match (runtimeLibrary()) {
         Some(runtime) => runtime
         None => return Err('compile error: the runtime library (libkoji_runtime.a) is not next to kojic: set KOJI_RUNTIME to its path')
     }
-    // A file of its own in the temporary directory, removed after.
-    immut c = temporary('.c')
-    writeFile(c, source)?
-    immut compiler = variable('KOJI_CC', 'cc')
-    mut args = ['-O2', '-o', output, c, runtime]
+
+    // Koji's linker (linker.kj, machlink.kj, pelink.kj), with the shared libraries of the blocks
+    // `foreign`; the system's (KOJI_CC) when it cannot link the objects (KOJI_LINKER=koji to see
+    // why: a library found only as an archive, say), or with KOJI_LINKER=system.
+    immut chosen = variable('KOJI_LINKER', '')
+
+    // The libraries it links always (the C library, its mathematics and its threads) may be named.
+    mut foreign: string[] = []
+
+    for library in program.libraries {
+        if (not (library in ['c', 'm', 'pthread'])) { foreign.push(library) }
+    }
+
+    immut others = foreign.length() > 0
+
+    // For macOS, its linker of Mach-O (machlink.kj).
+    if (not others and chosen != 'system' and targetPlatform() / 3 == 1) {
+        match (linkMachOwn(object, runtime, output)) {
+            Ok(_) => return Ok()
+            Err(message) => {
+                if (chosen == 'koji') { return Err(`compile error: ${message}`) }
+            }
+        }
+    }
+
+    // For Windows, its linker of PE (pelink.kj), the only one: the functions of a block `foreign`
+    // from the DLL of its library (`foreign 'user32'`: user32.dll).
+    if (targetPlatform() / 3 == 2) {
+        mut dlls: Map[string, string] = [:]
+
+        for each in program.externs {
+            if (each.library == '' or each.library in ['c', 'm', 'pthread']) { continue }
+
+            dlls[each.symbol] = if (each.library.lower().endsWith('.dll')) { each.library } else { `${each.library}.dll` }
+        }
+
+        return linkWindowsOwn(object, runtime, output, dlls)
+    }
+
+    if (chosen != 'system' and targetPlatform() / 3 != 1) {
+        match (linkOwn(object, runtime, output, foreign)) {
+            Ok(_) => return Ok()
+            Err(message) => {
+                if (chosen == 'koji') { return Err(`compile error: ${message}`) }
+            }
+        }
+    }
+
+    immut objectPath = temporary('.o')
+
+    match (writeBytes(objectPath, object)) {
+        Ok(_) => {}
+        Err(message) => return Err(message)
+    }
+
+    immut linker = variable('KOJI_CC', 'cc')
+    mut args = ['-o', output, objectPath, runtime]
+
+    for library in program.libraries {
+        args.push(`-l${library}`)
+    }
 
     for library in systemLibraries() {
         args.push(library)
     }
 
-    immut result = system.capture(compiler, args)
-    file.remove(c)
+    immut result = system.capture(linker, args)
+    file.remove(objectPath)
 
     return match (result) {
-        Ok(run) => {
-            if (run.status == 0) {
-                Ok()
-            } else {
-                Err(`compile error: the C compiler '${compiler}' failed:\n${run.stderr.trim()}`)
+        Ok(run) => if (run.status == 0) { Ok() } else { Err(`compile error: the linker '${linker}' failed:\n${run.stderr.trim()}`) }
+        Err(_) => Err(`compile error: cannot run the linker '${linker}' (set KOJI_CC to choose another one)`)
+    }
+}
+
+// The executable of the object of a program and of the runtime library, by Koji's linker, with the
+// libraries of C of the system: the C library and its mathematics (and its threads, on systems
+// where they are a library of their own).
+// A program for macOS by Koji's linker of Mach-O: the object and those of the archive of the runtime.
+function linkMachOwn(object: byte[], runtime: string, output: string): Result[void, string] {
+    immut library = match (file.open(runtime, file.Read)) {
+        Ok(opened) => match (opened.readBytes()) {
+            Ok(bytes) => bytes
+            Err(error) => return Err(`cannot read '${runtime}': ${ioMessage(error)}`)
+        }
+        Err(error) => return Err(`cannot read '${runtime}': ${ioMessage(error)}`)
+    }
+    mut objects = [object]
+
+    for member in machArchiveObjects(library)? {
+        objects.push(member)
+    }
+
+    immut executable = linkMach(objects)?
+    writeBytes(output, executable)?
+    return match (file.setPermissions(output, 0x1ED)) {
+        Ok(_) => Ok()
+        Err(error) => Err(`cannot make '${output}' executable: ${ioMessage(error)}`)
+    }
+}
+
+function linkWindowsOwn(object: byte[], runtime: string, output: string, dlls: Map[string, string]): Result[void, string] {
+    immut library = match (file.open(runtime, file.Read)) {
+        Ok(opened) => match (opened.readBytes()) {
+            Ok(bytes) => bytes
+            Err(error) => return Err(`cannot read '${runtime}': ${ioMessage(error)}`)
+        }
+        Err(error) => return Err(`cannot read '${runtime}': ${ioMessage(error)}`)
+    }
+    mut objects = [object]
+
+    for member in archiveObjects(library)? {
+        objects.push(member)
+    }
+
+    immut executable = match (linkWindows(objects, dlls)) {
+        Ok(bytes) => bytes
+        Err(message) => return Err(`compile error: ${message}`)
+    }
+    return writeBytes(output, executable)
+}
+
+// The shared library of a block `foreign` (`foreign 'sqlite3'`: libsqlite3.so, in the directories of
+// libraries of the system or of LIBRARY_PATH), through the script of the linker it may be (as
+// libc.so is): its path, or '' when there is none.
+function sharedLibrary(name: string, directories: string[]): string {
+    mut all = directories
+
+    match (system.env('LIBRARY_PATH')) {
+        Some(paths) => {
+            for each in paths.split(':') {
+                if (each != '') { all.push(each) }
             }
         }
-        Err(_) => Err(`compile error: cannot run the C compiler '${compiler}' (set KOJI_CC to choose another one)`)
+        None => {}
     }
+
+    for directory in all + ['/usr/local/lib'] {
+        immut found = path.join(directory, `lib${name}.so`)
+
+        if (not file.exists(found)) { continue }
+
+        immut bytes = match (file.open(found, file.Read)) {
+            Ok(opened) => match (opened.readBytes()) {
+                Ok(read) => read
+                Err(_) => continue
+            }
+            Err(_) => continue
+        }
+
+        if (bytes.length() >= 4 and bytes[0] == 0x7F and bytes[1] == 0x45) { return found }
+
+        // A script: the first path of a shared library it names.
+        match (file.open(found, file.Read)) {
+            Ok(opened) => match (opened.read()) {
+                Ok(text) => {
+                    for word in text.replace('(', ' ').replace(')', ' ').replace('\n', ' ').split(' ') {
+                        if (word.startsWith('/') and '.so' in word and file.exists(word)) { return word }
+                    }
+                }
+                Err(_) => {}
+            }
+            Err(_) => {}
+        }
+    }
+
+    return ''
+}
+
+function linkOwn(object: byte[], runtime: string, output: string, foreign: string[]): Result[void, string] {
+    immut library = match (file.open(runtime, file.Read)) {
+        Ok(opened) => match (opened.readBytes()) {
+            Ok(bytes) => bytes
+            Err(error) => return Err(`cannot read '${runtime}': ${ioMessage(error)}`)
+        }
+        Err(error) => return Err(`cannot read '${runtime}': ${ioMessage(error)}`)
+    }
+    mut objects = [object]
+
+    for member in archiveObjects(library)? {
+        objects.push(member)
+    }
+
+    // The libraries, and the symbols they define (found in the directories of libraries of the
+    // system).
+    mut libraries: string[] = []
+    mut provided: Set[string] = Set.from([])
+    mut unchecked = false
+
+    for name in ['libc.so.6', 'libm.so.6', 'libpthread.so.0'] {
+        mut found = ''
+
+        // Those of arm64 (on another system, those of its tools for arm64), or of x86-64.
+        immut directories = if (targetPlatform() == 1) { ['/lib/aarch64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/aarch64-linux-gnu/lib'] } else { ['/lib/x86_64-linux-gnu', '/usr/lib/x86_64-linux-gnu', '/lib64', '/usr/lib64', '/lib', '/usr/lib'] }
+
+        for directory in directories {
+            if (found == '' and file.exists(path.join(directory, name))) { found = path.join(directory, name) }
+        }
+
+        // The threads may be in the C library itself (glibc 2.34 and later). Libraries that are
+        // not here (those of another processor, when Koji builds for it): named all the same, and
+        // the symbols the program needs from them left to the dynamic loader to find.
+        if (found == '') {
+            if (name != 'libpthread.so.0') {
+                libraries.push(name)
+                unchecked = true
+            }
+
+            continue
+        }
+
+        immut bytes = match (file.open(found, file.Read)) {
+            Ok(opened) => match (opened.readBytes()) {
+                Ok(read) => read
+                Err(error) => return Err(`cannot read '${found}': ${ioMessage(error)}`)
+            }
+            Err(error) => return Err(`cannot read '${found}': ${ioMessage(error)}`)
+        }
+
+        for symbol in sharedSymbols(bytes)? {
+            provided.add(symbol)
+        }
+
+        libraries.push(name)
+    }
+
+    // The libraries of the blocks `foreign`, by their names for the dynamic loader.
+    immut systemDirectories = if (targetPlatform() == 1) { ['/lib/aarch64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/aarch64-linux-gnu/lib'] } else { ['/lib/x86_64-linux-gnu', '/usr/lib/x86_64-linux-gnu', '/lib64', '/usr/lib64', '/lib', '/usr/lib'] }
+
+    for name in foreign {
+        immut found = sharedLibrary(name, systemDirectories)
+
+        if (found == '') { return Err(`cannot find the shared library of 'foreign \'${name}\'' (lib${name}.so)`) }
+
+        immut bytes = match (file.open(found, file.Read)) {
+            Ok(opened) => match (opened.readBytes()) {
+                Ok(read) => read
+                Err(error) => return Err(`cannot read '${found}': ${ioMessage(error)}`)
+            }
+            Err(error) => return Err(`cannot read '${found}': ${ioMessage(error)}`)
+        }
+
+        for symbol in sharedSymbols(bytes)? {
+            provided.add(symbol)
+        }
+
+        immut soname = sharedName(bytes)
+        immut needed = if (soname != '') { soname } else { match (path.name(found)) {
+            Some(file) => file
+            None => found
+        } }
+
+        if (not (needed in libraries)) { libraries.push(needed) }
+    }
+
+    immut executable = linkExecutable(objects, libraries, provided, unchecked)?
+    writeBytes(output, executable)?
+
+    return match (file.setPermissions(output, 0x1ED)) {
+        Ok(_) => Ok()
+        Err(error) => Err(`cannot make '${output}' executable: ${ioMessage(error)}`)
+    }
+}
+
+function buildLibrary(output: string): Result[void, string] {
+    immut checked = checkLibrary()?
+    immut lowered = lower(checked)?
+    immut object = match (generateNative(lowered)) {
+        Ok(bytes) => bytes
+        Err(message) => return Err(`compile error: ${message}`)
+    }
+    // An archive of the object, with the table of its symbols (linker.kj).
+    // For macOS, an archive of BSD (its linker reads no other).
+    // For Windows, the table of the symbols of its object of COFF.
+    if (targetPlatform() / 3 == 2) { return writeBytes(output, archiveNamed([object], [coffGlobals(object)])) }
+
+    return writeBytes(output, if (targetPlatform() / 3 == 1) { machArchive([object]) } else { archive([object]) })
+}
+
+function writeBytes(name: string, bytes: byte[]): Result[void, string] {
+    return match (writeBytesTo(name, bytes)) {
+        Ok(_) => Ok()
+        Err(error) => Err(`compile error: cannot write '${name}': ${ioMessage(error)}`)
+    }
+}
+
+function writeBytesTo(name: string, bytes: byte[]): Result[void, file.FileError] {
+    immut out = file.open(name, file.Write)?
+    return out.writeBytes(bytes)
+}
+
+// Whether the native backend generates the code of this platform.
+function nativeHere(): boolean {
+    return match (system.os) {
+        Linux => system.architecture == system.X64 or system.architecture == system.Arm64
+        MacOS => system.architecture == system.X64 or system.architecture == system.Arm64
+        Windows => system.architecture == system.X64
+        _ => false
+    }
+}
+
+// The executable of a program, by the backend of the platform.
+function executable(program: IrProgram, output: string): Result[void, string] {
+    if (not nativeHere()) { return Err('compile error: Koji builds executables for Linux, macOS and Windows on x86-64 and arm64 (Windows on x86-64 only): set KOJI_TARGET to one of them') }
+
+    return linkNative(program, output)
 }
 
 // `kojic build`: the executable, the C or the IR of a program.
@@ -289,8 +605,12 @@ function build(args: string[]) {
     }
     immut result = match (options.emit) {
         'ir' => writeFile(options.output, text(programText(program)))
-        'c' => writeFile(options.output, text(generate(program)))
-        _ => compileC(text(generate(program)), options.output)
+        'native' => linkNative(program, options.output)
+        'object' => match (generateNative(program)) {
+            Ok(bytes) => writeBytes(options.output, bytes)
+            Err(message) => Err(`compile error: ${message}`)
+        }
+        _ => executable(program, options.output)
     }
 
     match (result) {
@@ -312,9 +632,9 @@ function runProgram(args: string[]) {
             system.exit(1)
         }
     }
-    immut executable = temporary('')
+    immut built = temporary(if (system.os == system.Windows) { '.exe' } else { '' })
 
-    match (compileC(text(generate(program)), executable)) {
+    match (executable(program, built)) {
         Ok(_) => {}
         Err(message) => {
             printError(message)
@@ -322,39 +642,248 @@ function runProgram(args: string[]) {
         }
     }
 
-    immut code = match (system.run(executable, args[1..])) {
+    immut code = match (system.run(built, args[1..])) {
         Ok(code) => code
         Err(error) => {
             printError(`cannot run the program: ${error}`)
             1
         }
     }
-    file.remove(executable)
+    file.remove(built)
     // A program stopped by a signal has no exit code.
     system.exit(if (code < 0) { 1 } else { code })
 }
 
+// The `.kj` files of `name`: itself, or those of a directory and its directories (sorted; those
+// whose names start with a dot left out).
+function sourceFiles(name: string, mut files: string[]) {
+    match (file.list(name)) {
+        Ok(entries) => {
+            for entry in entries {
+                if (entry.startsWith('.')) { continue }
+
+                immut inner = path.join(name, entry)
+
+                if (entry.endsWith('.kj')) {
+                    if (file.list(inner) is Err) { files.push(inner) }
+                } else {
+                    if (file.list(inner) is Ok) { sourceFiles(inner, mut files) }
+                }
+            }
+        }
+        Err(_) => files.push(name)
+    }
+}
+
+// Whether a file has tests: `test 'name' { ... }` at its top level (a syntax error is found when
+// it is checked).
+function hasTests(source: string): boolean {
+    match (parser.parse(source)) {
+        Ok(statements) => {
+            for statement in statements {
+                match (unlocatedDeclaration(statement)) {
+                    Some(name) => {
+                        if (parser.isTestName(name)) { return true }
+                    }
+                    None => {}
+                }
+            }
+
+            return false
+        }
+        Err(_) => return true
+    }
+}
+
+// The name of a function declared by a statement.
+function unlocatedDeclaration(node: parser.Node): Option[string] {
+    return match (node.kind) {
+        Located(_, inner) => unlocatedDeclaration(inner)
+        FunctionDecl(name, _, _, _, _, _) => Some(name)
+        _ => None
+    }
+}
+
+// The name of a test as written, from the name of its function (`test 'it\'s'` is `it's`).
+function testDisplay(name: string): string {
+    immut chars = name.chars()
+    mut text = ''
+    mut i = 6
+
+    while (i < chars.length() - 1) {
+        mut c = chars[i]
+
+        if (c == '\\' and i + 1 < chars.length() - 1) {
+            i += 1
+            c = match (chars[i]) {
+                'n' => '\n'
+                't' => '\t'
+                'r' => '\r'
+                other => other
+            }
+        }
+
+        text += string(c)
+        i += 1
+    }
+
+    return text
+}
+
+// A text indented by four spaces, line by line (the line breaks at its end left out).
+function indented(text: string): string {
+    mut lines: string[] = []
+
+    mut end = text.length()
+
+    while (end > 0 and (text[end - 1] == '\n' or text[end - 1] == '\r')) {
+        end -= 1
+    }
+
+    for line in text[..end].split('\n') {
+        lines.push(`    ${line}`)
+    }
+
+    return lines.join('\n')
+}
+
+// Seconds with two decimals (`0.25`).
+function secondsText(seconds: decimal): string {
+    immut hundredths = int(seconds * 100)
+    immut rest = hundredths % 100
+    return `${hundredths / 100}.${if (rest < 10) { '0' } else { '' }}${rest}`
+}
+
+// `kojic test [paths]`: the tests of each file, each in a process of its own (the file's top-level
+// statements first, as an import runs them), so that a failure or a panic stops only its test and
+// each one starts from the same state. The output of a test is shown when it fails.
+function testCommand(args: string[]) {
+    immut started = time.monotonic()
+    mut files: string[] = []
+
+    immut paths = if (args.length() == 0) { ['.'] } else { args }
+
+    for each in paths {
+        sourceFiles(each, mut files)
+    }
+
+    mut passed = 0
+    mut failed = 0
+    mut broken = 0
+
+    for name in files {
+        immut source = match (readSource(name)) {
+            Ok(text) => text
+            Err(error) => {
+                print(`FAIL  ${name}: cannot read it: ${ioMessage(error)}`)
+                broken += 1
+                continue
+            }
+        }
+
+        if (not hasTests(source)) { continue }
+
+        immut program = match (check(name)) {
+            Ok(checked) => lowerTests(checked)
+            Err(message) => Err(message)
+        }
+        immut lowered = match (program) {
+            Ok(found) => found
+            Err(message) => {
+                print(`FAIL  ${name}\n${indented(message)}`)
+                broken += 1
+                continue
+            }
+        }
+        immut built = temporary(if (system.os == system.Windows) { '.exe' } else { '' })
+
+        match (executable(lowered, built)) {
+            Ok(_) => {}
+            Err(message) => {
+                print(`FAIL  ${name}\n${indented(message)}`)
+                broken += 1
+                continue
+            }
+        }
+
+        for i in range(lowered.tests.length()) {
+            immut title = `${name}: ${testDisplay(lowered.tests[i].name)}`
+
+            match (system.capture(built, [string(i)])) {
+                Ok(run) => {
+                    if (run.status == 0) {
+                        print(`ok    ${title}`)
+                        passed += 1
+                    } else {
+                        print(`FAIL  ${title}`)
+
+                        if (run.stderr.trim() != '') { print(indented(run.stderr)) }
+
+                        if (run.stdout.trim() != '') { print(`    output:\n${indented(indented(run.stdout))}`) }
+
+                        if (run.status < 0) { print('    stopped by a signal') }
+
+                        failed += 1
+                    }
+                }
+                Err(error) => {
+                    print(`FAIL  ${title}: cannot run it: ${error}`)
+                    failed += 1
+                }
+            }
+        }
+
+        file.remove(built)
+    }
+
+    immut seconds = time.monotonic() - started
+    mut summary = `${passed} passed, ${failed} failed`
+
+    if (broken > 0) { summary += `, ${broken} ${if (broken == 1) { 'file' } else { 'files' }} not built` }
+
+    if (passed + failed + broken == 0) { summary = 'no tests found' }
+
+    print(`\n${summary} (${secondsText(seconds)} s)`)
+    system.exit(if (failed + broken > 0) { 1 } else { 0 })
+}
+
 immut args = system.args()
 immut command = if (args.length() > 0) { args[0] } else { '' }
+
+if (command == 'test') { testCommand(args[1..]) }
+
+// The commands of packages (compiler/packages.kj).
+if (command in ['init', 'add', 'update'] and args.length() <= 2 and (args.length() == 2 or command == 'update')) {
+    immut done = match (command) {
+        'init' => initModule(args[1])
+        'add' => addModule(args[1])
+        _ => updateModules(if (args.length() == 2) { Some(args[1]) } else { None })
+    }
+
+    match (done) {
+        Ok(message) => print(message)
+        Err(message) => {
+            printError(`package error: ${message}`)
+            system.exit(1)
+        }
+    }
+
+    system.exit(0)
+}
+
+if (command == 'lsp' and args.length() == 1) { serve() }
 
 if (command == 'build') {
     build(args[1..])
     system.exit(0)
 }
 
-// The C of std/koji/ (but `koji:core`), which bootstrap/build.sh and build.rs compile into the
-// runtime library.
-if (command == 'dump' and args.length() == 2 and args[1] == 'library') {
-    match (checkLibrary()) {
-        Ok(program) => {
-            match (lower(program)) {
-                Ok(lowered) => print(generate(lowered).join('\n'))
-                Err(message) => {
-                    printError(message)
-                    system.exit(1)
-                }
-            }
-        }
+// `kojic library -o libkoji_runtime.a`: the runtime library, built natively (see "The library of the
+// runtime built by the compiler" in doc/design.md): the machine code of std/koji/ (but `koji:core`),
+// with `koji:prelude` and the code the backend writes for the runtime, alone in an archive.
+if (command == 'library' and args.length() == 3 and args[1] == '-o') {
+    match (buildLibrary(args[2])) {
+        Ok(_) => {}
         Err(message) => {
             printError(message)
             system.exit(1)
@@ -364,7 +893,20 @@ if (command == 'dump' and args.length() == 2 and args[1] == 'library') {
     system.exit(0)
 }
 
-if (command == 'dump' and args.length() == 3 and args[1] in ['tokens', 'ast', 'types', 'ir', 'c']) {
+// The IR of std/koji/ as the native backend gets it (`kojic library`).
+if (command == 'dump' and args.length() == 3 and args[1] == 'inlined' and args[2] == 'library') {
+    match (checkLibrary()) {
+        Ok(program) => match (lower(program)) {
+            Ok(lowered) => print(programText(inlineSmall(lowered)).join('\n'))
+            Err(message) => printError(message)
+        }
+        Err(message) => printError(message)
+    }
+
+    system.exit(0)
+}
+
+if (command == 'dump' and args.length() == 3 and args[1] in ['tokens', 'ast', 'types', 'ir', 'inlined']) {
     dumpStage(args[1], args[2])
     system.exit(0)
 }
@@ -377,6 +919,11 @@ if (command == 'check' and args.length() == 2) {
             system.exit(1)
         }
     }
+}
+
+if (args.length() == 1 and command in ['version', '--version', '-V']) {
+    print(`kojic ${version}`)
+    system.exit(0)
 }
 
 if (args.length() == 1 and command in ['help', '--help', '-h']) {
