@@ -425,24 +425,43 @@ export function runCases(source: string, building: boolean) {
     if (onWindows and not building) { windowsLibrary() }
 
     mut failed: string[] = []
+    // The programs that measure their time (`without valgrind`) run alone, after the others: run
+    // with others that compute, they would measure the others.
+    mut together: Case[] = []
+    mut alone: Case[] = []
+
+    for each in all {
+        if (each.valgrind) {
+            together.push(each)
+        } else {
+            alone.push(each)
+        }
+    }
+
     mut at = 0
 
-    while (at < all.length()) {
+    while (at < together.length()) {
         mut works: (() => string)[] = []
-        immut end = if (at + jobs < all.length()) { at + jobs } else { all.length() }
+        immut end = if (at + jobs < together.length()) { at + jobs } else { together.length() }
 
         for i in range(at, end) {
-            immut each = all[i]
+            immut each = together[i]
             works.push(() => runCase(each, building))
         }
 
         immut results = task.all(works)
 
         for i in range(results.length()) {
-            if (results[i] != '') { failed.push(`---- ${all[at + i].name}\n${results[i]}`) }
+            if (results[i] != '') { failed.push(`---- ${together[at + i].name}\n${results[i]}`) }
         }
 
         at = end
+    }
+
+    for each in alone {
+        immut result = runCase(each, building)
+
+        if (result != '') { failed.push(`---- ${each.name}\n${result}`) }
     }
 
     if (failed.length() > 0) {

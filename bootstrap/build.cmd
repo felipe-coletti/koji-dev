@@ -23,4 +23,11 @@ set KOJI_RUNTIME=
 echo building the runtime with kojic
 build\kojic.exe library -o build\libkoji_runtime.a || exit /b 1
 
+rem Then kojic linked with the runtime it built, so that it has nothing of the seed's.
+echo building kojic again, with its runtime
+set KOJI_RUNTIME=%CD%\build\libkoji_runtime.a
+build\kojic.exe build compiler/main.kj -o build\kojic3.exe || exit /b 1
+set KOJI_RUNTIME=
+move /y build\kojic3.exe build\kojic.exe > nul || exit /b 1
+
 echo done: build\kojic.exe, with build\libkoji_runtime.a next to it

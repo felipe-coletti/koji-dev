@@ -4,7 +4,19 @@ This guide shows how to build Koji, write a first program and run it.
 
 ## Requirements
 
-The Koji compiler, `kojic`, is written in Koji, and compiles programs to machine code (Linux on x86-64 and arm64, macOS on x86-64 and arm64, Windows on x86-64). Building it needs Linux on x86-64 or arm64 and `gzip`, or Windows on x86-64: no C compiler.
+The Koji compiler, `kojic`, is written in Koji, and compiles programs to machine code (Linux on x86-64 and arm64, macOS on x86-64 and arm64, Windows on x86-64). Building it needs `gzip` on Linux or macOS, or PowerShell on Windows: no C compiler.
+
+## Installing a release
+
+A release has a package for each platform (`koji-<version>-<platform>.tar.gz`, a `.zip` for Windows): `kojic` and the runtime library next to it. Unpack it and add its directory to your `PATH`:
+
+```sh
+tar -xzf koji-0.1.0-linux-x64.tar.gz
+export PATH=$PWD/koji-0.1.0-linux-x64:$PATH
+kojic version
+```
+
+On macOS, a downloaded executable is quarantined by the system: `xattr -d com.apple.quarantine koji-0.1.0-macos-arm64/kojic` lets it run (or build Koji from the repository, below).
 
 ## Building
 
@@ -18,7 +30,7 @@ bootstrap/build.sh
 
 The compiler is written in Koji, so it needs a compiler to be built: the script starts from an executable of the compiler for your platform (`bootstrap/seed/kojic-<platform>.gz`, the seed), which builds the runtime library and the compiler of `compiler/`, machine code and linking included.
 
-On Windows (x86-64), run `bootstrap\build.cmd` instead: it unpacks the seed for Windows with PowerShell and builds `build\kojic.exe` the same way.
+On macOS, the same script uses the seed for macOS. On Windows (x86-64), run `bootstrap\build.cmd` instead: it unpacks the seed for Windows with PowerShell and builds `build\kojic.exe` the same way.
 
 The compiler is created at `build/kojic`, and the runtime library at `build/libkoji_runtime.a`. `kojic` finds the runtime library next to itself; another one can be given in the environment variable `KOJI_RUNTIME`. To call it as `kojic` from anywhere, add `build` to your `PATH`:
 
@@ -92,7 +104,7 @@ kojic build hello.kj
 
 ## Editor Support
 
-`editors/vscode` is an extension of Visual Studio Code with the syntax highlighting of Koji and its language server: see its [README](../editors/vscode/README.md) to install it. Its grammar is a TextMate grammar, which other editors read too.
+[koji-vscode](https://github.com/koji-language/koji-vscode) is the extension of Visual Studio Code, with the syntax highlighting of Koji and its language server (`kojic lsp`). The grammar of the syntax, which other editors can use too, is `editors/textmate/koji.tmLanguage.json`.
 
 `kojic lsp` is the language server, for any editor that speaks the Language Server Protocol (VS Code, Neovim, Helix, Zed, Emacs...): it shows every error of a file as it is edited, the type of what is under the cursor, and goes to where a name is declared, in the file or in the module it comes from.
 

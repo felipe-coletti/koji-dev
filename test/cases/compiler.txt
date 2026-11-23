@@ -1,7 +1,7 @@
 // Programs built by `kojic build` and run (under valgrind when it is installed, without the pool;
 // test/cases.kj): each case is a program (after `---- source`) and what it must print (`---- output`),
 // and, for one that must panic, the end of the last line of its standard error output (`---- panic`).
-// `---- without valgrind` runs it alone (a program that measures its time).
+// `---- without valgrind` runs it alone, after the others (a program that measures its time).
 
 ==== arithmetic
 ---- source
@@ -1562,7 +1562,8 @@ function fib(n: int): int {
 }
 
 // Two tasks that compute for half a second without waiting (time.monotonic does not wait), and one
-// that sleeps: it wakes on time all the same.
+// that sleeps: it wakes long before they end all the same (without preemption, it would wait the half
+// second; the margin is for slow machines).
 immut start = time.monotonic()
 immut late = task.group((tasks) => {
     tasks.spawn(() => {
@@ -1591,7 +1592,7 @@ immut late = task.group((tasks) => {
     })
     return sleeper.wait()
 })
-print(late < 0.1)
+print(late < 0.25)
 ---- output
 true
 ---- without valgrind

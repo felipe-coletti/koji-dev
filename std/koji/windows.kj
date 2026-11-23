@@ -151,8 +151,10 @@ extern function koji_windows_closedir(directory: Address): CInt {
 }
 
 // `memmem`: the first place of the needle in the haystack, or none (that of the C library, but on
-// Windows).
+// Windows). An empty needle is at the start (glibc says so, macOS's says it is nowhere).
 extern function koji_find_bytes(haystack: Address, haystackSize: CSize, needle: Address, needleSize: CSize): Address {
+    if (needleSize == 0) { return haystack }
+
     return if (system.os == system.Windows) { windowsFind(haystack, haystackSize, needle, needleSize) } else { memmem(haystack, haystackSize, needle, needleSize) }
 }
 

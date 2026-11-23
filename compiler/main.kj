@@ -20,8 +20,11 @@ import { linkWindows } from 'pelink.kj'
 import { serve } from 'lsp.kj'
 import { initModule, addModule, updateModules } from 'packages.kj'
 
+// The version of Koji: of the language, its standard library and this compiler.
+immut version = '0.1.0'
+
 immut usage = [
-    'kojic - the Koji programming language (the compiler written in Koji)',
+    `kojic ${version} - the Koji programming language (the compiler written in Koji)`,
     '',
     'Usage:',
     '    kojic run <file.kj> [arguments]   check, compile and run a program',
@@ -41,6 +44,7 @@ immut usage = [
     '    kojic init <module>               make a koji.mod for the module (github.com/ana/agenda)',
     '    kojic add <module>[@version]      require a module, at its latest version or the one given',
     '    kojic update [module]             require the latest versions of the modules (or of one)',
+    '    kojic version                     show the version of Koji',
     '    kojic help                        show this message',
     '',
     'To build an executable, kojic needs the runtime library (libkoji_runtime.a): next to kojic,',
@@ -233,7 +237,9 @@ function variable(name: string, otherwise: string): string {
 // A new path in the temporary directory, ending with `extension`: named after the time, with a
 // number after it if that name is taken.
 function temporary(extension: string): string {
-    immut directory = variable('TMPDIR', '/tmp')
+    // TMPDIR; on Windows, TEMP or TMP (which have no /tmp).
+    immut fallback = if (system.os == system.Windows) { variable('TEMP', variable('TMP', '.')) } else { '/tmp' }
+    immut directory = variable('TMPDIR', fallback)
     immut unique = string(time.now()).replace('.', '')
     mut name = path.join(directory, `kojic-${unique}${extension}`)
     mut count = 1
@@ -466,6 +472,7 @@ function linkOwn(object: byte[], runtime: string, output: string, foreign: strin
     // system).
     mut libraries: string[] = []
     mut provided: Set[string] = Set.from([])
+    mut unchecked = false
 
     for name in ['libc.so.6', 'libm.so.6', 'libpthread.so.0'] {
         mut found = ''
@@ -477,11 +484,16 @@ function linkOwn(object: byte[], runtime: string, output: string, foreign: strin
             if (found == '' and file.exists(path.join(directory, name))) { found = path.join(directory, name) }
         }
 
-        // The threads may be in the C library itself (glibc 2.34 and later).
+        // The threads may be in the C library itself (glibc 2.34 and later). Libraries that are
+        // not here (those of another processor, when Koji builds for it): named all the same, and
+        // the symbols the program needs from them left to the dynamic loader to find.
         if (found == '') {
-            if (name == 'libpthread.so.0') { continue }
+            if (name != 'libpthread.so.0') {
+                libraries.push(name)
+                unchecked = true
+            }
 
-            return Err(`cannot find the library ${name}`)
+            continue
         }
 
         immut bytes = match (file.open(found, file.Read)) {
@@ -528,7 +540,7 @@ function linkOwn(object: byte[], runtime: string, output: string, foreign: strin
         if (not (needed in libraries)) { libraries.push(needed) }
     }
 
-    immut executable = linkExecutable(objects, libraries, provided)?
+    immut executable = linkExecutable(objects, libraries, provided, unchecked)?
     writeBytes(output, executable)?
 
     return match (file.setPermissions(output, 0x1ED)) {
@@ -620,7 +632,7 @@ function runProgram(args: string[]) {
             system.exit(1)
         }
     }
-    immut built = temporary('')
+    immut built = temporary(if (system.os == system.Windows) { '.exe' } else { '' })
 
     match (executable(program, built)) {
         Ok(_) => {}
@@ -783,7 +795,7 @@ function testCommand(args: string[]) {
                 continue
             }
         }
-        immut built = temporary('')
+        immut built = temporary(if (system.os == system.Windows) { '.exe' } else { '' })
 
         match (executable(lowered, built)) {
             Ok(_) => {}
@@ -907,6 +919,11 @@ if (command == 'check' and args.length() == 2) {
             system.exit(1)
         }
     }
+}
+
+if (args.length() == 1 and command in ['version', '--version', '-V']) {
+    print(`kojic ${version}`)
+    system.exit(0)
 }
 
 if (args.length() == 1 and command in ['help', '--help', '-h']) {

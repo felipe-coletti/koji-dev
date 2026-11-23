@@ -102,6 +102,66 @@ function f0 main(): Void
     goto b3
   b3:
     return
+==== examples/decimals.kj
+global g0: Decimal // a
+global g1: Decimal // b
+global g2: Decimal // c
+global g3: Float // x
+global g4: Float // y
+global g5: Float // z
+
+function f0 main(): Void
+    local l0: Decimal
+    local l1: Str
+    local l2: Str
+    local l3: Decimal
+    local l4: Str
+    local l5: Float
+    local l6: Str
+    local l7: Float
+    local l8: Str
+    local l9: Decimal
+    local l10: Str
+    local l11: Float
+    local l12: Bool
+    local l13: Str
+    local l14: Decimal
+    local l15: Bool
+    local l16: Str
+  b0:
+    l0 = IntToDecimal 10
+    g0 = l0
+    l1 = DecimalToStr g0
+    print l1
+    g0 = 1e-1
+    l2 = DecimalToStr g0
+    print l2
+    g1 = 2e-1
+    l3 = DecimalAdd g0, g1
+    g2 = l3
+    l4 = DecimalToStr g2
+    print l4
+    l5 = DecimalToFloat g2
+    l6 = FloatToStr l5
+    print l6
+    g3 = 0x1.999999999999ap-4
+    g4 = 0x1.999999999999ap-3
+    l7 = FloatAdd g3, g4
+    g5 = l7
+    l8 = FloatToStr g5
+    print l8
+    l9 = FloatToDecimal g5
+    l10 = DecimalToStr l9
+    print l10
+    l11 = DecimalToFloat g2
+    l12 = FloatCompare(Equal) l11, g5
+    l13 = BoolToStr l12
+    print l13
+    l14 = FloatToDecimal g5
+    l15 = DecimalCompare(Equal) g2, l14
+    l16 = BoolToStr l15
+    print l16
+    return
 ==== examples/functions.kj
 record r0 environment
     {} ()
@@ -32539,11 +32599,11 @@ function f0 main(): Void
     call f2()
     l0 = call f16(s47)
     l1 = BoolToStr l0
-    l2 = call f31()
+    l2 = call f32()
     l3 = ListToStr l2
     l4 = StrConcat l1, s15
     l5 = StrConcat l4, l3
-    l6 = call f34(s48)
+    l6 = call f35(s48)
     l7 = RecordTag l6
     l8 = IntCompare(Equal) l7, 0
     l9 = BoolToStr l8
@@ -32574,9 +32634,9 @@ function f2 system (module)(): Void
   b2:
     g1 = true
     call f3()
-    l0 = call f53()
+    l0 = call f54()
     g3 = l0
-    l1 = call f55()
+    l1 = call f56()
     g4 = l1
     l2 = list []
     g5 = l2
@@ -32736,22 +32796,28 @@ function f7 open(l0: Str, l1: Record(2)): Record(3)
     local l25: Int
     local l26: Int // code
     local l27: Bool
-    local l28: Record(0)
-    local l29: Record(3)
-    local l30: Int
-    local l31: Str
-    local l32: Record(2)
-    local l33: Record(1)
-    local l34: Record(3)
+    local l28: Bool
+    local l29: Bool
+    local l30: Bool
+    local l31: Bool
+    local l32: Bool // directory
+    local l33: Int
+    local l34: Record(0)
+    local l35: Record(3)
+    local l36: Int
+    local l37: Str
+    local l38: Record(2)
+    local l39: Record(1)
+    local l40: Record(3)
   b0:
-    l2 = call f78(l0)
+    l2 = call f79(l0)
     branch l2, b1, b2
   b1:
-    l3 = call f27(l0)
+    l3 = call f28(l0)
     l4 = record variant 1 (l3)
     return l4
   b2:
-    l5 = call f76(l0)
+    l5 = call f77(l0)
     l6 = l5
     l7 = record variant 2 ()
     l8 = RecordCompare(Equal) g3, l7
@@ -32761,13 +32827,12 @@ function f7 open(l0: Str, l1: Record(2)): Record(3)
     l13 = IntCompare(Equal) l12, 0
     branch l13, b5, b4
   b3:
-    l21 = call f76(l10)
+    l21 = call f77(l10)
     l22 = l21
     l23 = koji_blocking_fopen([Value(Local(6)), Value(Local(22))])
     l24 = l23
     l25 = koji_system_errno([])
     l26 = l25
-    koji_unsafe_free([Value(Local(6))])
     koji_unsafe_free([Value(Local(22))])
     l27 = IntCompare(Equal) l24, 0
     branch l27, b19, b20
@@ -32815,16 +32880,41 @@ function f7 open(l0: Str, l1: Record(2)): Record(3)
     l10 = l20
     goto b3
   b19:
-    l28 = call f26(l0, l26)
-    l29 = record variant 1 (l28)
-    return l29
+    l29 = l9
+    branch l29, b21, b22
   b20:
-    l30 = l24
-    l31 = l0
-    l32 = l1
-    l33 = record variant 0 (l30, l31, l32)
-    l34 = record variant 0 (l33)
-    return l34
+    koji_unsafe_free([Value(Local(6))])
+    l36 = l24
+    l37 = l0
+    l38 = l1
+    l39 = record variant 0 (l36, l37, l38)
+    l40 = record variant 0 (l39)
+    return l40
+  b21:
+    l30 = IntCompare(Equal) l26, 13
+    l29 = l30
+    goto b22
+  b22:
+    l28 = l29
+    branch l28, b23, b24
+  b23:
+    l31 = call f18(l6)
+    l28 = l31
+    goto b24
+  b24:
+    l32 = l28
+    koji_unsafe_free([Value(Local(6))])
+    branch l32, b25, b26
+  b25:
+    l33 = 21
+    goto b27
+  b26:
+    l33 = l26
+    goto b27
+  b27:
+    l34 = call f27(l0, l33)
+    l35 = record variant 1 (l34)
+    return l35
 
 function f8 File.read(l0: Record(1), l1: Int): Record(4)
     local l2: Record(2)
@@ -32892,7 +32982,7 @@ function f8 File.read(l0: Record(1), l1: Int): Record(4)
     l16 = IntCompare(Less) l15, 4096
     branch l16, b6, b7
   b5:
-    l32 = call f73(l13, l14)
+    l32 = call f74(l13, l14)
     l33 = Not l32
     branch l33, b14, b15
   b6:
@@ -32904,7 +32994,7 @@ function f8 File.read(l0: Record(1), l1: Int): Record(4)
   b7:
     l19 = koji_unsafe_offset([Value(Local(13)), Value(Local(14))])
     l20 = IntSub l11, l14
-    l21 = call f28(false, l10, l19, l20)
+    l21 = call f29(false, l10, l19, l20)
     l22 = l21
     l23 = IntCompare(Less) l22, 0
     branch l23, b8, b9
@@ -32921,7 +33011,7 @@ function f8 File.read(l0: Record(1), l1: Int): Record(4)
   b11:
     koji_unsafe_free([Value(Local(13))])
     l27 = l0.1
-    l28 = call f26(l27, l25)
+    l28 = call f27(l27, l25)
     l29 = record variant 1 (l28)
     return l29
   b12:
@@ -32998,7 +33088,7 @@ function f9 File.readBytes(l0: Record(1), l1: Int): Record(5)
   b3:
     branch true, b4, b5
   b4:
-    l15 = call f28(false, l10, l12, 65536)
+    l15 = call f29(false, l10, l12, 65536)
     l16 = l15
     l17 = IntCompare(Less) l16, 0
     branch l17, b6, b7
@@ -33019,7 +33109,7 @@ function f9 File.readBytes(l0: Record(1), l1: Int): Record(5)
   b9:
     koji_unsafe_free([Value(Local(12))])
     l21 = l0.1
-    l22 = call f26(l21, l19)
+    l22 = call f27(l21, l19)
     l23 = record variant 1 (l22)
     return l23
   b10:
@@ -33154,7 +33244,7 @@ function f12 File.writeAt(l0: Record(1), l1: Int, l2: Int): Record(6)
   b2:
     l8 = koji_unsafe_offset([Value(Local(1)), Value(Local(6))])
     l9 = IntSub l2, l6
-    l10 = call f28(true, l5, l8, l9)
+    l10 = call f29(true, l5, l8, l9)
     l11 = l10
     l12 = IntCompare(Less) l11, 0
     branch l12, b4, b5
@@ -33174,13 +33264,13 @@ function f12 File.writeAt(l0: Record(1), l1: Int, l2: Int): Record(6)
     goto b1
   b7:
     l16 = l0.1
-    l17 = call f26(l16, l14)
+    l17 = call f27(l16, l14)
     l18 = record variant 1 (l17)
     return l18
 
 function f13 File.close(l0: Record(1)): Void
   b0:
-    drop l0 with f94
+    drop l0 with f95
     return
 
 function f14 descriptor(l0: Int): Int
@@ -33244,14 +33334,14 @@ function f15 list(l0: Str): Record(7)
     local l37: Int
     local l38: Record(7)
   b0:
-    l1 = call f78(l0)
+    l1 = call f79(l0)
     branch l1, b1, b2
   b1:
-    l2 = call f27(l0)
+    l2 = call f28(l0)
     l3 = record variant 1 (l2)
     return l3
   b2:
-    l4 = call f76(l0)
+    l4 = call f77(l0)
     l5 = l4
     l6 = koji_blocking_opendir([Value(Local(5))])
     l7 = l6
@@ -33261,7 +33351,7 @@ function f15 list(l0: Str): Record(7)
     l10 = IntCompare(Equal) l7, 0
     branch l10, b3, b4
   b3:
-    l11 = call f26(l0, l9)
+    l11 = call f27(l0, l9)
     l12 = record variant 1 (l11)
     return l12
   b4:
@@ -33306,7 +33396,7 @@ function f15 list(l0: Str): Record(7)
     l25 = koji_unsafe_offset([Value(Local(23)), Value(Local(19))])
     l26 = l25
     l27 = strlen([Value(Local(26))])
-    l28 = call f72(l26, l27)
+    l28 = call f73(l26, l27)
     l29 = l28
     l31 = StrCompare(NotEqual) l29, s43
     l30 = l31
@@ -33339,12 +33429,12 @@ function f16 exists(l0: Str): Bool
     local l1: Bool
     local l2: Bool
   b0:
-    l1 = call f78(l0)
+    l1 = call f79(l0)
     branch l1, b1, b2
   b1:
     return false
   b2:
-    l2 = call f25(l0)
+    l2 = call f26(l0)
     return l2
 
 function f17 remove(l0: Str): Record(6)
@@ -33363,14 +33453,14 @@ function f17 remove(l0: Str): Record(6)
     local l13: Record(6)
     local l14: Record(6)
   b0:
-    l1 = call f78(l0)
+    l1 = call f79(l0)
     branch l1, b1, b2
   b1:
-    l2 = call f27(l0)
+    l2 = call f28(l0)
     l3 = record variant 1 (l2)
     return l3
   b2:
-    l4 = call f76(l0)
+    l4 = call f77(l0)
     l5 = l4
     l6 = koji_blocking_unlink([Value(Local(5))])
     l7 = IntCompare(Equal) l6, 0
@@ -33381,14 +33471,30 @@ function f17 remove(l0: Str): Record(6)
     l11 = Not l8
     branch l11, b3, b4
   b3:
-    l12 = call f26(l0, l10)
+    l12 = call f27(l0, l10)
     l13 = record variant 1 (l12)
     return l13
   b4:
     l14 = record variant 0 (0)
     return l14
 
-function f18 removeDir(l0: Str): Record(6)
+function f18 opensAsDirectory(l0: Int): Bool
+    local l1: Int
+    local l2: Int // directory
+    local l3: Bool
+    local l4: Int
+  b0:
+    l1 = koji_blocking_opendir([Value(Local(0))])
+    l2 = l1
+    l3 = IntCompare(Equal) l2, 0
+    branch l3, b1, b2
+  b1:
+    return false
+  b2:
+    l4 = koji_windows_closedir([Value(Local(2))])
+    return true
+
+function f19 removeDir(l0: Str): Record(6)
     local l1: Bool
     local l2: Record(0)
     local l3: Record(6)
@@ -33404,14 +33510,14 @@ function f18 removeDir(l0: Str): Record(6)
     local l13: Record(6)
     local l14: Record(6)
   b0:
-    l1 = call f78(l0)
+    l1 = call f79(l0)
     branch l1, b1, b2
   b1:
-    l2 = call f27(l0)
+    l2 = call f28(l0)
     l3 = record variant 1 (l2)
     return l3
   b2:
-    l4 = call f76(l0)
+    l4 = call f77(l0)
     l5 = l4
     l6 = rmdir([Value(Local(5))])
     l7 = IntCompare(Equal) l6, 0
@@ -33422,14 +33528,14 @@ function f18 removeDir(l0: Str): Record(6)
     l11 = Not l8
     branch l11, b3, b4
   b3:
-    l12 = call f26(l0, l10)
+    l12 = call f27(l0, l10)
     l13 = record variant 1 (l12)
     return l13
   b4:
     l14 = record variant 0 (0)
     return l14
 
-function f19 setPermissions(l0: Str, l1: Int): Record(6)
+function f20 setPermissions(l0: Str, l1: Int): Record(6)
     local l2: Bool
     local l3: Record(0)
     local l4: Record(6)
@@ -33450,14 +33556,14 @@ function f19 setPermissions(l0: Str, l1: Int): Record(6)
     local l19: Record(6)
     local l20: Record(6)
   b0:
-    l2 = call f78(l0)
+    l2 = call f79(l0)
     branch l2, b1, b2
   b1:
-    l3 = call f27(l0)
+    l3 = call f28(l0)
     l4 = record variant 1 (l3)
     return l4
   b2:
-    l5 = call f76(l0)
+    l5 = call f77(l0)
     l6 = l5
     l8 = record variant 2 ()
     l9 = RecordCompare(Equal) g3, l8
@@ -33480,30 +33586,30 @@ function f19 setPermissions(l0: Str, l1: Int): Record(6)
     l17 = Not l14
     branch l17, b6, b7
   b6:
-    l18 = call f26(l0, l16)
+    l18 = call f27(l0, l16)
     l19 = record variant 1 (l18)
     return l19
   b7:
     l20 = record variant 0 (0)
     return l20
 
-function f20 createDir(l0: Str): Record(6)
+function f21 createDir(l0: Str): Record(6)
     local l1: Bool
     local l2: Record(0)
     local l3: Record(6)
     local l4: Record(6)
   b0:
-    l1 = call f78(l0)
+    l1 = call f79(l0)
     branch l1, b1, b2
   b1:
-    l2 = call f27(l0)
+    l2 = call f28(l0)
     l3 = record variant 1 (l2)
     return l3
   b2:
-    l4 = call f21(l0)
+    l4 = call f22(l0)
     return l4
 
-function f21 createAll(l0: Str): Record(6)
+function f22 createAll(l0: Str): Record(6)
     local l1: Bool
     local l2: Record(6)
     local l3: Int
@@ -33537,7 +33643,7 @@ function f21 createAll(l0: Str): Record(6)
     l2 = record variant 0 (0)
     return l2
   b2:
-    l3 = call f22(l0)
+    l3 = call f23(l0)
     l4 = l3
     l5 = IntCompare(Equal) l4, 0
     branch l5, b3, b4
@@ -33548,11 +33654,11 @@ function f21 createAll(l0: Str): Record(6)
     l7 = IntCompare(NotEqual) l4, 2
     branch l7, b5, b6
   b5:
-    l8 = call f24(l0)
+    l8 = call f25(l0)
     branch l8, b7, b8
   b6:
-    l12 = call f23(l0)
-    l13 = call f21(l12)
+    l12 = call f24(l0)
+    l13 = call f22(l12)
     l14 = l13
     l15 = RecordTag l14
     l16 = IntCompare(Equal) l15, 0
@@ -33561,7 +33667,7 @@ function f21 createAll(l0: Str): Record(6)
     l9 = record variant 0 (0)
     return l9
   b8:
-    l10 = call f26(l0, l4)
+    l10 = call f27(l0, l4)
     l11 = record variant 1 (l10)
     return l11
   b9:
@@ -33569,13 +33675,13 @@ function f21 createAll(l0: Str): Record(6)
     l18 = record variant 1 (l17)
     return l18
   b10:
-    l19 = call f22(l0)
+    l19 = call f23(l0)
     l20 = l19
     l22 = IntCompare(Equal) l20, 0
     l21 = l22
     branch l21, b12, b11
   b11:
-    l23 = call f24(l0)
+    l23 = call f25(l0)
     l21 = l23
     goto b12
   b12:
@@ -33584,11 +33690,11 @@ function f21 createAll(l0: Str): Record(6)
     l24 = record variant 0 (0)
     return l24
   b14:
-    l25 = call f26(l0, l20)
+    l25 = call f27(l0, l20)
     l26 = record variant 1 (l25)
     return l26
 
-function f22 makeDirectory(l0: Str): Int
+function f23 makeDirectory(l0: Str): Int
     local l1: Int
     local l2: Int // cPath
     local l3: Int
@@ -33598,7 +33704,7 @@ function f22 makeDirectory(l0: Str): Int
     local l7: Int // code
     local l8: Int
   b0:
-    l1 = call f76(l0)
+    l1 = call f77(l0)
     l2 = l1
     l3 = koji_blocking_mkdir([Value(Local(2)), Value(Int(511))])
     l4 = IntCompare(Equal) l3, 0
@@ -33616,7 +33722,7 @@ function f22 makeDirectory(l0: Str): Int
   b3:
     return l8
 
-function f23 parentOf(l0: Str): Str
+function f24 parentOf(l0: Str): Str
     local l1: Int
     local l2: Int // bytes
     local l3: Int
@@ -33658,7 +33764,7 @@ function f23 parentOf(l0: Str): Str
     goto b6
   b4:
     l7 = IntSub l4, 1
-    l8 = call f29(l2, l7)
+    l8 = call f30(l2, l7)
     l9 = IntCompare(Equal) l8, 47
     l5 = l9
     goto b5
@@ -33676,7 +33782,7 @@ function f23 parentOf(l0: Str): Str
     goto b11
   b9:
     l13 = IntSub l4, 1
-    l14 = call f29(l2, l13)
+    l14 = call f30(l2, l13)
     l15 = IntCompare(NotEqual) l14, 47
     l11 = l15
     goto b10
@@ -33695,29 +33801,29 @@ function f23 parentOf(l0: Str): Str
     return l23
   b14:
     l19 = IntSub l4, 1
-    l20 = call f29(l2, l19)
+    l20 = call f30(l2, l19)
     l21 = IntCompare(Equal) l20, 47
     l17 = l21
     goto b15
   b15:
     branch l17, b12, b13
 
-function f24 isDirectory(l0: Str): Bool
+function f25 isDirectory(l0: Str): Bool
     local l1: Str
     local l2: Bool
   b0:
     l1 = StrConcat l0, s45
-    l2 = call f25(l1)
+    l2 = call f26(l1)
     return l2
 
-function f25 reachable(l0: Str): Bool
+function f26 reachable(l0: Str): Bool
     local l1: Int
     local l2: Int // cPath
     local l3: Int
     local l4: Bool
     local l5: Bool // found
   b0:
-    l1 = call f76(l0)
+    l1 = call f77(l0)
     l2 = l1
     l3 = koji_blocking_access([Value(Local(2)), Value(Int(0))])
     l4 = IntCompare(Equal) l3, 0
@@ -33725,7 +33831,7 @@ function f25 reachable(l0: Str): Bool
     koji_unsafe_free([Value(Local(2))])
     return l5
 
-function f26 failure(l0: Str, l1: Int): Record(0)
+function f27 failure(l0: Str, l1: Int): Record(0)
     local l2: Bool
     local l3: Record(0)
     local l4: Bool
@@ -33768,7 +33874,7 @@ function f26 failure(l0: Str, l1: Int): Record(0)
     return l9
   b8:
     l10 = strerror([Value(Local(1))])
-    l11 = call f77(l10)
+    l11 = call f78(l10)
     l12 = StrConcat l11, s13
     l13 = IntToStr l1
     l14 = StrConcat l12, l13
@@ -33776,13 +33882,13 @@ function f26 failure(l0: Str, l1: Int): Record(0)
     l16 = record variant 4 (l0, l15)
     return l16
 
-function f27 invalidPath(l0: Str): Record(0)
+function f28 invalidPath(l0: Str): Record(0)
     local l1: Record(0)
   b0:
     l1 = record variant 4 (l0, s46)
     return l1
 
-function f28 transfer(l0: Bool, l1: Int, l2: Int, l3: Int): Int
+function f29 transfer(l0: Bool, l1: Int, l2: Int, l3: Int): Int
     local l4: Int
     local l5: Int // vector
     local l6: Int
@@ -33808,7 +33914,7 @@ function f28 transfer(l0: Bool, l1: Int, l2: Int, l3: Int): Int
     koji_unsafe_free([Value(Local(5))])
     return l9
 
-function f29 byteAt(l0: Int, l1: Int): Int
+function f30 byteAt(l0: Int, l1: Int): Int
     local l2: Byte
     local l3: Byte // b
     local l4: Int
@@ -33818,7 +33924,7 @@ function f29 byteAt(l0: Int, l1: Int): Int
     l4 = ByteToInt l3
     return l4
 
-function f30 SystemError.display(l0: Record(8)): Str
+function f31 SystemError.display(l0: Record(8)): Str
     local l1: Str
     local l2: Record(8)
     local l3: Int
@@ -33884,7 +33990,7 @@ function f30 SystemError.display(l0: Record(8)): Str
     l1 = l23
     goto b1
 
-function f31 args(): List(Str)
+function f32 args(): List(Str)
     local l0: List(Str)
     local l1: List(Str) // found
     local l2: Int
@@ -33909,13 +34015,13 @@ function f31 args(): List(Str)
     branch l6, b2, b3
   b2:
     l8 = koji_system_argument([Value(Local(7))])
-    l9 = call f77(l8)
+    l9 = call f78(l8)
     push l1, l9
     goto b1
   b3:
     return l1
 
-function f32 readInput(l0: Int, l1: Int): Record(9)
+function f33 readInput(l0: Int, l1: Int): Record(9)
     local l2: Int
     local l3: Int // status
     local l4: Str
@@ -33948,12 +34054,12 @@ function f32 readInput(l0: Int, l1: Int): Record(9)
   b3:
     return l8
 
-function f33 writeOutput(l0: Str, l1: Int): Void
+function f34 writeOutput(l0: Str, l1: Int): Void
   b0:
     koji_write([Value(Local(0)), Value(Local(1))])
     return
 
-function f34 env(l0: Str): Record(9)
+function f35 env(l0: Str): Record(9)
     local l1: Bool
     local l2: Record(9)
     local l3: Int
@@ -33970,13 +34076,13 @@ function f34 env(l0: Str): Record(9)
     local l14: Str
     local l15: Record(9)
   b0:
-    l1 = call f78(l0)
+    l1 = call f79(l0)
     branch l1, b1, b2
   b1:
     l2 = record variant 1 ()
     return l2
   b2:
-    l3 = call f76(l0)
+    l3 = call f77(l0)
     l4 = l3
     l5 = getenv([Value(Local(4))])
     l6 = l5
@@ -33989,7 +34095,7 @@ function f34 env(l0: Str): Record(9)
   b4:
     l9 = strlen([Value(Local(6))])
     l10 = l9
-    l11 = call f73(l6, l10)
+    l11 = call f74(l6, l10)
     l12 = Not l11
     branch l12, b5, b6
   b5:
@@ -34000,7 +34106,7 @@ function f34 env(l0: Str): Record(9)
     l15 = record variant 0 (l14)
     return l15
 
-function f35 currentDirectory(): Record(9)
+function f36 currentDirectory(): Record(9)
     local l0: Int // size
     local l1: Bool
     local l2: Int
@@ -34032,7 +34138,7 @@ function f35 currentDirectory(): Record(9)
     return l12
   b4:
     l7 = strlen([Value(Local(3))])
-    l8 = call f72(l3, l7)
+    l8 = call f73(l3, l7)
     l9 = l8
     koji_unsafe_free([Value(Local(3))])
     l10 = record variant 0 (l9)
@@ -34043,7 +34149,7 @@ function f35 currentDirectory(): Record(9)
     l0 = l11
     goto b1
 
-function f36 executable(): Record(9)
+function f37 executable(): Record(9)
     local l0: Int
     local l1: Bool
     local l2: Record(9)
@@ -34053,14 +34159,14 @@ function f36 executable(): Record(9)
     l1 = IntCompare(Equal) l0, 0
     branch l1, b1, b2
   b1:
-    l2 = call f37()
+    l2 = call f38()
     push g5, l2
     goto b2
   b2:
     l3 = g5[0]
     return l3
 
-function f37 executablePath(): Record(9)
+function f38 executablePath(): Record(9)
     local l0: Int // size
     local l1: Int
     local l2: Int // buffer
@@ -34085,7 +34191,7 @@ function f37 executablePath(): Record(9)
   b2:
     l1 = koji_unsafe_allocate([Value(Local(0))])
     l2 = l1
-    l3 = call f54(l2, l0)
+    l3 = call f55(l2, l0)
     l4 = l3
     l5 = IntCompare(GreaterEqual) l4, 0
     branch l5, b4, b5
@@ -34093,7 +34199,7 @@ function f37 executablePath(): Record(9)
     l15 = record variant 1 ()
     return l15
   b4:
-    l6 = call f72(l2, l4)
+    l6 = call f73(l2, l4)
     l7 = l6
     koji_unsafe_free([Value(Local(2))])
     l8 = record variant 0 (l7)
@@ -34118,7 +34224,7 @@ function f37 executablePath(): Record(9)
     l0 = l14
     goto b1
 
-function f38 leave(l0: Int): Void
+function f39 leave(l0: Int): Void
     local l1: Int
     local l2: Bool
     local l3: Int
@@ -34151,7 +34257,7 @@ function f38 leave(l0: Int): Void
     l1 = l3
     goto b3
 
-function f39 command(l0: Str, l1: List(Str)): Record(10)
+function f40 command(l0: Str, l1: List(Str)): Record(10)
     local l2: Str
     local l3: List(Str)
     local l4: Str
@@ -34171,7 +34277,7 @@ function f39 command(l0: Str, l1: List(Str)): Record(10)
     l9 = record variant 0 (l2, l3, l4, l5, l7, l8)
     return l9
 
-function f40 Command.run(l0: Record(10)): Record(11)
+function f41 Command.run(l0: Record(10)): Record(11)
     local l1: Record(15)
     local l2: Record(15)
     local l3: Int
@@ -34184,7 +34290,7 @@ function f40 Command.run(l0: Record(10)): Record(11)
     local l10: Int
     local l11: Record(11)
   b0:
-    l1 = call f45(l0, false)
+    l1 = call f46(l0, false)
     l2 = l1
     l3 = RecordTag l2
     l4 = IntCompare(Equal) l3, 0
@@ -34197,11 +34303,11 @@ function f40 Command.run(l0: Record(10)): Record(11)
     l7 = l2.0
     l8 = l7
     l9 = l8.0
-    l10 = call f47(l9)
+    l10 = call f48(l9)
     l11 = record variant 0 (l10)
     return l11
 
-function f41 Command.output(l0: Record(10)): Record(13)
+function f42 Command.output(l0: Record(10)): Record(13)
     local l1: Record(15)
     local l2: Record(15)
     local l3: Int
@@ -34227,7 +34333,7 @@ function f41 Command.output(l0: Record(10)): Record(13)
     local l23: Record(12)
     local l24: Record(13)
   b0:
-    l1 = call f45(l0, true)
+    l1 = call f46(l0, true)
     l2 = l1
     l3 = RecordTag l2
     l4 = IntCompare(Equal) l3, 0
@@ -34243,10 +34349,10 @@ function f41 Command.output(l0: Record(10)): Record(13)
     l10 = l8.2
     l11 = l8.3
     l12 = l0.2
-    l13 = call f52(l9, l10, l11, l12)
+    l13 = call f53(l9, l10, l11, l12)
     l14 = l13
     l15 = l8.0
-    l16 = call f47(l15)
+    l16 = call f48(l15)
     l17 = l16
     l18 = l17
     l19 = l14[0]
@@ -34257,23 +34363,23 @@ function f41 Command.output(l0: Record(10)): Record(13)
     l24 = record variant 0 (l23)
     return l24
 
-function f42 run(l0: Str, l1: List(Str)): Record(11)
+function f43 run(l0: Str, l1: List(Str)): Record(11)
     local l2: Record(10)
     local l3: Record(11)
   b0:
-    l2 = call f39(l0, l1)
-    l3 = call f40(l2)
-    return l3
-
-function f43 capture(l0: Str, l1: List(Str)): Record(13)
-    local l2: Record(10)
-    local l3: Record(13)
-  b0:
-    l2 = call f39(l0, l1)
+    l2 = call f40(l0, l1)
     l3 = call f41(l2)
     return l3
 
-function f44 environmentOf(l0: Record(10)): List(Str)
+function f44 capture(l0: Str, l1: List(Str)): Record(13)
+    local l2: Record(10)
+    local l3: Record(13)
+  b0:
+    l2 = call f40(l0, l1)
+    l3 = call f42(l2)
+    return l3
+
+function f45 environmentOf(l0: Record(10)): List(Str)
     local l1: List(Str)
     local l2: List(Str) // found
     local l3: Bool
@@ -34337,9 +34443,9 @@ function f44 environmentOf(l0: Record(10)): List(Str)
   b6:
     goto b5
   b7:
-    l12 = call f77(l10)
+    l12 = call f78(l10)
     l13 = l12
-    l14 = call f65(l13, s10, location(system:269))
+    l14 = call f66(l13, s10, location(system:269))
     l15 = l14[0]
     l16 = l15
     l17 = l0.4
@@ -34371,7 +34477,7 @@ function f44 environmentOf(l0: Record(10)): List(Str)
   b13:
     return l2
 
-function f45 spawn(l0: Record(10), l1: Bool): Record(15)
+function f46 spawn(l0: Record(10), l1: Bool): Record(15)
     local l2: Record(16)
     local l3: Bool
     local l4: Record(15)
@@ -34539,7 +34645,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     l3 = RecordCompare(Equal) g3, l2
     branch l3, b1, b2
   b1:
-    l4 = call f48(l0, l1)
+    l4 = call f49(l0, l1)
     return l4
   b2:
     l5 = l0.0
@@ -34559,7 +34665,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     branch l16, b4, b6
   b4:
     l18 = l13[l15]
-    l19 = call f78(l18)
+    l19 = call f79(l18)
     branch l19, b7, b8
   b5:
     l17 = IntAdd l15, 1
@@ -34571,7 +34677,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     l24 = IntMul l23, 8
     l25 = koji_unsafe_allocate([Value(Local(24))])
     l26 = l25
-    l27 = call f76(l6)
+    l27 = call f77(l6)
     koji_unsafe_write_int([Value(Local(26)), Value(Int(0)), Value(Local(27))])
     l28 = ListLength l8
     l29 = l28
@@ -34592,7 +34698,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     l34 = IntAdd l33, 1
     l35 = IntMul l34, 8
     l36 = l8[l33]
-    l37 = call f76(l36)
+    l37 = call f77(l36)
     koji_unsafe_write_int([Value(Local(26)), Value(Local(35)), Value(Local(37))])
     goto b9
   b11:
@@ -34625,13 +34731,13 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     l56 = pipe([Value(Local(45))])
     l57 = koji_unsafe_offset([Value(Local(45)), Value(Int(8))])
     l58 = pipe([Value(Local(57))])
-    l59 = call f56(l45, 0)
+    l59 = call f57(l45, 0)
     l47 = l59
-    l60 = call f56(l45, 8)
+    l60 = call f57(l45, 8)
     l49 = l60
-    l61 = call f56(l45, 4)
+    l61 = call f57(l45, 4)
     l62 = l61
-    l63 = call f56(l45, 12)
+    l63 = call f57(l45, 12)
     l64 = l63
     branch l55, b16, b17
   b15:
@@ -34641,16 +34747,16 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
   b16:
     l65 = koji_unsafe_offset([Value(Local(45)), Value(Int(16))])
     l66 = pipe([Value(Local(65))])
-    l67 = call f56(l45, 20)
+    l67 = call f57(l45, 20)
     l51 = l67
-    l68 = call f56(l45, 16)
+    l68 = call f57(l45, 16)
     l69 = l68
     l70 = posix_spawn_file_actions_adddup2([Value(Local(42)), Value(Local(69)), Value(Int(0))])
     l71 = posix_spawn_file_actions_addclose([Value(Local(42)), Value(Local(69))])
     l72 = posix_spawn_file_actions_addclose([Value(Local(42)), Value(Local(51))])
     goto b18
   b17:
-    l73 = call f76(s12)
+    l73 = call f77(s12)
     l74 = l73
     l75 = posix_spawn_file_actions_addopen([Value(Local(42)), Value(Int(0)), Value(Local(74)), Value(Int(0)), Value(Int(0))])
     koji_unsafe_free([Value(Local(74))])
@@ -34678,7 +34784,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     goto b15
   b23:
     l88 = l0.3
-    l89 = call f76(l88)
+    l89 = call f77(l88)
     l90 = l89
     l91 = posix_spawn_file_actions_addchdir_np([Value(Local(42)), Value(Local(90))])
     koji_unsafe_free([Value(Local(90))])
@@ -34701,7 +34807,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     l101 = l96
     branch l101, b27, b28
   b27:
-    l102 = call f44(l0)
+    l102 = call f45(l0)
     l95 = l102
     l103 = ListLength l95
     l104 = IntAdd l103, 1
@@ -34730,7 +34836,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
   b30:
     l113 = IntMul l112, 8
     l114 = l95[l112]
-    l115 = call f76(l114)
+    l115 = call f77(l114)
     koji_unsafe_write_int([Value(Local(93)), Value(Local(113)), Value(Local(115))])
     goto b29
   b31:
@@ -34776,20 +34882,20 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     goto b37
   b39:
     koji_unsafe_free([Value(Local(26))])
-    l144 = call f56(l119, 0)
+    l144 = call f57(l119, 0)
     l145 = l144
     koji_unsafe_free([Value(Local(119))])
     branch l1, b40, b41
   b40:
-    l146 = call f56(l45, 4)
+    l146 = call f57(l45, 4)
     l147 = close([Value(Local(146))])
-    l148 = call f56(l45, 12)
+    l148 = call f57(l45, 12)
     l149 = close([Value(Local(148))])
     goto b41
   b41:
     branch l55, b42, b43
   b42:
-    l150 = call f56(l45, 16)
+    l150 = call f57(l45, 16)
     l151 = close([Value(Local(150))])
     goto b43
   b43:
@@ -34816,11 +34922,11 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     l155 = close([Value(Local(51))])
     goto b49
   b49:
-    l156 = call f46(l6, l123)
+    l156 = call f47(l6, l123)
     l157 = record variant 1 (l156)
     return l157
 
-function f46 failure(l0: Str, l1: Int): Record(8)
+function f47 failure(l0: Str, l1: Int): Record(8)
     local l2: Bool
     local l3: Record(8)
     local l4: Bool
@@ -34855,7 +34961,7 @@ function f46 failure(l0: Str, l1: Int): Record(8)
     return l7
   b6:
     l8 = strerror([Value(Local(1))])
-    l9 = call f77(l8)
+    l9 = call f78(l8)
     l10 = StrConcat l9, s13
     l11 = IntToStr l1
     l12 = StrConcat l10, l11
@@ -34863,7 +34969,7 @@ function f46 failure(l0: Str, l1: Int): Record(8)
     l14 = record variant 2 (l0, l13)
     return l14
 
-function f47 wait(l0: Int): Int
+function f48 wait(l0: Int): Int
     local l1: Int
     local l2: Int // status
     local l3: Bool
@@ -34890,7 +34996,7 @@ function f47 wait(l0: Int): Int
   b2:
     goto b1
   b3:
-    l8 = call f56(l2, 0)
+    l8 = call f57(l2, 0)
     l9 = l8
     koji_unsafe_free([Value(Local(2))])
     l10 = BitAnd l9, 127
@@ -34911,7 +35017,7 @@ function f47 wait(l0: Int): Int
     l14 = BitAnd l13, 255
     return l14
 
-function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
+function f49 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     local l2: Str
     local l3: Str // command
     local l4: Str
@@ -35090,7 +35196,7 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
   b0:
     l2 = l0.0
     l3 = l2
-    l4 = call f50(l3)
+    l4 = call f51(l3)
     l5 = l4
     l6 = l0.1
     l7 = l6
@@ -35102,7 +35208,7 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     branch l10, b2, b4
   b2:
     l12 = l7[l9]
-    l13 = call f50(l12)
+    l13 = call f51(l12)
     l14 = StrConcat s15, l13
     l15 = StrConcat l5, l14
     l5 = l15
@@ -35114,9 +35220,9 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
   b4:
     l16 = koji_unsafe_allocate([Value(Int(24))])
     l17 = l16
-    call f57(l17, 0, 24)
+    call f58(l17, 0, 24)
     koji_unsafe_write_int([Value(Local(17)), Value(Int(8)), Value(Int(0))])
-    call f57(l17, 16, 1)
+    call f58(l17, 16, 1)
     l18 = koji_unsafe_allocate([Value(Int(104))])
     l19 = l18
     l20 = 13
@@ -35132,7 +35238,7 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     koji_unsafe_write_int([Value(Local(19)), Value(Local(25)), Value(Int(0))])
     goto b5
   b7:
-    call f57(l19, 0, 104)
+    call f58(l19, 0, 104)
     l26 = koji_unsafe_allocate([Value(Int(24))])
     l27 = l26
     l28 = koji_unsafe_allocate([Value(Int(48))])
@@ -35180,14 +35286,14 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     l30 = l55
     goto b14
   b13:
-    l56 = call f76(s16)
+    l56 = call f77(s16)
     l57 = l56
     l58 = CreateFileA([Value(Local(57)), Value(Int(2147483648)), Value(Int(3)), Value(Local(17)), Value(Int(3)), Value(Int(0)), Value(Int(0))])
     l30 = l58
     koji_unsafe_free([Value(Local(57))])
     goto b14
   b14:
-    call f57(l19, 60, 256)
+    call f58(l19, 60, 256)
     koji_unsafe_write_int([Value(Local(19)), Value(Int(80)), Value(Local(30))])
     l59 = koji_unsafe_read_int([Value(Local(29)), Value(Int(8))])
     l60 = l59
@@ -35205,7 +35311,7 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
   b16:
     branch l64, b17, b18
   b17:
-    l69 = call f44(l0)
+    l69 = call f45(l0)
     l70 = l69
     l71 = 1
     l72 = l70
@@ -35281,12 +35387,12 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     goto b32
   b31:
     l108 = l0.3
-    l109 = call f76(l108)
+    l109 = call f77(l108)
     l105 = l109
     goto b32
   b32:
     l110 = l105
-    l111 = call f76(l5)
+    l111 = call f77(l5)
     l112 = l111
     l113 = CreateProcessA([Value(Int(0)), Value(Local(112)), Value(Int(0)), Value(Int(0)), Value(Int(1)), Value(Int(0)), Value(Local(63)), Value(Local(110)), Value(Local(19)), Value(Local(27))])
     l114 = IntCompare(NotEqual) l113, 0
@@ -35380,9 +35486,9 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     l176 = record variant 0 (l175)
     return l176
   b48:
-    l149 = call f49(l124)
+    l149 = call f50(l124)
     l150 = CloseHandle([Value(Local(149))])
-    l151 = call f49(l126)
+    l151 = call f50(l126)
     l152 = CloseHandle([Value(Local(151))])
     goto b49
   b49:
@@ -35413,13 +35519,13 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     l164 = record variant 1 (l163)
     return l164
 
-function f49 windowsHandle(l0: Int): Int
+function f50 windowsHandle(l0: Int): Int
     local l1: Int
   b0:
     l1 = koji_unsafe_offset([Value(Int(0)), Value(Local(0))])
     return l1
 
-function f50 windowsQuoted(l0: Str): Str
+function f51 windowsQuoted(l0: Str): Str
     local l1: Bool
     local l2: Bool
     local l3: Bool
@@ -35487,7 +35593,7 @@ function f50 windowsQuoted(l0: Str): Str
   b8:
     l11 = s19
     l12 = 0
-    l13 = call f79(l0)
+    l13 = call f80(l0)
     l14 = l13
     l15 = ListLength l14
     l16 = 0
@@ -35535,7 +35641,7 @@ function f50 windowsQuoted(l0: Str): Str
     l12 = 0
     goto b11
 
-function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
+function f52 windowsReadBoth(l0: Int, l1: Int): List(Str)
     local l2: Int
     local l3: Int
     local l4: List(Int)
@@ -35669,7 +35775,7 @@ function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
   b10:
     koji_unsafe_write_int([Value(Local(15)), Value(Int(0)), Value(Int(0))])
     l27 = l13[l24]
-    l28 = call f49(l27)
+    l28 = call f50(l27)
     l29 = PeekNamedPipe([Value(Local(28)), Value(Int(0)), Value(Int(0)), Value(Int(0)), Value(Local(15)), Value(Int(0))])
     l30 = IntCompare(Equal) l29, 0
     branch l30, b11, b12
@@ -35677,11 +35783,11 @@ function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
     l31 = l24
     l11[l31] = false
     l32 = l13[l24]
-    l33 = call f49(l32)
+    l33 = call f50(l32)
     l34 = CloseHandle([Value(Local(33))])
     goto b6
   b12:
-    l35 = call f56(l15, 0)
+    l35 = call f57(l15, 0)
     l36 = l35
     l37 = IntCompare(LessEqual) l36, 0
     branch l37, b13, b14
@@ -35708,7 +35814,7 @@ function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
   b16:
     koji_unsafe_write_int([Value(Local(15)), Value(Int(8)), Value(Int(0))])
     l50 = l13[l24]
-    l51 = call f49(l50)
+    l51 = call f50(l50)
     l52 = l5[l24]
     l53 = l7[l24]
     l54 = koji_unsafe_offset([Value(Local(52)), Value(Local(53))])
@@ -35716,7 +35822,7 @@ function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
     l56 = ReadFile([Value(Local(51)), Value(Local(54)), Value(Local(36)), Value(Local(55)), Value(Int(0))])
     l57 = l24
     l58 = l7[l24]
-    l59 = call f56(l15, 8)
+    l59 = call f57(l15, 8)
     l60 = IntAdd l58, l59
     l7[l57] = l60
     l19 = true
@@ -35745,7 +35851,7 @@ function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
   b24:
     l73 = l5[l72]
     l74 = l7[l72]
-    l75 = call f72(l73, l74)
+    l75 = call f73(l73, l74)
     push l67, l75
     l76 = l5[l72]
     koji_unsafe_free([Value(Local(76))])
@@ -35753,7 +35859,7 @@ function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
   b25:
     return l67
 
-function f52 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
+function f53 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
     local l4: Record(16)
     local l5: Bool
     local l6: List(Str)
@@ -35894,7 +36000,7 @@ function f52 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
     l5 = RecordCompare(Equal) g3, l4
     branch l5, b1, b2
   b1:
-    l6 = call f51(l0, l1)
+    l6 = call f52(l0, l1)
     return l6
   b2:
     l7 = koji_unsafe_allocate([Value(Int(24))])
@@ -35961,20 +36067,20 @@ function f52 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
   b15:
     l41 = IntMul l31, 8
     l42 = l20[l38]
-    call f57(l8, l41, l42)
+    call f58(l8, l41, l42)
     l43 = IntMul l31, 8
     l44 = IntAdd l43, 4
-    call f57(l8, l44, 1)
+    call f58(l8, l44, 1)
     push l33, l38
     l45 = IntAdd l31, 1
     l31 = l45
     goto b11
   b16:
     l46 = IntMul l31, 8
-    call f57(l8, l46, l2)
+    call f58(l8, l46, l2)
     l47 = IntMul l31, 8
     l48 = IntAdd l47, 4
-    call f57(l8, l48, 4)
+    call f58(l8, l48, 4)
     push l33, 2
     l49 = IntAdd l31, 1
     l31 = l49
@@ -36004,7 +36110,7 @@ function f52 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
   b23:
     l60 = IntMul l59, 8
     l61 = IntAdd l60, 4
-    l62 = call f56(l8, l61)
+    l62 = call f57(l8, l61)
     l63 = ShiftRight l62, 16
     l64 = IntCompare(Equal) l63, 0
     branch l64, b25, b26
@@ -36160,7 +36266,7 @@ function f52 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
   b55:
     l135 = l12[l134]
     l136 = l14[l134]
-    l137 = call f72(l135, l136)
+    l137 = call f73(l135, l136)
     push l129, l137
     l138 = l12[l134]
     koji_unsafe_free([Value(Local(138))])
@@ -36168,7 +36274,7 @@ function f52 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
   b56:
     return l129
 
-function f53 systemNamed(): Record(16)
+function f54 systemNamed(): Record(16)
     local l0: Record(16)
     local l1: Bool
     local l2: Record(16)
@@ -36196,7 +36302,7 @@ function f53 systemNamed(): Record(16)
     l3 = koji_unsafe_allocate([Value(Int(4096))])
     l4 = l3
     l5 = uname([Value(Local(4))])
-    l6 = call f77(l4)
+    l6 = call f78(l4)
     l7 = l6
     koji_unsafe_free([Value(Local(4))])
     l9 = l7
@@ -36223,7 +36329,7 @@ function f53 systemNamed(): Record(16)
   b8:
     unreachable
 
-function f54 executableInto(l0: Int, l1: Int): Int
+function f55 executableInto(l0: Int, l1: Int): Int
     local l2: Record(16)
     local l3: Int
     local l4: Bool
@@ -36268,7 +36374,7 @@ function f54 executableInto(l0: Int, l1: Int): Int
     l15 = IntCompare(Equal) l14, 1
     branch l15, b10, b9
   b3:
-    l5 = call f76(s23)
+    l5 = call f77(s23)
     l6 = l5
     l7 = readlink([Value(Local(6)), Value(Local(0)), Value(Local(1))])
     l8 = l7
@@ -36339,7 +36445,7 @@ function f54 executableInto(l0: Int, l1: Int): Int
   b21:
     unreachable
 
-function f55 architectureNamed(): Record(17)
+function f56 architectureNamed(): Record(17)
     local l0: Record(16)
     local l1: Bool
     local l2: Record(17)
@@ -36385,7 +36491,7 @@ function f55 architectureNamed(): Record(17)
     l10 = l6
     l11 = IntMul 4, l10
     l12 = koji_unsafe_offset([Value(Local(4)), Value(Local(11))])
-    l13 = call f77(l12)
+    l13 = call f78(l12)
     l14 = l13
     koji_unsafe_free([Value(Local(4))])
     l16 = l14
@@ -36433,7 +36539,7 @@ function f55 architectureNamed(): Record(17)
   b16:
     unreachable
 
-function f56 readInt32(l0: Int, l1: Int): Int
+function f57 readInt32(l0: Int, l1: Int): Int
     local l2: Int // value
     local l3: Int
     local l4: Int
@@ -36483,7 +36589,7 @@ function f56 readInt32(l0: Int, l1: Int): Int
   b6:
     return l15
 
-function f57 writeInt32(l0: Int, l1: Int, l2: Int): Void
+function f58 writeInt32(l0: Int, l1: Int, l2: Int): Void
     local l3: Int
     local l4: Int
     local l5: Bool
@@ -36514,7 +36620,7 @@ function f57 writeInt32(l0: Int, l1: Int, l2: Int): Void
   b3:
     return
 
-function f58 trim(l0: Str): Str
+function f59 trim(l0: Str): Str
     local l1: Int
     local l2: Int // bytes
     local l3: Int
@@ -36532,9 +36638,9 @@ function f58 trim(l0: Str): Str
     l2 = l1
     l3 = koji_unsafe_string_size([Value(Local(0))])
     l4 = l3
-    l5 = call f59(l2, 0, l4)
+    l5 = call f60(l2, 0, l4)
     l6 = l5
-    l7 = call f60(l2, l6, l4)
+    l7 = call f61(l2, l6, l4)
     l8 = l7
     l10 = IntCompare(Equal) l6, 0
     l9 = l10
@@ -36548,10 +36654,10 @@ function f58 trim(l0: Str): Str
   b3:
     return l0
   b4:
-    l12 = call f61(l2, l6, l8)
+    l12 = call f62(l2, l6, l8)
     return l12
 
-function f59 spaceEnd(l0: Int, l1: Int, l2: Int): Int
+function f60 spaceEnd(l0: Int, l1: Int, l2: Int): Int
     local l3: Int // at
     local l4: Bool
     local l5: Byte
@@ -36582,14 +36688,14 @@ function f59 spaceEnd(l0: Int, l1: Int, l2: Int): Int
     return l3
   b4:
     l8 = ByteToInt l6
-    l9 = call f71(l8)
+    l9 = call f72(l8)
     l10 = Not l9
     branch l10, b6, b7
   b5:
-    l12 = call f69(l0, l3)
+    l12 = call f70(l0, l3)
     l13 = l12
-    l14 = call f70(l0, l3, l13)
-    l15 = call f71(l14)
+    l14 = call f71(l0, l3, l13)
+    l15 = call f72(l14)
     l16 = Not l15
     branch l16, b8, b9
   b6:
@@ -36605,7 +36711,7 @@ function f59 spaceEnd(l0: Int, l1: Int, l2: Int): Int
     l3 = l17
     goto b1
 
-function f60 spaceStart(l0: Int, l1: Int, l2: Int): Int
+function f61 spaceStart(l0: Int, l1: Int, l2: Int): Int
     local l3: Int // at
     local l4: Bool
     local l5: Int
@@ -36640,7 +36746,7 @@ function f60 spaceStart(l0: Int, l1: Int, l2: Int): Int
     return l3
   b4:
     l9 = ByteToInt l7
-    l10 = call f71(l9)
+    l10 = call f72(l9)
     l11 = Not l10
     branch l11, b6, b7
   b5:
@@ -36654,7 +36760,7 @@ function f60 spaceStart(l0: Int, l1: Int, l2: Int): Int
     l3 = l12
     goto b1
   b8:
-    l15 = call f68(l0, l14)
+    l15 = call f69(l0, l14)
     branch l15, b9, b10
   b9:
     l16 = IntSub l14, 1
@@ -36662,8 +36768,8 @@ function f60 spaceStart(l0: Int, l1: Int, l2: Int): Int
     goto b8
   b10:
     l17 = IntSub l3, l14
-    l18 = call f70(l0, l14, l17)
-    l19 = call f71(l18)
+    l18 = call f71(l0, l14, l17)
+    l19 = call f72(l18)
     l20 = Not l19
     branch l20, b11, b12
   b11:
@@ -36672,7 +36778,7 @@ function f60 spaceStart(l0: Int, l1: Int, l2: Int): Int
     l3 = l14
     goto b1
 
-function f61 copyBytes(l0: Int, l1: Int, l2: Int): Str
+function f62 copyBytes(l0: Int, l1: Int, l2: Int): Str
     local l3: Int
     local l4: Int
     local l5: Str
@@ -36692,7 +36798,7 @@ function f61 copyBytes(l0: Int, l1: Int, l2: Int): Str
     l10 = memcpy([Value(Local(7)), Value(Local(8)), Value(Local(9))])
     return l6
 
-function f62 startsWith(l0: Str, l1: Str): Bool
+function f63 startsWith(l0: Str, l1: Str): Bool
     local l2: Int
     local l3: Int // size
     local l4: Int
@@ -36716,7 +36822,7 @@ function f62 startsWith(l0: Str, l1: Str): Bool
     l9 = IntCompare(Equal) l8, 0
     return l9
 
-function f63 endsWith(l0: Str, l1: Str): Bool
+function f64 endsWith(l0: Str, l1: Str): Bool
     local l2: Int
     local l3: Int // size
     local l4: Int
@@ -36746,7 +36852,7 @@ function f63 endsWith(l0: Str, l1: Str): Bool
     l12 = IntCompare(Equal) l11, 0
     return l12
 
-function f64 indexOf(l0: Str, l1: Str): Record(18)
+function f65 indexOf(l0: Str, l1: Str): Record(18)
     local l2: Int
     local l3: Int // bytes
     local l4: Int
@@ -36766,7 +36872,7 @@ function f64 indexOf(l0: Str, l1: Str): Record(18)
   b0:
     l2 = koji_unsafe_string_bytes([Value(Local(0))])
     l3 = l2
-    l4 = call f67(l0, l1, 0)
+    l4 = call f68(l0, l1, 0)
     l5 = l4
     l6 = IntCompare(Less) l5, 0
     branch l6, b1, b2
@@ -36784,7 +36890,7 @@ function f64 indexOf(l0: Str, l1: Str): Record(18)
     l12, l13 = range_next l10, l9, 1, l11
     branch l12, b4, b5
   b4:
-    l14 = call f68(l3, l13)
+    l14 = call f69(l3, l13)
     l15 = Not l14
     branch l15, b6, b7
   b5:
@@ -36797,7 +36903,7 @@ function f64 indexOf(l0: Str, l1: Str): Record(18)
   b7:
     goto b3
 
-function f65 split(l0: Str, l1: Str, l2: Int): List(Str)
+function f66 split(l0: Str, l1: Str, l2: Int): List(Str)
     local l3: Int
     local l4: Bool
     local l5: Int
@@ -36834,7 +36940,7 @@ function f65 split(l0: Str, l1: Str, l2: Int): List(Str)
   b3:
     branch true, b4, b5
   b4:
-    l10 = call f67(l0, l1, l9)
+    l10 = call f68(l0, l1, l9)
     l11 = l10
     l12 = IntCompare(Less) l11, 0
     branch l12, b6, b7
@@ -36857,7 +36963,7 @@ function f65 split(l0: Str, l1: Str, l2: Int): List(Str)
     l9 = l17
     goto b3
 
-function f66 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
+function f67 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
     local l4: Int
     local l5: Bool
     local l6: Int
@@ -36889,7 +36995,7 @@ function f66 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
     koji_std_panic([Value(Str(1)), Place(Local(3))])
     unreachable
   b2:
-    l6 = call f67(l0, l1, 0)
+    l6 = call f68(l0, l1, 0)
     l7 = l6
     l8 = IntCompare(Less) l7, 0
     branch l8, b3, b4
@@ -36915,7 +37021,7 @@ function f66 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
     l19 = koji_unsafe_string_size([Value(Local(1))])
     l20 = IntAdd l7, l19
     l12 = l20
-    l21 = call f67(l0, l1, l12)
+    l21 = call f68(l0, l1, l12)
     l7 = l21
     goto b5
   b7:
@@ -36927,7 +37033,7 @@ function f66 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
     l11 = l26
     return l11
 
-function f67 find(l0: Str, l1: Str, l2: Int): Int
+function f68 find(l0: Str, l1: Str, l2: Int): Int
     local l3: Int
     local l4: Int // bytes
     local l5: Int
@@ -36966,7 +37072,7 @@ function f67 find(l0: Str, l1: Str, l2: Int): Int
   b3:
     return l14
 
-function f68 isContinuation(l0: Int, l1: Int): Bool
+function f69 isContinuation(l0: Int, l1: Int): Bool
     local l2: Byte
     local l3: Byte // b
     local l4: Byte
@@ -36978,7 +37084,7 @@ function f68 isContinuation(l0: Int, l1: Int): Bool
     l5 = ByteCompare(Equal) l4, 128
     return l5
 
-function f69 widthAt(l0: Int, l1: Int): Int
+function f70 widthAt(l0: Int, l1: Int): Int
     local l2: Byte
     local l3: Byte // b
     local l4: Bool
@@ -37004,7 +37110,7 @@ function f69 widthAt(l0: Int, l1: Int): Int
   b6:
     return 4
 
-function f70 codeAt(l0: Int, l1: Int, l2: Int): Int
+function f71 codeAt(l0: Int, l1: Int, l2: Int): Int
     local l3: Byte
     local l4: Byte // first
     local l5: Bool
@@ -37063,7 +37169,7 @@ function f70 codeAt(l0: Int, l1: Int, l2: Int): Int
   b5:
     return l11
 
-function f71 isSpace(l0: Int): Bool
+function f72 isSpace(l0: Int): Bool
     local l1: Bool
     local l2: Bool
     local l3: Bool
@@ -37178,7 +37284,7 @@ function f71 isSpace(l0: Int): Bool
   b26:
     return l15
 
-function f72 textOf(l0: Int, l1: Int): Str
+function f73 textOf(l0: Int, l1: Int): Str
     local l2: Str // out
     local l3: Int // start
     local l4: Int // at
@@ -37210,7 +37316,7 @@ function f72 textOf(l0: Int, l1: Int): Str
     l5 = IntCompare(Less) l4, l1
     branch l5, b2, b3
   b2:
-    l6 = call f74(l0, l4, l1)
+    l6 = call f75(l0, l4, l1)
     l7 = l6
     l8 = IntCompare(Greater) l7, 0
     branch l8, b4, b5
@@ -37254,7 +37360,7 @@ function f72 textOf(l0: Int, l1: Int): Str
   b11:
     return l2
 
-function f73 isUtf8(l0: Int, l1: Int): Bool
+function f74 isUtf8(l0: Int, l1: Int): Bool
     local l2: Int // at
     local l3: Bool
     local l4: Int
@@ -37268,7 +37374,7 @@ function f73 isUtf8(l0: Int, l1: Int): Bool
     l3 = IntCompare(Less) l2, l1
     branch l3, b2, b3
   b2:
-    l4 = call f74(l0, l2, l1)
+    l4 = call f75(l0, l2, l1)
     l5 = l4
     l6 = IntCompare(Less) l5, 0
     branch l6, b4, b5
@@ -37281,7 +37387,7 @@ function f73 isUtf8(l0: Int, l1: Int): Bool
     l2 = l7
     goto b1
 
-function f74 validAt(l0: Int, l1: Int, l2: Int): Int
+function f75 validAt(l0: Int, l1: Int, l2: Int): Int
     local l3: Int
     local l4: Int // first
     local l5: Bool
@@ -37324,7 +37430,7 @@ function f74 validAt(l0: Int, l1: Int, l2: Int): Int
     local l42: Bool
     local l43: Int
   b0:
-    l3 = call f75(l0, l1, l2)
+    l3 = call f76(l0, l1, l2)
     l4 = l3
     l5 = IntCompare(Less) l4, 128
     branch l5, b1, b2
@@ -37404,7 +37510,7 @@ function f74 validAt(l0: Int, l1: Int, l2: Int): Int
     goto b24
   b24:
     l24 = IntAdd l1, 1
-    l25 = call f75(l0, l24, l2)
+    l25 = call f76(l0, l24, l2)
     l26 = l25
     l28 = IntCompare(Less) l26, l7
     l27 = l28
@@ -37430,7 +37536,7 @@ function f74 validAt(l0: Int, l1: Int, l2: Int): Int
     branch l35, b30, b31
   b30:
     l37 = IntAdd l1, l36
-    l38 = call f75(l0, l37, l2)
+    l38 = call f76(l0, l37, l2)
     l39 = l38
     l41 = IntCompare(Less) l39, 128
     l40 = l41
@@ -37449,7 +37555,7 @@ function f74 validAt(l0: Int, l1: Int, l2: Int): Int
   b35:
     goto b29
 
-function f75 byteAt(l0: Int, l1: Int, l2: Int): Int
+function f76 byteAt(l0: Int, l1: Int, l2: Int): Int
     local l3: Bool
     local l4: Int
     local l5: Byte
@@ -37467,7 +37573,7 @@ function f75 byteAt(l0: Int, l1: Int, l2: Int): Int
     l7 = ByteToInt l6
     return l7
 
-function f76 cString(l0: Str): Int
+function f77 cString(l0: Str): Int
     local l1: Int
     local l2: Int // size
     local l3: Int
@@ -37509,15 +37615,15 @@ function f76 cString(l0: Str): Int
     koji_unsafe_write_byte([Value(Local(5)), Value(Local(2)), Value(Local(15))])
     return l5
 
-function f77 cText(l0: Int): Str
+function f78 cText(l0: Int): Str
     local l1: Int
     local l2: Str
   b0:
     l1 = strlen([Value(Local(0))])
-    l2 = call f72(l0, l1)
+    l2 = call f73(l0, l1)
     return l2
 
-function f78 hasNul(l0: Str): Bool
+function f79 hasNul(l0: Str): Bool
     local l1: Int
     local l2: Int // bytes
     local l3: Int
@@ -37543,7 +37649,7 @@ function f78 hasNul(l0: Str): Bool
     branch l7, b2, b3
   b2:
     l9 = koji_unsafe_string_size([Value(Local(0))])
-    l10 = call f75(l2, l8, l9)
+    l10 = call f76(l2, l8, l9)
     l11 = IntCompare(Equal) l10, 0
     branch l11, b4, b5
   b3:
@@ -37553,7 +37659,7 @@ function f78 hasNul(l0: Str): Bool
   b5:
     goto b1
 
-function f79 chars(l0: Str): List(Char)
+function f80 chars(l0: Str): List(Char)
     local l1: Int
     local l2: Int // bytes
     local l3: Int
@@ -37607,9 +37713,9 @@ function f79 chars(l0: Str): List(Char)
     l10 = l16
     goto b6
   b5:
-    l17 = call f69(l2, l10)
+    l17 = call f70(l2, l10)
     l18 = l17
-    l19 = call f70(l2, l10, l18)
+    l19 = call f71(l2, l10, l18)
     koji_unsafe_write_int([Value(Local(8)), Value(Int(0)), Value(Local(19))])
     l20 = IntAdd l10, l18
     l10 = l20
@@ -37621,7 +37727,7 @@ function f79 chars(l0: Str): List(Char)
     l9 = l22
     goto b1
 
-function f80 charOf(l0: Int): Record(19)
+function f81 charOf(l0: Int): Record(19)
     local l1: Bool
     local l2: Bool
     local l3: Bool
@@ -37664,7 +37770,7 @@ function f80 charOf(l0: Int): Record(19)
     l10 = record variant 0 (l9)
     return l10
 
-function f81 intOf(l0: Str): Record(21)
+function f82 intOf(l0: Str): Record(21)
     local l1: Int
     local l2: Int // bytes
     local l3: Int
@@ -37722,9 +37828,9 @@ function f81 intOf(l0: Str): Record(21)
     l2 = l1
     l3 = koji_unsafe_string_size([Value(Local(0))])
     l4 = l3
-    l5 = call f59(l2, 0, l4)
+    l5 = call f60(l2, 0, l4)
     l6 = l5
-    l7 = call f60(l2, l6, l4)
+    l7 = call f61(l2, l6, l4)
     l8 = l7
     l9 = l6
     l10 = false
@@ -37845,7 +37951,7 @@ function f81 intOf(l0: Str): Record(21)
     l52 = record variant 0 (l50)
     return l52
 
-function f82 floatOf(l0: Str): Record(22)
+function f83 floatOf(l0: Str): Record(22)
     local l1: Int
     local l2: Int // bytes
     local l3: Int
@@ -37896,9 +38002,9 @@ function f82 floatOf(l0: Str): Record(22)
     l2 = l1
     l3 = koji_unsafe_string_size([Value(Local(0))])
     l4 = l3
-    l5 = call f59(l2, 0, l4)
+    l5 = call f60(l2, 0, l4)
     l6 = l5
-    l7 = call f60(l2, l6, l4)
+    l7 = call f61(l2, l6, l4)
     l8 = l7
     l9 = l6
     goto b1
@@ -37911,19 +38017,19 @@ function f82 floatOf(l0: Str): Record(22)
     l9 = l17
     goto b1
   b3:
-    l19 = call f75(l2, l9, l8)
+    l19 = call f76(l2, l9, l8)
     l20 = IntCompare(Equal) l19, 48
     l18 = l20
     branch l18, b8, b9
   b4:
-    l13 = call f75(l2, l9, l8)
+    l13 = call f76(l2, l9, l8)
     l14 = IntCompare(Equal) l13, 43
     l12 = l14
     branch l12, b7, b6
   b5:
     branch l10, b2, b3
   b6:
-    l15 = call f75(l2, l9, l8)
+    l15 = call f76(l2, l9, l8)
     l16 = IntCompare(Equal) l15, 45
     l12 = l16
     goto b7
@@ -37932,7 +38038,7 @@ function f82 floatOf(l0: Str): Record(22)
     goto b5
   b8:
     l21 = IntAdd l9, 1
-    l22 = call f75(l2, l21, l8)
+    l22 = call f76(l2, l21, l8)
     l23 = IntCompare(Equal) l22, 120
     l18 = l23
     goto b9
@@ -37940,15 +38046,15 @@ function f82 floatOf(l0: Str): Record(22)
     branch l18, b10, b11
   b10:
     l24 = 0
-    l25 = call f61(l2, l6, l8)
-    l26 = call f88(l25, l24) writeback 1 -> l24
+    l25 = call f62(l2, l6, l8)
+    l26 = call f89(l25, l24) writeback 1 -> l24
     l27 = l26
     l28 = IntCompare(Equal) l24, 1
     branch l28, b12, b13
   b11:
     l35 = IntToFloat 0
     l36 = l35
-    l37 = call f83(l2, l6, l8, l36) writeback 3 -> l36
+    l37 = call f84(l2, l6, l8, l36) writeback 3 -> l36
     l38 = l37
     l39 = IntCompare(Equal) l38, 1
     branch l39, b16, b17
@@ -37981,7 +38087,7 @@ function f82 floatOf(l0: Str): Record(22)
     l45 = record variant 0 (l36)
     return l45
 
-function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
+function f84 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l4: Int // at
     local l5: Bool // negative
     local l6: Bool
@@ -38097,14 +38203,14 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l6 = l7
     branch l6, b1, b2
   b1:
-    l8 = call f75(l0, l4, l2)
-    l9 = call f87(l8)
+    l8 = call f76(l0, l4, l2)
+    l9 = call f88(l8)
     l6 = l9
     goto b2
   b2:
     branch l6, b3, b4
   b3:
-    l10 = call f75(l0, l4, l2)
+    l10 = call f76(l0, l4, l2)
     l11 = IntCompare(Equal) l10, 45
     l5 = l11
     l12 = IntAdd l4, 1
@@ -38122,9 +38228,9 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l18 = l19
     branch l18, b8, b9
   b6:
-    l22 = call f75(l0, l4, l2)
+    l22 = call f76(l0, l4, l2)
     l23 = IntSub l22, 48
-    call f84(l23, l13, l14, l15, l16, false) writeback 1 -> l13, 2 -> l14, 3 -> l15, 4 -> l16
+    call f85(l23, l13, l14, l15, l16, false) writeback 1 -> l13, 2 -> l14, 3 -> l15, 4 -> l16
     l24 = IntAdd l17, 1
     l17 = l24
     l25 = IntAdd l4, 1
@@ -38132,12 +38238,12 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     goto b5
   b7:
     l26 = 0
-    l27 = call f75(l0, l4, l2)
+    l27 = call f76(l0, l4, l2)
     l28 = IntCompare(Equal) l27, 46
     branch l28, b10, b11
   b8:
-    l20 = call f75(l0, l4, l2)
-    l21 = call f85(l20)
+    l20 = call f76(l0, l4, l2)
+    l21 = call f86(l20)
     l18 = l21
     goto b9
   b9:
@@ -38155,9 +38261,9 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l30 = l31
     branch l30, b15, b16
   b13:
-    l34 = call f75(l0, l4, l2)
+    l34 = call f76(l0, l4, l2)
     l35 = IntSub l34, 48
-    call f84(l35, l13, l14, l15, l16, true) writeback 1 -> l13, 2 -> l14, 3 -> l15, 4 -> l16
+    call f85(l35, l13, l14, l15, l16, true) writeback 1 -> l13, 2 -> l14, 3 -> l15, 4 -> l16
     l36 = IntAdd l26, 1
     l26 = l36
     l37 = IntAdd l4, 1
@@ -38166,8 +38272,8 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
   b14:
     goto b11
   b15:
-    l32 = call f75(l0, l4, l2)
-    l33 = call f85(l32)
+    l32 = call f76(l0, l4, l2)
+    l33 = call f86(l32)
     l30 = l33
     goto b16
   b16:
@@ -38182,12 +38288,12 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     return 1
   b20:
     l41 = 0
-    l43 = call f75(l0, l4, l2)
+    l43 = call f76(l0, l4, l2)
     l44 = IntCompare(Equal) l43, 101
     l42 = l44
     branch l42, b22, b21
   b21:
-    l45 = call f75(l0, l4, l2)
+    l45 = call f76(l0, l4, l2)
     l46 = IntCompare(Equal) l45, 69
     l42 = l46
     goto b22
@@ -38204,14 +38310,14 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l72 = IntCompare(NotEqual) l4, l2
     branch l72, b42, b43
   b25:
-    l51 = call f75(l0, l4, l2)
-    l52 = call f87(l51)
+    l51 = call f76(l0, l4, l2)
+    l52 = call f88(l51)
     l49 = l52
     goto b26
   b26:
     branch l49, b27, b28
   b27:
-    l53 = call f75(l0, l4, l2)
+    l53 = call f76(l0, l4, l2)
     l54 = IntCompare(Equal) l53, 45
     l48 = l54
     l55 = IntAdd l4, 1
@@ -38222,8 +38328,8 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l56 = l57
     branch l56, b29, b30
   b29:
-    l58 = call f75(l0, l4, l2)
-    l59 = call f85(l58)
+    l58 = call f76(l0, l4, l2)
+    l59 = call f86(l58)
     l56 = l59
     goto b30
   b30:
@@ -38243,15 +38349,15 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
   b35:
     branch l48, b40, b41
   b36:
-    l63 = call f75(l0, l4, l2)
-    l64 = call f85(l63)
+    l63 = call f76(l0, l4, l2)
+    l64 = call f86(l63)
     l61 = l64
     goto b37
   b37:
     branch l61, b34, b35
   b38:
     l66 = IntMul l41, 10
-    l67 = call f75(l0, l4, l2)
+    l67 = call f76(l0, l4, l2)
     l68 = IntAdd l66, l67
     l69 = IntSub l68, 48
     l41 = l69
@@ -38326,7 +38432,7 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l85 = l74
     goto b54
   b54:
-    l88 = call f86(l85)
+    l88 = call f87(l85)
     l89 = l88
     l91 = IntCompare(Less) l74, 0
     branch l91, b55, b56
@@ -38363,7 +38469,7 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
   b64:
     return 0
 
-function f84 keepDigit(l0: Int, l1: Int, l2: Int, l3: Bool, l4: Int, l5: Bool): Void
+function f85 keepDigit(l0: Int, l1: Int, l2: Int, l3: Bool, l4: Int, l5: Bool): Void
     local l6: Bool
     local l7: Int
     local l8: Int
@@ -38410,7 +38516,7 @@ function f84 keepDigit(l0: Int, l1: Int, l2: Int, l3: Bool, l4: Int, l5: Bool): 
   b10:
     return
 
-function f85 isDigit(l0: Int): Bool
+function f86 isDigit(l0: Int): Bool
     local l1: Bool
     local l2: Bool
     local l3: Bool
@@ -38425,7 +38531,7 @@ function f85 isDigit(l0: Int): Bool
   b2:
     return l1
 
-function f86 tenTo(l0: Int): Float
+function f87 tenTo(l0: Int): Float
     local l1: Float
     local l2: Float // result
     local l3: Int
@@ -38454,7 +38560,7 @@ function f86 tenTo(l0: Int): Float
   b3:
     return l2
 
-function f87 isSign(l0: Int): Bool
+function f88 isSign(l0: Int): Bool
     local l1: Bool
     local l2: Bool
     local l3: Bool
@@ -38469,7 +38575,7 @@ function f87 isSign(l0: Int): Bool
   b2:
     return l1
 
-function f88 hexFloat(l0: Str, l1: Int): Float
+function f89 hexFloat(l0: Str, l1: Int): Float
     local l2: List(Char)
     local l3: List(Char) // chars
     local l4: Int // at
@@ -38682,7 +38788,7 @@ function f88 hexFloat(l0: Str, l1: Int): Float
     local l211: Float
     local l212: Float
   b0:
-    l2 = call f79(l0)
+    l2 = call f80(l0)
     l3 = l2
     l4 = 0
     l5 = false
@@ -38804,7 +38910,7 @@ function f88 hexFloat(l0: Str, l1: Int): Float
     l54 = IntAdd l35, 1
     l55 = l54
     l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
-    l57 = call f81(l56)
+    l57 = call f82(l56)
     l58 = l57
     l59 = RecordTag l58
     l60 = IntCompare(Equal) l59, 0
@@ -38821,7 +38927,7 @@ function f88 hexFloat(l0: Str, l1: Int): Float
     l72 = IntAdd l35, 1
     l73 = l72
     l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
-    l75 = call f58(l74)
+    l75 = call f59(l74)
     l76 = IntAdd l35, 1
     l77 = l76
     l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
@@ -38933,7 +39039,7 @@ function f88 hexFloat(l0: Str, l1: Int): Float
     goto b55
   b59:
     l111 = l3[l109]
-    l112 = call f89(l111)
+    l112 = call f90(l111)
     l113 = l112
     l114 = IntCompare(Less) l113, 0
     branch l114, b60, b61
@@ -39145,15 +39251,15 @@ function f88 hexFloat(l0: Str, l1: Int): Float
     l204 = koji_unsafe_wide_to_float([Value(Local(158))])
     l205 = FloatMul l136, l204
     l206 = IntDiv l159, 2
-    l207 = call f90(l206)
+    l207 = call f91(l206)
     l208 = FloatMul l205, l207
     l209 = IntDiv l159, 2
     l210 = IntSub l159, l209
-    l211 = call f90(l210)
+    l211 = call f91(l210)
     l212 = FloatMul l208, l211
     return l212
 
-function f89 hexValue(l0: Char): Int
+function f90 hexValue(l0: Char): Int
     local l1: Int
     local l2: Int // code
     local l3: Bool
@@ -39214,7 +39320,7 @@ function f89 hexValue(l0: Char): Int
     l15 = IntNeg 1
     return l15
 
-function f90 powerOfTwo(l0: Int): Float
+function f91 powerOfTwo(l0: Int): Float
     local l1: Float
     local l2: Float // result
     local l3: Float
@@ -39287,13 +39393,13 @@ function f90 powerOfTwo(l0: Int): Float
   b13:
     return l16
 
-function f91 readLine(l0: Int): Record(9)
+function f92 readLine(l0: Int): Record(9)
     local l1: Record(9)
   b0:
-    l1 = call f92(s2, l0)
+    l1 = call f93(s2, l0)
     return l1
 
-function f92 readLineAfter(l0: Str, l1: Int): Record(9)
+function f93 readLineAfter(l0: Str, l1: Int): Record(9)
     local l2: Int
     local l3: Int // status
     local l4: Str
@@ -39321,7 +39427,7 @@ function f92 readLineAfter(l0: Str, l1: Int): Record(9)
     l10 = record variant 0 (l5)
     return l10
 
-function f93 decimalOf(l0: Str): Record(23)
+function f94 decimalOf(l0: Str): Record(23)
     local l1: Int
     local l2: Int // status
     local l3: Decimal
@@ -39360,7 +39466,7 @@ function f93 decimalOf(l0: Str): Record(23)
     l13 = record variant 0 (l4)
     return l13
 
-function f94 drop Record(1)(l0: Record(1)): Void
+function f95 drop Record(1)(l0: Record(1)): Void
     local l1: Record(1)
   b0:
     l1 = l0
@@ -56072,9 +56178,9 @@ function f2 system (module)(): Void
   b2:
     g1 = true
     call f3()
-    l0 = call f53()
+    l0 = call f54()
     g4 = l0
-    l1 = call f55()
+    l1 = call f56()
     g5 = l1
     l2 = list []
     g6 = l2
@@ -56234,22 +56340,28 @@ function f7 open(l0: Str, l1: Record(2)): Record(3)
     local l25: Int
     local l26: Int // code
     local l27: Bool
-    local l28: Record(0)
-    local l29: Record(3)
-    local l30: Int
-    local l31: Str
-    local l32: Record(2)
-    local l33: Record(1)
-    local l34: Record(3)
+    local l28: Bool
+    local l29: Bool
+    local l30: Bool
+    local l31: Bool
+    local l32: Bool // directory
+    local l33: Int
+    local l34: Record(0)
+    local l35: Record(3)
+    local l36: Int
+    local l37: Str
+    local l38: Record(2)
+    local l39: Record(1)
+    local l40: Record(3)
   b0:
-    l2 = call f78(l0)
+    l2 = call f79(l0)
     branch l2, b1, b2
   b1:
-    l3 = call f27(l0)
+    l3 = call f28(l0)
     l4 = record variant 1 (l3)
     return l4
   b2:
-    l5 = call f76(l0)
+    l5 = call f77(l0)
     l6 = l5
     l7 = record variant 2 ()
     l8 = RecordCompare(Equal) g4, l7
@@ -56259,13 +56371,12 @@ function f7 open(l0: Str, l1: Record(2)): Record(3)
     l13 = IntCompare(Equal) l12, 0
     branch l13, b5, b4
   b3:
-    l21 = call f76(l10)
+    l21 = call f77(l10)
     l22 = l21
     l23 = koji_blocking_fopen([Value(Local(6)), Value(Local(22))])
     l24 = l23
     l25 = koji_system_errno([])
     l26 = l25
-    koji_unsafe_free([Value(Local(6))])
     koji_unsafe_free([Value(Local(22))])
     l27 = IntCompare(Equal) l24, 0
     branch l27, b19, b20
@@ -56313,16 +56424,41 @@ function f7 open(l0: Str, l1: Record(2)): Record(3)
     l10 = l20
     goto b3
   b19:
-    l28 = call f26(l0, l26)
-    l29 = record variant 1 (l28)
-    return l29
+    l29 = l9
+    branch l29, b21, b22
   b20:
-    l30 = l24
-    l31 = l0
-    l32 = l1
-    l33 = record variant 0 (l30, l31, l32)
-    l34 = record variant 0 (l33)
-    return l34
+    koji_unsafe_free([Value(Local(6))])
+    l36 = l24
+    l37 = l0
+    l38 = l1
+    l39 = record variant 0 (l36, l37, l38)
+    l40 = record variant 0 (l39)
+    return l40
+  b21:
+    l30 = IntCompare(Equal) l26, 13
+    l29 = l30
+    goto b22
+  b22:
+    l28 = l29
+    branch l28, b23, b24
+  b23:
+    l31 = call f18(l6)
+    l28 = l31
+    goto b24
+  b24:
+    l32 = l28
+    koji_unsafe_free([Value(Local(6))])
+    branch l32, b25, b26
+  b25:
+    l33 = 21
+    goto b27
+  b26:
+    l33 = l26
+    goto b27
+  b27:
+    l34 = call f27(l0, l33)
+    l35 = record variant 1 (l34)
+    return l35
 
 function f8 File.read(l0: Record(1), l1: Int): Record(4)
     local l2: Record(2)
@@ -56390,7 +56526,7 @@ function f8 File.read(l0: Record(1), l1: Int): Record(4)
     l16 = IntCompare(Less) l15, 4096
     branch l16, b6, b7
   b5:
-    l32 = call f73(l13, l14)
+    l32 = call f74(l13, l14)
     l33 = Not l32
     branch l33, b14, b15
   b6:
@@ -56402,7 +56538,7 @@ function f8 File.read(l0: Record(1), l1: Int): Record(4)
   b7:
     l19 = koji_unsafe_offset([Value(Local(13)), Value(Local(14))])
     l20 = IntSub l11, l14
-    l21 = call f28(false, l10, l19, l20)
+    l21 = call f29(false, l10, l19, l20)
     l22 = l21
     l23 = IntCompare(Less) l22, 0
     branch l23, b8, b9
@@ -56419,7 +56555,7 @@ function f8 File.read(l0: Record(1), l1: Int): Record(4)
   b11:
     koji_unsafe_free([Value(Local(13))])
     l27 = l0.1
-    l28 = call f26(l27, l25)
+    l28 = call f27(l27, l25)
     l29 = record variant 1 (l28)
     return l29
   b12:
@@ -56496,7 +56632,7 @@ function f9 File.readBytes(l0: Record(1), l1: Int): Record(5)
   b3:
     branch true, b4, b5
   b4:
-    l15 = call f28(false, l10, l12, 65536)
+    l15 = call f29(false, l10, l12, 65536)
     l16 = l15
     l17 = IntCompare(Less) l16, 0
     branch l17, b6, b7
@@ -56517,7 +56653,7 @@ function f9 File.readBytes(l0: Record(1), l1: Int): Record(5)
   b9:
     koji_unsafe_free([Value(Local(12))])
     l21 = l0.1
-    l22 = call f26(l21, l19)
+    l22 = call f27(l21, l19)
     l23 = record variant 1 (l22)
     return l23
   b10:
@@ -56652,7 +56788,7 @@ function f12 File.writeAt(l0: Record(1), l1: Int, l2: Int): Record(6)
   b2:
     l8 = koji_unsafe_offset([Value(Local(1)), Value(Local(6))])
     l9 = IntSub l2, l6
-    l10 = call f28(true, l5, l8, l9)
+    l10 = call f29(true, l5, l8, l9)
     l11 = l10
     l12 = IntCompare(Less) l11, 0
     branch l12, b4, b5
@@ -56672,13 +56808,13 @@ function f12 File.writeAt(l0: Record(1), l1: Int, l2: Int): Record(6)
     goto b1
   b7:
     l16 = l0.1
-    l17 = call f26(l16, l14)
+    l17 = call f27(l16, l14)
     l18 = record variant 1 (l17)
     return l18
 
 function f13 File.close(l0: Record(1)): Void
   b0:
-    drop l0 with f94
+    drop l0 with f95
     return
 
 function f14 descriptor(l0: Int): Int
@@ -56742,14 +56878,14 @@ function f15 list(l0: Str): Record(7)
     local l37: Int
     local l38: Record(7)
   b0:
-    l1 = call f78(l0)
+    l1 = call f79(l0)
     branch l1, b1, b2
   b1:
-    l2 = call f27(l0)
+    l2 = call f28(l0)
     l3 = record variant 1 (l2)
     return l3
   b2:
-    l4 = call f76(l0)
+    l4 = call f77(l0)
     l5 = l4
     l6 = koji_blocking_opendir([Value(Local(5))])
     l7 = l6
@@ -56759,7 +56895,7 @@ function f15 list(l0: Str): Record(7)
     l10 = IntCompare(Equal) l7, 0
     branch l10, b3, b4
   b3:
-    l11 = call f26(l0, l9)
+    l11 = call f27(l0, l9)
     l12 = record variant 1 (l11)
     return l12
   b4:
@@ -56804,7 +56940,7 @@ function f15 list(l0: Str): Record(7)
     l25 = koji_unsafe_offset([Value(Local(23)), Value(Local(19))])
     l26 = l25
     l27 = strlen([Value(Local(26))])
-    l28 = call f72(l26, l27)
+    l28 = call f73(l26, l27)
     l29 = l28
     l31 = StrCompare(NotEqual) l29, s43
     l30 = l31
@@ -56837,12 +56973,12 @@ function f16 exists(l0: Str): Bool
     local l1: Bool
     local l2: Bool
   b0:
-    l1 = call f78(l0)
+    l1 = call f79(l0)
     branch l1, b1, b2
   b1:
     return false
   b2:
-    l2 = call f25(l0)
+    l2 = call f26(l0)
     return l2
 
 function f17 remove(l0: Str): Record(6)
@@ -56861,14 +56997,14 @@ function f17 remove(l0: Str): Record(6)
     local l13: Record(6)
     local l14: Record(6)
   b0:
-    l1 = call f78(l0)
+    l1 = call f79(l0)
     branch l1, b1, b2
   b1:
-    l2 = call f27(l0)
+    l2 = call f28(l0)
     l3 = record variant 1 (l2)
     return l3
   b2:
-    l4 = call f76(l0)
+    l4 = call f77(l0)
     l5 = l4
     l6 = koji_blocking_unlink([Value(Local(5))])
     l7 = IntCompare(Equal) l6, 0
@@ -56879,14 +57015,30 @@ function f17 remove(l0: Str): Record(6)
     l11 = Not l8
     branch l11, b3, b4
   b3:
-    l12 = call f26(l0, l10)
+    l12 = call f27(l0, l10)
     l13 = record variant 1 (l12)
     return l13
   b4:
     l14 = record variant 0 (0)
     return l14
 
-function f18 removeDir(l0: Str): Record(6)
+function f18 opensAsDirectory(l0: Int): Bool
+    local l1: Int
+    local l2: Int // directory
+    local l3: Bool
+    local l4: Int
+  b0:
+    l1 = koji_blocking_opendir([Value(Local(0))])
+    l2 = l1
+    l3 = IntCompare(Equal) l2, 0
+    branch l3, b1, b2
+  b1:
+    return false
+  b2:
+    l4 = koji_windows_closedir([Value(Local(2))])
+    return true
+
+function f19 removeDir(l0: Str): Record(6)
     local l1: Bool
     local l2: Record(0)
     local l3: Record(6)
@@ -56902,14 +57054,14 @@ function f18 removeDir(l0: Str): Record(6)
     local l13: Record(6)
     local l14: Record(6)
   b0:
-    l1 = call f78(l0)
+    l1 = call f79(l0)
     branch l1, b1, b2
   b1:
-    l2 = call f27(l0)
+    l2 = call f28(l0)
     l3 = record variant 1 (l2)
     return l3
   b2:
-    l4 = call f76(l0)
+    l4 = call f77(l0)
     l5 = l4
     l6 = rmdir([Value(Local(5))])
     l7 = IntCompare(Equal) l6, 0
@@ -56920,14 +57072,14 @@ function f18 removeDir(l0: Str): Record(6)
     l11 = Not l8
     branch l11, b3, b4
   b3:
-    l12 = call f26(l0, l10)
+    l12 = call f27(l0, l10)
     l13 = record variant 1 (l12)
     return l13
   b4:
     l14 = record variant 0 (0)
     return l14
 
-function f19 setPermissions(l0: Str, l1: Int): Record(6)
+function f20 setPermissions(l0: Str, l1: Int): Record(6)
     local l2: Bool
     local l3: Record(0)
     local l4: Record(6)
@@ -56948,14 +57100,14 @@ function f19 setPermissions(l0: Str, l1: Int): Record(6)
     local l19: Record(6)
     local l20: Record(6)
   b0:
-    l2 = call f78(l0)
+    l2 = call f79(l0)
     branch l2, b1, b2
   b1:
-    l3 = call f27(l0)
+    l3 = call f28(l0)
     l4 = record variant 1 (l3)
     return l4
   b2:
-    l5 = call f76(l0)
+    l5 = call f77(l0)
     l6 = l5
     l8 = record variant 2 ()
     l9 = RecordCompare(Equal) g4, l8
@@ -56978,30 +57130,30 @@ function f19 setPermissions(l0: Str, l1: Int): Record(6)
     l17 = Not l14
     branch l17, b6, b7
   b6:
-    l18 = call f26(l0, l16)
+    l18 = call f27(l0, l16)
     l19 = record variant 1 (l18)
     return l19
   b7:
     l20 = record variant 0 (0)
     return l20
 
-function f20 createDir(l0: Str): Record(6)
+function f21 createDir(l0: Str): Record(6)
     local l1: Bool
     local l2: Record(0)
     local l3: Record(6)
     local l4: Record(6)
   b0:
-    l1 = call f78(l0)
+    l1 = call f79(l0)
     branch l1, b1, b2
   b1:
-    l2 = call f27(l0)
+    l2 = call f28(l0)
     l3 = record variant 1 (l2)
     return l3
   b2:
-    l4 = call f21(l0)
+    l4 = call f22(l0)
     return l4
 
-function f21 createAll(l0: Str): Record(6)
+function f22 createAll(l0: Str): Record(6)
     local l1: Bool
     local l2: Record(6)
     local l3: Int
@@ -57035,7 +57187,7 @@ function f21 createAll(l0: Str): Record(6)
     l2 = record variant 0 (0)
     return l2
   b2:
-    l3 = call f22(l0)
+    l3 = call f23(l0)
     l4 = l3
     l5 = IntCompare(Equal) l4, 0
     branch l5, b3, b4
@@ -57046,11 +57198,11 @@ function f21 createAll(l0: Str): Record(6)
     l7 = IntCompare(NotEqual) l4, 2
     branch l7, b5, b6
   b5:
-    l8 = call f24(l0)
+    l8 = call f25(l0)
     branch l8, b7, b8
   b6:
-    l12 = call f23(l0)
-    l13 = call f21(l12)
+    l12 = call f24(l0)
+    l13 = call f22(l12)
     l14 = l13
     l15 = RecordTag l14
     l16 = IntCompare(Equal) l15, 0
@@ -57059,7 +57211,7 @@ function f21 createAll(l0: Str): Record(6)
     l9 = record variant 0 (0)
     return l9
   b8:
-    l10 = call f26(l0, l4)
+    l10 = call f27(l0, l4)
     l11 = record variant 1 (l10)
     return l11
   b9:
@@ -57067,13 +57219,13 @@ function f21 createAll(l0: Str): Record(6)
     l18 = record variant 1 (l17)
     return l18
   b10:
-    l19 = call f22(l0)
+    l19 = call f23(l0)
     l20 = l19
     l22 = IntCompare(Equal) l20, 0
     l21 = l22
     branch l21, b12, b11
   b11:
-    l23 = call f24(l0)
+    l23 = call f25(l0)
     l21 = l23
     goto b12
   b12:
@@ -57082,11 +57234,11 @@ function f21 createAll(l0: Str): Record(6)
     l24 = record variant 0 (0)
     return l24
   b14:
-    l25 = call f26(l0, l20)
+    l25 = call f27(l0, l20)
     l26 = record variant 1 (l25)
     return l26
 
-function f22 makeDirectory(l0: Str): Int
+function f23 makeDirectory(l0: Str): Int
     local l1: Int
     local l2: Int // cPath
     local l3: Int
@@ -57096,7 +57248,7 @@ function f22 makeDirectory(l0: Str): Int
     local l7: Int // code
     local l8: Int
   b0:
-    l1 = call f76(l0)
+    l1 = call f77(l0)
     l2 = l1
     l3 = koji_blocking_mkdir([Value(Local(2)), Value(Int(511))])
     l4 = IntCompare(Equal) l3, 0
@@ -57114,7 +57266,7 @@ function f22 makeDirectory(l0: Str): Int
   b3:
     return l8
 
-function f23 parentOf(l0: Str): Str
+function f24 parentOf(l0: Str): Str
     local l1: Int
     local l2: Int // bytes
     local l3: Int
@@ -57156,7 +57308,7 @@ function f23 parentOf(l0: Str): Str
     goto b6
   b4:
     l7 = IntSub l4, 1
-    l8 = call f29(l2, l7)
+    l8 = call f30(l2, l7)
     l9 = IntCompare(Equal) l8, 47
     l5 = l9
     goto b5
@@ -57174,7 +57326,7 @@ function f23 parentOf(l0: Str): Str
     goto b11
   b9:
     l13 = IntSub l4, 1
-    l14 = call f29(l2, l13)
+    l14 = call f30(l2, l13)
     l15 = IntCompare(NotEqual) l14, 47
     l11 = l15
     goto b10
@@ -57193,29 +57345,29 @@ function f23 parentOf(l0: Str): Str
     return l23
   b14:
     l19 = IntSub l4, 1
-    l20 = call f29(l2, l19)
+    l20 = call f30(l2, l19)
     l21 = IntCompare(Equal) l20, 47
     l17 = l21
     goto b15
   b15:
     branch l17, b12, b13
 
-function f24 isDirectory(l0: Str): Bool
+function f25 isDirectory(l0: Str): Bool
     local l1: Str
     local l2: Bool
   b0:
     l1 = StrConcat l0, s45
-    l2 = call f25(l1)
+    l2 = call f26(l1)
     return l2
 
-function f25 reachable(l0: Str): Bool
+function f26 reachable(l0: Str): Bool
     local l1: Int
     local l2: Int // cPath
     local l3: Int
     local l4: Bool
     local l5: Bool // found
   b0:
-    l1 = call f76(l0)
+    l1 = call f77(l0)
     l2 = l1
     l3 = koji_blocking_access([Value(Local(2)), Value(Int(0))])
     l4 = IntCompare(Equal) l3, 0
@@ -57223,7 +57375,7 @@ function f25 reachable(l0: Str): Bool
     koji_unsafe_free([Value(Local(2))])
     return l5
 
-function f26 failure(l0: Str, l1: Int): Record(0)
+function f27 failure(l0: Str, l1: Int): Record(0)
     local l2: Bool
     local l3: Record(0)
     local l4: Bool
@@ -57266,7 +57418,7 @@ function f26 failure(l0: Str, l1: Int): Record(0)
     return l9
   b8:
     l10 = strerror([Value(Local(1))])
-    l11 = call f77(l10)
+    l11 = call f78(l10)
     l12 = StrConcat l11, s13
     l13 = IntToStr l1
     l14 = StrConcat l12, l13
@@ -57274,13 +57426,13 @@ function f26 failure(l0: Str, l1: Int): Record(0)
     l16 = record variant 4 (l0, l15)
     return l16
 
-function f27 invalidPath(l0: Str): Record(0)
+function f28 invalidPath(l0: Str): Record(0)
     local l1: Record(0)
   b0:
     l1 = record variant 4 (l0, s46)
     return l1
 
-function f28 transfer(l0: Bool, l1: Int, l2: Int, l3: Int): Int
+function f29 transfer(l0: Bool, l1: Int, l2: Int, l3: Int): Int
     local l4: Int
     local l5: Int // vector
     local l6: Int
@@ -57306,7 +57458,7 @@ function f28 transfer(l0: Bool, l1: Int, l2: Int, l3: Int): Int
     koji_unsafe_free([Value(Local(5))])
     return l9
 
-function f29 byteAt(l0: Int, l1: Int): Int
+function f30 byteAt(l0: Int, l1: Int): Int
     local l2: Byte
     local l3: Byte // b
     local l4: Int
@@ -57316,7 +57468,7 @@ function f29 byteAt(l0: Int, l1: Int): Int
     l4 = ByteToInt l3
     return l4
 
-function f30 SystemError.display(l0: Record(8)): Str
+function f31 SystemError.display(l0: Record(8)): Str
     local l1: Str
     local l2: Record(8)
     local l3: Int
@@ -57382,7 +57534,7 @@ function f30 SystemError.display(l0: Record(8)): Str
     l1 = l23
     goto b1
 
-function f31 args(): List(Str)
+function f32 args(): List(Str)
     local l0: List(Str)
     local l1: List(Str) // found
     local l2: Int
@@ -57407,13 +57559,13 @@ function f31 args(): List(Str)
     branch l6, b2, b3
   b2:
     l8 = koji_system_argument([Value(Local(7))])
-    l9 = call f77(l8)
+    l9 = call f78(l8)
     push l1, l9
     goto b1
   b3:
     return l1
 
-function f32 readInput(l0: Int, l1: Int): Record(9)
+function f33 readInput(l0: Int, l1: Int): Record(9)
     local l2: Int
     local l3: Int // status
     local l4: Str
@@ -57446,12 +57598,12 @@ function f32 readInput(l0: Int, l1: Int): Record(9)
   b3:
     return l8
 
-function f33 writeOutput(l0: Str, l1: Int): Void
+function f34 writeOutput(l0: Str, l1: Int): Void
   b0:
     koji_write([Value(Local(0)), Value(Local(1))])
     return
 
-function f34 env(l0: Str): Record(9)
+function f35 env(l0: Str): Record(9)
     local l1: Bool
     local l2: Record(9)
     local l3: Int
@@ -57468,13 +57620,13 @@ function f34 env(l0: Str): Record(9)
     local l14: Str
     local l15: Record(9)
   b0:
-    l1 = call f78(l0)
+    l1 = call f79(l0)
     branch l1, b1, b2
   b1:
     l2 = record variant 1 ()
     return l2
   b2:
-    l3 = call f76(l0)
+    l3 = call f77(l0)
     l4 = l3
     l5 = getenv([Value(Local(4))])
     l6 = l5
@@ -57487,7 +57639,7 @@ function f34 env(l0: Str): Record(9)
   b4:
     l9 = strlen([Value(Local(6))])
     l10 = l9
-    l11 = call f73(l6, l10)
+    l11 = call f74(l6, l10)
     l12 = Not l11
     branch l12, b5, b6
   b5:
@@ -57498,7 +57650,7 @@ function f34 env(l0: Str): Record(9)
     l15 = record variant 0 (l14)
     return l15
 
-function f35 currentDirectory(): Record(9)
+function f36 currentDirectory(): Record(9)
     local l0: Int // size
     local l1: Bool
     local l2: Int
@@ -57530,7 +57682,7 @@ function f35 currentDirectory(): Record(9)
     return l12
   b4:
     l7 = strlen([Value(Local(3))])
-    l8 = call f72(l3, l7)
+    l8 = call f73(l3, l7)
     l9 = l8
     koji_unsafe_free([Value(Local(3))])
     l10 = record variant 0 (l9)
@@ -57541,7 +57693,7 @@ function f35 currentDirectory(): Record(9)
     l0 = l11
     goto b1
 
-function f36 executable(): Record(9)
+function f37 executable(): Record(9)
     local l0: Int
     local l1: Bool
     local l2: Record(9)
@@ -57551,14 +57703,14 @@ function f36 executable(): Record(9)
     l1 = IntCompare(Equal) l0, 0
     branch l1, b1, b2
   b1:
-    l2 = call f37()
+    l2 = call f38()
     push g6, l2
     goto b2
   b2:
     l3 = g6[0]
     return l3
 
-function f37 executablePath(): Record(9)
+function f38 executablePath(): Record(9)
     local l0: Int // size
     local l1: Int
     local l2: Int // buffer
@@ -57583,7 +57735,7 @@ function f37 executablePath(): Record(9)
   b2:
     l1 = koji_unsafe_allocate([Value(Local(0))])
     l2 = l1
-    l3 = call f54(l2, l0)
+    l3 = call f55(l2, l0)
     l4 = l3
     l5 = IntCompare(GreaterEqual) l4, 0
     branch l5, b4, b5
@@ -57591,7 +57743,7 @@ function f37 executablePath(): Record(9)
     l15 = record variant 1 ()
     return l15
   b4:
-    l6 = call f72(l2, l4)
+    l6 = call f73(l2, l4)
     l7 = l6
     koji_unsafe_free([Value(Local(2))])
     l8 = record variant 0 (l7)
@@ -57616,7 +57768,7 @@ function f37 executablePath(): Record(9)
     l0 = l14
     goto b1
 
-function f38 leave(l0: Int): Void
+function f39 leave(l0: Int): Void
     local l1: Int
     local l2: Bool
     local l3: Int
@@ -57649,7 +57801,7 @@ function f38 leave(l0: Int): Void
     l1 = l3
     goto b3
 
-function f39 command(l0: Str, l1: List(Str)): Record(10)
+function f40 command(l0: Str, l1: List(Str)): Record(10)
     local l2: Str
     local l3: List(Str)
     local l4: Str
@@ -57669,7 +57821,7 @@ function f39 command(l0: Str, l1: List(Str)): Record(10)
     l9 = record variant 0 (l2, l3, l4, l5, l7, l8)
     return l9
 
-function f40 Command.run(l0: Record(10)): Record(11)
+function f41 Command.run(l0: Record(10)): Record(11)
     local l1: Record(15)
     local l2: Record(15)
     local l3: Int
@@ -57682,7 +57834,7 @@ function f40 Command.run(l0: Record(10)): Record(11)
     local l10: Int
     local l11: Record(11)
   b0:
-    l1 = call f45(l0, false)
+    l1 = call f46(l0, false)
     l2 = l1
     l3 = RecordTag l2
     l4 = IntCompare(Equal) l3, 0
@@ -57695,11 +57847,11 @@ function f40 Command.run(l0: Record(10)): Record(11)
     l7 = l2.0
     l8 = l7
     l9 = l8.0
-    l10 = call f47(l9)
+    l10 = call f48(l9)
     l11 = record variant 0 (l10)
     return l11
 
-function f41 Command.output(l0: Record(10)): Record(13)
+function f42 Command.output(l0: Record(10)): Record(13)
     local l1: Record(15)
     local l2: Record(15)
     local l3: Int
@@ -57725,7 +57877,7 @@ function f41 Command.output(l0: Record(10)): Record(13)
     local l23: Record(12)
     local l24: Record(13)
   b0:
-    l1 = call f45(l0, true)
+    l1 = call f46(l0, true)
     l2 = l1
     l3 = RecordTag l2
     l4 = IntCompare(Equal) l3, 0
@@ -57741,10 +57893,10 @@ function f41 Command.output(l0: Record(10)): Record(13)
     l10 = l8.2
     l11 = l8.3
     l12 = l0.2
-    l13 = call f52(l9, l10, l11, l12)
+    l13 = call f53(l9, l10, l11, l12)
     l14 = l13
     l15 = l8.0
-    l16 = call f47(l15)
+    l16 = call f48(l15)
     l17 = l16
     l18 = l17
     l19 = l14[0]
@@ -57755,23 +57907,23 @@ function f41 Command.output(l0: Record(10)): Record(13)
     l24 = record variant 0 (l23)
     return l24
 
-function f42 run(l0: Str, l1: List(Str)): Record(11)
+function f43 run(l0: Str, l1: List(Str)): Record(11)
     local l2: Record(10)
     local l3: Record(11)
   b0:
-    l2 = call f39(l0, l1)
-    l3 = call f40(l2)
-    return l3
-
-function f43 capture(l0: Str, l1: List(Str)): Record(13)
-    local l2: Record(10)
-    local l3: Record(13)
-  b0:
-    l2 = call f39(l0, l1)
+    l2 = call f40(l0, l1)
     l3 = call f41(l2)
     return l3
 
-function f44 environmentOf(l0: Record(10)): List(Str)
+function f44 capture(l0: Str, l1: List(Str)): Record(13)
+    local l2: Record(10)
+    local l3: Record(13)
+  b0:
+    l2 = call f40(l0, l1)
+    l3 = call f42(l2)
+    return l3
+
+function f45 environmentOf(l0: Record(10)): List(Str)
     local l1: List(Str)
     local l2: List(Str) // found
     local l3: Bool
@@ -57835,9 +57987,9 @@ function f44 environmentOf(l0: Record(10)): List(Str)
   b6:
     goto b5
   b7:
-    l12 = call f77(l10)
+    l12 = call f78(l10)
     l13 = l12
-    l14 = call f65(l13, s10, location(system:269))
+    l14 = call f66(l13, s10, location(system:269))
     l15 = l14[0]
     l16 = l15
     l17 = l0.4
@@ -57869,7 +58021,7 @@ function f44 environmentOf(l0: Record(10)): List(Str)
   b13:
     return l2
 
-function f45 spawn(l0: Record(10), l1: Bool): Record(15)
+function f46 spawn(l0: Record(10), l1: Bool): Record(15)
     local l2: Record(16)
     local l3: Bool
     local l4: Record(15)
@@ -58037,7 +58189,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     l3 = RecordCompare(Equal) g4, l2
     branch l3, b1, b2
   b1:
-    l4 = call f48(l0, l1)
+    l4 = call f49(l0, l1)
     return l4
   b2:
     l5 = l0.0
@@ -58057,7 +58209,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     branch l16, b4, b6
   b4:
     l18 = l13[l15]
-    l19 = call f78(l18)
+    l19 = call f79(l18)
     branch l19, b7, b8
   b5:
     l17 = IntAdd l15, 1
@@ -58069,7 +58221,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     l24 = IntMul l23, 8
     l25 = koji_unsafe_allocate([Value(Local(24))])
     l26 = l25
-    l27 = call f76(l6)
+    l27 = call f77(l6)
     koji_unsafe_write_int([Value(Local(26)), Value(Int(0)), Value(Local(27))])
     l28 = ListLength l8
     l29 = l28
@@ -58090,7 +58242,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     l34 = IntAdd l33, 1
     l35 = IntMul l34, 8
     l36 = l8[l33]
-    l37 = call f76(l36)
+    l37 = call f77(l36)
     koji_unsafe_write_int([Value(Local(26)), Value(Local(35)), Value(Local(37))])
     goto b9
   b11:
@@ -58123,13 +58275,13 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     l56 = pipe([Value(Local(45))])
     l57 = koji_unsafe_offset([Value(Local(45)), Value(Int(8))])
     l58 = pipe([Value(Local(57))])
-    l59 = call f56(l45, 0)
+    l59 = call f57(l45, 0)
     l47 = l59
-    l60 = call f56(l45, 8)
+    l60 = call f57(l45, 8)
     l49 = l60
-    l61 = call f56(l45, 4)
+    l61 = call f57(l45, 4)
     l62 = l61
-    l63 = call f56(l45, 12)
+    l63 = call f57(l45, 12)
     l64 = l63
     branch l55, b16, b17
   b15:
@@ -58139,16 +58291,16 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
   b16:
     l65 = koji_unsafe_offset([Value(Local(45)), Value(Int(16))])
     l66 = pipe([Value(Local(65))])
-    l67 = call f56(l45, 20)
+    l67 = call f57(l45, 20)
     l51 = l67
-    l68 = call f56(l45, 16)
+    l68 = call f57(l45, 16)
     l69 = l68
     l70 = posix_spawn_file_actions_adddup2([Value(Local(42)), Value(Local(69)), Value(Int(0))])
     l71 = posix_spawn_file_actions_addclose([Value(Local(42)), Value(Local(69))])
     l72 = posix_spawn_file_actions_addclose([Value(Local(42)), Value(Local(51))])
     goto b18
   b17:
-    l73 = call f76(s12)
+    l73 = call f77(s12)
     l74 = l73
     l75 = posix_spawn_file_actions_addopen([Value(Local(42)), Value(Int(0)), Value(Local(74)), Value(Int(0)), Value(Int(0))])
     koji_unsafe_free([Value(Local(74))])
@@ -58176,7 +58328,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     goto b15
   b23:
     l88 = l0.3
-    l89 = call f76(l88)
+    l89 = call f77(l88)
     l90 = l89
     l91 = posix_spawn_file_actions_addchdir_np([Value(Local(42)), Value(Local(90))])
     koji_unsafe_free([Value(Local(90))])
@@ -58199,7 +58351,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     l101 = l96
     branch l101, b27, b28
   b27:
-    l102 = call f44(l0)
+    l102 = call f45(l0)
     l95 = l102
     l103 = ListLength l95
     l104 = IntAdd l103, 1
@@ -58228,7 +58380,7 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
   b30:
     l113 = IntMul l112, 8
     l114 = l95[l112]
-    l115 = call f76(l114)
+    l115 = call f77(l114)
     koji_unsafe_write_int([Value(Local(93)), Value(Local(113)), Value(Local(115))])
     goto b29
   b31:
@@ -58274,20 +58426,20 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     goto b37
   b39:
     koji_unsafe_free([Value(Local(26))])
-    l144 = call f56(l119, 0)
+    l144 = call f57(l119, 0)
     l145 = l144
     koji_unsafe_free([Value(Local(119))])
     branch l1, b40, b41
   b40:
-    l146 = call f56(l45, 4)
+    l146 = call f57(l45, 4)
     l147 = close([Value(Local(146))])
-    l148 = call f56(l45, 12)
+    l148 = call f57(l45, 12)
     l149 = close([Value(Local(148))])
     goto b41
   b41:
     branch l55, b42, b43
   b42:
-    l150 = call f56(l45, 16)
+    l150 = call f57(l45, 16)
     l151 = close([Value(Local(150))])
     goto b43
   b43:
@@ -58314,11 +58466,11 @@ function f45 spawn(l0: Record(10), l1: Bool): Record(15)
     l155 = close([Value(Local(51))])
     goto b49
   b49:
-    l156 = call f46(l6, l123)
+    l156 = call f47(l6, l123)
     l157 = record variant 1 (l156)
     return l157
 
-function f46 failure(l0: Str, l1: Int): Record(8)
+function f47 failure(l0: Str, l1: Int): Record(8)
     local l2: Bool
     local l3: Record(8)
     local l4: Bool
@@ -58353,7 +58505,7 @@ function f46 failure(l0: Str, l1: Int): Record(8)
     return l7
   b6:
     l8 = strerror([Value(Local(1))])
-    l9 = call f77(l8)
+    l9 = call f78(l8)
     l10 = StrConcat l9, s13
     l11 = IntToStr l1
     l12 = StrConcat l10, l11
@@ -58361,7 +58513,7 @@ function f46 failure(l0: Str, l1: Int): Record(8)
     l14 = record variant 2 (l0, l13)
     return l14
 
-function f47 wait(l0: Int): Int
+function f48 wait(l0: Int): Int
     local l1: Int
     local l2: Int // status
     local l3: Bool
@@ -58388,7 +58540,7 @@ function f47 wait(l0: Int): Int
   b2:
     goto b1
   b3:
-    l8 = call f56(l2, 0)
+    l8 = call f57(l2, 0)
     l9 = l8
     koji_unsafe_free([Value(Local(2))])
     l10 = BitAnd l9, 127
@@ -58409,7 +58561,7 @@ function f47 wait(l0: Int): Int
     l14 = BitAnd l13, 255
     return l14
 
-function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
+function f49 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     local l2: Str
     local l3: Str // command
     local l4: Str
@@ -58588,7 +58740,7 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
   b0:
     l2 = l0.0
     l3 = l2
-    l4 = call f50(l3)
+    l4 = call f51(l3)
     l5 = l4
     l6 = l0.1
     l7 = l6
@@ -58600,7 +58752,7 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     branch l10, b2, b4
   b2:
     l12 = l7[l9]
-    l13 = call f50(l12)
+    l13 = call f51(l12)
     l14 = StrConcat s15, l13
     l15 = StrConcat l5, l14
     l5 = l15
@@ -58612,9 +58764,9 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
   b4:
     l16 = koji_unsafe_allocate([Value(Int(24))])
     l17 = l16
-    call f57(l17, 0, 24)
+    call f58(l17, 0, 24)
     koji_unsafe_write_int([Value(Local(17)), Value(Int(8)), Value(Int(0))])
-    call f57(l17, 16, 1)
+    call f58(l17, 16, 1)
     l18 = koji_unsafe_allocate([Value(Int(104))])
     l19 = l18
     l20 = 13
@@ -58630,7 +58782,7 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     koji_unsafe_write_int([Value(Local(19)), Value(Local(25)), Value(Int(0))])
     goto b5
   b7:
-    call f57(l19, 0, 104)
+    call f58(l19, 0, 104)
     l26 = koji_unsafe_allocate([Value(Int(24))])
     l27 = l26
     l28 = koji_unsafe_allocate([Value(Int(48))])
@@ -58678,14 +58830,14 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     l30 = l55
     goto b14
   b13:
-    l56 = call f76(s16)
+    l56 = call f77(s16)
     l57 = l56
     l58 = CreateFileA([Value(Local(57)), Value(Int(2147483648)), Value(Int(3)), Value(Local(17)), Value(Int(3)), Value(Int(0)), Value(Int(0))])
     l30 = l58
     koji_unsafe_free([Value(Local(57))])
     goto b14
   b14:
-    call f57(l19, 60, 256)
+    call f58(l19, 60, 256)
     koji_unsafe_write_int([Value(Local(19)), Value(Int(80)), Value(Local(30))])
     l59 = koji_unsafe_read_int([Value(Local(29)), Value(Int(8))])
     l60 = l59
@@ -58703,7 +58855,7 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
   b16:
     branch l64, b17, b18
   b17:
-    l69 = call f44(l0)
+    l69 = call f45(l0)
     l70 = l69
     l71 = 1
     l72 = l70
@@ -58779,12 +58931,12 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     goto b32
   b31:
     l108 = l0.3
-    l109 = call f76(l108)
+    l109 = call f77(l108)
     l105 = l109
     goto b32
   b32:
     l110 = l105
-    l111 = call f76(l5)
+    l111 = call f77(l5)
     l112 = l111
     l113 = CreateProcessA([Value(Int(0)), Value(Local(112)), Value(Int(0)), Value(Int(0)), Value(Int(1)), Value(Int(0)), Value(Local(63)), Value(Local(110)), Value(Local(19)), Value(Local(27))])
     l114 = IntCompare(NotEqual) l113, 0
@@ -58878,9 +59030,9 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     l176 = record variant 0 (l175)
     return l176
   b48:
-    l149 = call f49(l124)
+    l149 = call f50(l124)
     l150 = CloseHandle([Value(Local(149))])
-    l151 = call f49(l126)
+    l151 = call f50(l126)
     l152 = CloseHandle([Value(Local(151))])
     goto b49
   b49:
@@ -58911,13 +59063,13 @@ function f48 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     l164 = record variant 1 (l163)
     return l164
 
-function f49 windowsHandle(l0: Int): Int
+function f50 windowsHandle(l0: Int): Int
     local l1: Int
   b0:
     l1 = koji_unsafe_offset([Value(Int(0)), Value(Local(0))])
     return l1
 
-function f50 windowsQuoted(l0: Str): Str
+function f51 windowsQuoted(l0: Str): Str
     local l1: Bool
     local l2: Bool
     local l3: Bool
@@ -58985,7 +59137,7 @@ function f50 windowsQuoted(l0: Str): Str
   b8:
     l11 = s19
     l12 = 0
-    l13 = call f79(l0)
+    l13 = call f80(l0)
     l14 = l13
     l15 = ListLength l14
     l16 = 0
@@ -59033,7 +59185,7 @@ function f50 windowsQuoted(l0: Str): Str
     l12 = 0
     goto b11
 
-function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
+function f52 windowsReadBoth(l0: Int, l1: Int): List(Str)
     local l2: Int
     local l3: Int
     local l4: List(Int)
@@ -59167,7 +59319,7 @@ function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
   b10:
     koji_unsafe_write_int([Value(Local(15)), Value(Int(0)), Value(Int(0))])
     l27 = l13[l24]
-    l28 = call f49(l27)
+    l28 = call f50(l27)
     l29 = PeekNamedPipe([Value(Local(28)), Value(Int(0)), Value(Int(0)), Value(Int(0)), Value(Local(15)), Value(Int(0))])
     l30 = IntCompare(Equal) l29, 0
     branch l30, b11, b12
@@ -59175,11 +59327,11 @@ function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
     l31 = l24
     l11[l31] = false
     l32 = l13[l24]
-    l33 = call f49(l32)
+    l33 = call f50(l32)
     l34 = CloseHandle([Value(Local(33))])
     goto b6
   b12:
-    l35 = call f56(l15, 0)
+    l35 = call f57(l15, 0)
     l36 = l35
     l37 = IntCompare(LessEqual) l36, 0
     branch l37, b13, b14
@@ -59206,7 +59358,7 @@ function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
   b16:
     koji_unsafe_write_int([Value(Local(15)), Value(Int(8)), Value(Int(0))])
     l50 = l13[l24]
-    l51 = call f49(l50)
+    l51 = call f50(l50)
     l52 = l5[l24]
     l53 = l7[l24]
     l54 = koji_unsafe_offset([Value(Local(52)), Value(Local(53))])
@@ -59214,7 +59366,7 @@ function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
     l56 = ReadFile([Value(Local(51)), Value(Local(54)), Value(Local(36)), Value(Local(55)), Value(Int(0))])
     l57 = l24
     l58 = l7[l24]
-    l59 = call f56(l15, 8)
+    l59 = call f57(l15, 8)
     l60 = IntAdd l58, l59
     l7[l57] = l60
     l19 = true
@@ -59243,7 +59395,7 @@ function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
   b24:
     l73 = l5[l72]
     l74 = l7[l72]
-    l75 = call f72(l73, l74)
+    l75 = call f73(l73, l74)
     push l67, l75
     l76 = l5[l72]
     koji_unsafe_free([Value(Local(76))])
@@ -59251,7 +59403,7 @@ function f51 windowsReadBoth(l0: Int, l1: Int): List(Str)
   b25:
     return l67
 
-function f52 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
+function f53 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
     local l4: Record(16)
     local l5: Bool
     local l6: List(Str)
@@ -59392,7 +59544,7 @@ function f52 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
     l5 = RecordCompare(Equal) g4, l4
     branch l5, b1, b2
   b1:
-    l6 = call f51(l0, l1)
+    l6 = call f52(l0, l1)
     return l6
   b2:
     l7 = koji_unsafe_allocate([Value(Int(24))])
@@ -59459,20 +59611,20 @@ function f52 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
   b15:
     l41 = IntMul l31, 8
     l42 = l20[l38]
-    call f57(l8, l41, l42)
+    call f58(l8, l41, l42)
     l43 = IntMul l31, 8
     l44 = IntAdd l43, 4
-    call f57(l8, l44, 1)
+    call f58(l8, l44, 1)
     push l33, l38
     l45 = IntAdd l31, 1
     l31 = l45
     goto b11
   b16:
     l46 = IntMul l31, 8
-    call f57(l8, l46, l2)
+    call f58(l8, l46, l2)
     l47 = IntMul l31, 8
     l48 = IntAdd l47, 4
-    call f57(l8, l48, 4)
+    call f58(l8, l48, 4)
     push l33, 2
     l49 = IntAdd l31, 1
     l31 = l49
@@ -59502,7 +59654,7 @@ function f52 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
   b23:
     l60 = IntMul l59, 8
     l61 = IntAdd l60, 4
-    l62 = call f56(l8, l61)
+    l62 = call f57(l8, l61)
     l63 = ShiftRight l62, 16
     l64 = IntCompare(Equal) l63, 0
     branch l64, b25, b26
@@ -59658,7 +59810,7 @@ function f52 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
   b55:
     l135 = l12[l134]
     l136 = l14[l134]
-    l137 = call f72(l135, l136)
+    l137 = call f73(l135, l136)
     push l129, l137
     l138 = l12[l134]
     koji_unsafe_free([Value(Local(138))])
@@ -59666,7 +59818,7 @@ function f52 readBoth(l0: Int, l1: Int, l2: Int, l3: Str): List(Str)
   b56:
     return l129
 
-function f53 systemNamed(): Record(16)
+function f54 systemNamed(): Record(16)
     local l0: Record(16)
     local l1: Bool
     local l2: Record(16)
@@ -59694,7 +59846,7 @@ function f53 systemNamed(): Record(16)
     l3 = koji_unsafe_allocate([Value(Int(4096))])
     l4 = l3
     l5 = uname([Value(Local(4))])
-    l6 = call f77(l4)
+    l6 = call f78(l4)
     l7 = l6
     koji_unsafe_free([Value(Local(4))])
     l9 = l7
@@ -59721,7 +59873,7 @@ function f53 systemNamed(): Record(16)
   b8:
     unreachable
 
-function f54 executableInto(l0: Int, l1: Int): Int
+function f55 executableInto(l0: Int, l1: Int): Int
     local l2: Record(16)
     local l3: Int
     local l4: Bool
@@ -59766,7 +59918,7 @@ function f54 executableInto(l0: Int, l1: Int): Int
     l15 = IntCompare(Equal) l14, 1
     branch l15, b10, b9
   b3:
-    l5 = call f76(s23)
+    l5 = call f77(s23)
     l6 = l5
     l7 = readlink([Value(Local(6)), Value(Local(0)), Value(Local(1))])
     l8 = l7
@@ -59837,7 +59989,7 @@ function f54 executableInto(l0: Int, l1: Int): Int
   b21:
     unreachable
 
-function f55 architectureNamed(): Record(17)
+function f56 architectureNamed(): Record(17)
     local l0: Record(16)
     local l1: Bool
     local l2: Record(17)
@@ -59883,7 +60035,7 @@ function f55 architectureNamed(): Record(17)
     l10 = l6
     l11 = IntMul 4, l10
     l12 = koji_unsafe_offset([Value(Local(4)), Value(Local(11))])
-    l13 = call f77(l12)
+    l13 = call f78(l12)
     l14 = l13
     koji_unsafe_free([Value(Local(4))])
     l16 = l14
@@ -59931,7 +60083,7 @@ function f55 architectureNamed(): Record(17)
   b16:
     unreachable
 
-function f56 readInt32(l0: Int, l1: Int): Int
+function f57 readInt32(l0: Int, l1: Int): Int
     local l2: Int // value
     local l3: Int
     local l4: Int
@@ -59981,7 +60133,7 @@ function f56 readInt32(l0: Int, l1: Int): Int
   b6:
     return l15
 
-function f57 writeInt32(l0: Int, l1: Int, l2: Int): Void
+function f58 writeInt32(l0: Int, l1: Int, l2: Int): Void
     local l3: Int
     local l4: Int
     local l5: Bool
@@ -60012,7 +60164,7 @@ function f57 writeInt32(l0: Int, l1: Int, l2: Int): Void
   b3:
     return
 
-function f58 trim(l0: Str): Str
+function f59 trim(l0: Str): Str
     local l1: Int
     local l2: Int // bytes
     local l3: Int
@@ -60030,9 +60182,9 @@ function f58 trim(l0: Str): Str
     l2 = l1
     l3 = koji_unsafe_string_size([Value(Local(0))])
     l4 = l3
-    l5 = call f59(l2, 0, l4)
+    l5 = call f60(l2, 0, l4)
     l6 = l5
-    l7 = call f60(l2, l6, l4)
+    l7 = call f61(l2, l6, l4)
     l8 = l7
     l10 = IntCompare(Equal) l6, 0
     l9 = l10
@@ -60046,10 +60198,10 @@ function f58 trim(l0: Str): Str
   b3:
     return l0
   b4:
-    l12 = call f61(l2, l6, l8)
+    l12 = call f62(l2, l6, l8)
     return l12
 
-function f59 spaceEnd(l0: Int, l1: Int, l2: Int): Int
+function f60 spaceEnd(l0: Int, l1: Int, l2: Int): Int
     local l3: Int // at
     local l4: Bool
     local l5: Byte
@@ -60080,14 +60232,14 @@ function f59 spaceEnd(l0: Int, l1: Int, l2: Int): Int
     return l3
   b4:
     l8 = ByteToInt l6
-    l9 = call f71(l8)
+    l9 = call f72(l8)
     l10 = Not l9
     branch l10, b6, b7
   b5:
-    l12 = call f69(l0, l3)
+    l12 = call f70(l0, l3)
     l13 = l12
-    l14 = call f70(l0, l3, l13)
-    l15 = call f71(l14)
+    l14 = call f71(l0, l3, l13)
+    l15 = call f72(l14)
     l16 = Not l15
     branch l16, b8, b9
   b6:
@@ -60103,7 +60255,7 @@ function f59 spaceEnd(l0: Int, l1: Int, l2: Int): Int
     l3 = l17
     goto b1
 
-function f60 spaceStart(l0: Int, l1: Int, l2: Int): Int
+function f61 spaceStart(l0: Int, l1: Int, l2: Int): Int
     local l3: Int // at
     local l4: Bool
     local l5: Int
@@ -60138,7 +60290,7 @@ function f60 spaceStart(l0: Int, l1: Int, l2: Int): Int
     return l3
   b4:
     l9 = ByteToInt l7
-    l10 = call f71(l9)
+    l10 = call f72(l9)
     l11 = Not l10
     branch l11, b6, b7
   b5:
@@ -60152,7 +60304,7 @@ function f60 spaceStart(l0: Int, l1: Int, l2: Int): Int
     l3 = l12
     goto b1
   b8:
-    l15 = call f68(l0, l14)
+    l15 = call f69(l0, l14)
     branch l15, b9, b10
   b9:
     l16 = IntSub l14, 1
@@ -60160,8 +60312,8 @@ function f60 spaceStart(l0: Int, l1: Int, l2: Int): Int
     goto b8
   b10:
     l17 = IntSub l3, l14
-    l18 = call f70(l0, l14, l17)
-    l19 = call f71(l18)
+    l18 = call f71(l0, l14, l17)
+    l19 = call f72(l18)
     l20 = Not l19
     branch l20, b11, b12
   b11:
@@ -60170,7 +60322,7 @@ function f60 spaceStart(l0: Int, l1: Int, l2: Int): Int
     l3 = l14
     goto b1
 
-function f61 copyBytes(l0: Int, l1: Int, l2: Int): Str
+function f62 copyBytes(l0: Int, l1: Int, l2: Int): Str
     local l3: Int
     local l4: Int
     local l5: Str
@@ -60190,7 +60342,7 @@ function f61 copyBytes(l0: Int, l1: Int, l2: Int): Str
     l10 = memcpy([Value(Local(7)), Value(Local(8)), Value(Local(9))])
     return l6
 
-function f62 startsWith(l0: Str, l1: Str): Bool
+function f63 startsWith(l0: Str, l1: Str): Bool
     local l2: Int
     local l3: Int // size
     local l4: Int
@@ -60214,7 +60366,7 @@ function f62 startsWith(l0: Str, l1: Str): Bool
     l9 = IntCompare(Equal) l8, 0
     return l9
 
-function f63 endsWith(l0: Str, l1: Str): Bool
+function f64 endsWith(l0: Str, l1: Str): Bool
     local l2: Int
     local l3: Int // size
     local l4: Int
@@ -60244,7 +60396,7 @@ function f63 endsWith(l0: Str, l1: Str): Bool
     l12 = IntCompare(Equal) l11, 0
     return l12
 
-function f64 indexOf(l0: Str, l1: Str): Record(18)
+function f65 indexOf(l0: Str, l1: Str): Record(18)
     local l2: Int
     local l3: Int // bytes
     local l4: Int
@@ -60264,7 +60416,7 @@ function f64 indexOf(l0: Str, l1: Str): Record(18)
   b0:
     l2 = koji_unsafe_string_bytes([Value(Local(0))])
     l3 = l2
-    l4 = call f67(l0, l1, 0)
+    l4 = call f68(l0, l1, 0)
     l5 = l4
     l6 = IntCompare(Less) l5, 0
     branch l6, b1, b2
@@ -60282,7 +60434,7 @@ function f64 indexOf(l0: Str, l1: Str): Record(18)
     l12, l13 = range_next l10, l9, 1, l11
     branch l12, b4, b5
   b4:
-    l14 = call f68(l3, l13)
+    l14 = call f69(l3, l13)
     l15 = Not l14
     branch l15, b6, b7
   b5:
@@ -60295,7 +60447,7 @@ function f64 indexOf(l0: Str, l1: Str): Record(18)
   b7:
     goto b3
 
-function f65 split(l0: Str, l1: Str, l2: Int): List(Str)
+function f66 split(l0: Str, l1: Str, l2: Int): List(Str)
     local l3: Int
     local l4: Bool
     local l5: Int
@@ -60332,7 +60484,7 @@ function f65 split(l0: Str, l1: Str, l2: Int): List(Str)
   b3:
     branch true, b4, b5
   b4:
-    l10 = call f67(l0, l1, l9)
+    l10 = call f68(l0, l1, l9)
     l11 = l10
     l12 = IntCompare(Less) l11, 0
     branch l12, b6, b7
@@ -60355,7 +60507,7 @@ function f65 split(l0: Str, l1: Str, l2: Int): List(Str)
     l9 = l17
     goto b3
 
-function f66 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
+function f67 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
     local l4: Int
     local l5: Bool
     local l6: Int
@@ -60387,7 +60539,7 @@ function f66 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
     koji_std_panic([Value(Str(1)), Place(Local(3))])
     unreachable
   b2:
-    l6 = call f67(l0, l1, 0)
+    l6 = call f68(l0, l1, 0)
     l7 = l6
     l8 = IntCompare(Less) l7, 0
     branch l8, b3, b4
@@ -60413,7 +60565,7 @@ function f66 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
     l19 = koji_unsafe_string_size([Value(Local(1))])
     l20 = IntAdd l7, l19
     l12 = l20
-    l21 = call f67(l0, l1, l12)
+    l21 = call f68(l0, l1, l12)
     l7 = l21
     goto b5
   b7:
@@ -60425,7 +60577,7 @@ function f66 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
     l11 = l26
     return l11
 
-function f67 find(l0: Str, l1: Str, l2: Int): Int
+function f68 find(l0: Str, l1: Str, l2: Int): Int
     local l3: Int
     local l4: Int // bytes
     local l5: Int
@@ -60464,7 +60616,7 @@ function f67 find(l0: Str, l1: Str, l2: Int): Int
   b3:
     return l14
 
-function f68 isContinuation(l0: Int, l1: Int): Bool
+function f69 isContinuation(l0: Int, l1: Int): Bool
     local l2: Byte
     local l3: Byte // b
     local l4: Byte
@@ -60476,7 +60628,7 @@ function f68 isContinuation(l0: Int, l1: Int): Bool
     l5 = ByteCompare(Equal) l4, 128
     return l5
 
-function f69 widthAt(l0: Int, l1: Int): Int
+function f70 widthAt(l0: Int, l1: Int): Int
     local l2: Byte
     local l3: Byte // b
     local l4: Bool
@@ -60502,7 +60654,7 @@ function f69 widthAt(l0: Int, l1: Int): Int
   b6:
     return 4
 
-function f70 codeAt(l0: Int, l1: Int, l2: Int): Int
+function f71 codeAt(l0: Int, l1: Int, l2: Int): Int
     local l3: Byte
     local l4: Byte // first
     local l5: Bool
@@ -60561,7 +60713,7 @@ function f70 codeAt(l0: Int, l1: Int, l2: Int): Int
   b5:
     return l11
 
-function f71 isSpace(l0: Int): Bool
+function f72 isSpace(l0: Int): Bool
     local l1: Bool
     local l2: Bool
     local l3: Bool
@@ -60676,7 +60828,7 @@ function f71 isSpace(l0: Int): Bool
   b26:
     return l15
 
-function f72 textOf(l0: Int, l1: Int): Str
+function f73 textOf(l0: Int, l1: Int): Str
     local l2: Str // out
     local l3: Int // start
     local l4: Int // at
@@ -60708,7 +60860,7 @@ function f72 textOf(l0: Int, l1: Int): Str
     l5 = IntCompare(Less) l4, l1
     branch l5, b2, b3
   b2:
-    l6 = call f74(l0, l4, l1)
+    l6 = call f75(l0, l4, l1)
     l7 = l6
     l8 = IntCompare(Greater) l7, 0
     branch l8, b4, b5
@@ -60752,7 +60904,7 @@ function f72 textOf(l0: Int, l1: Int): Str
   b11:
     return l2
 
-function f73 isUtf8(l0: Int, l1: Int): Bool
+function f74 isUtf8(l0: Int, l1: Int): Bool
     local l2: Int // at
     local l3: Bool
     local l4: Int
@@ -60766,7 +60918,7 @@ function f73 isUtf8(l0: Int, l1: Int): Bool
     l3 = IntCompare(Less) l2, l1
     branch l3, b2, b3
   b2:
-    l4 = call f74(l0, l2, l1)
+    l4 = call f75(l0, l2, l1)
     l5 = l4
     l6 = IntCompare(Less) l5, 0
     branch l6, b4, b5
@@ -60779,7 +60931,7 @@ function f73 isUtf8(l0: Int, l1: Int): Bool
     l2 = l7
     goto b1
 
-function f74 validAt(l0: Int, l1: Int, l2: Int): Int
+function f75 validAt(l0: Int, l1: Int, l2: Int): Int
     local l3: Int
     local l4: Int // first
     local l5: Bool
@@ -60822,7 +60974,7 @@ function f74 validAt(l0: Int, l1: Int, l2: Int): Int
     local l42: Bool
     local l43: Int
   b0:
-    l3 = call f75(l0, l1, l2)
+    l3 = call f76(l0, l1, l2)
     l4 = l3
     l5 = IntCompare(Less) l4, 128
     branch l5, b1, b2
@@ -60902,7 +61054,7 @@ function f74 validAt(l0: Int, l1: Int, l2: Int): Int
     goto b24
   b24:
     l24 = IntAdd l1, 1
-    l25 = call f75(l0, l24, l2)
+    l25 = call f76(l0, l24, l2)
     l26 = l25
     l28 = IntCompare(Less) l26, l7
     l27 = l28
@@ -60928,7 +61080,7 @@ function f74 validAt(l0: Int, l1: Int, l2: Int): Int
     branch l35, b30, b31
   b30:
     l37 = IntAdd l1, l36
-    l38 = call f75(l0, l37, l2)
+    l38 = call f76(l0, l37, l2)
     l39 = l38
     l41 = IntCompare(Less) l39, 128
     l40 = l41
@@ -60947,7 +61099,7 @@ function f74 validAt(l0: Int, l1: Int, l2: Int): Int
   b35:
     goto b29
 
-function f75 byteAt(l0: Int, l1: Int, l2: Int): Int
+function f76 byteAt(l0: Int, l1: Int, l2: Int): Int
     local l3: Bool
     local l4: Int
     local l5: Byte
@@ -60965,7 +61117,7 @@ function f75 byteAt(l0: Int, l1: Int, l2: Int): Int
     l7 = ByteToInt l6
     return l7
 
-function f76 cString(l0: Str): Int
+function f77 cString(l0: Str): Int
     local l1: Int
     local l2: Int // size
     local l3: Int
@@ -61007,15 +61159,15 @@ function f76 cString(l0: Str): Int
     koji_unsafe_write_byte([Value(Local(5)), Value(Local(2)), Value(Local(15))])
     return l5
 
-function f77 cText(l0: Int): Str
+function f78 cText(l0: Int): Str
     local l1: Int
     local l2: Str
   b0:
     l1 = strlen([Value(Local(0))])
-    l2 = call f72(l0, l1)
+    l2 = call f73(l0, l1)
     return l2
 
-function f78 hasNul(l0: Str): Bool
+function f79 hasNul(l0: Str): Bool
     local l1: Int
     local l2: Int // bytes
     local l3: Int
@@ -61041,7 +61193,7 @@ function f78 hasNul(l0: Str): Bool
     branch l7, b2, b3
   b2:
     l9 = koji_unsafe_string_size([Value(Local(0))])
-    l10 = call f75(l2, l8, l9)
+    l10 = call f76(l2, l8, l9)
     l11 = IntCompare(Equal) l10, 0
     branch l11, b4, b5
   b3:
@@ -61051,7 +61203,7 @@ function f78 hasNul(l0: Str): Bool
   b5:
     goto b1
 
-function f79 chars(l0: Str): List(Char)
+function f80 chars(l0: Str): List(Char)
     local l1: Int
     local l2: Int // bytes
     local l3: Int
@@ -61105,9 +61257,9 @@ function f79 chars(l0: Str): List(Char)
     l10 = l16
     goto b6
   b5:
-    l17 = call f69(l2, l10)
+    l17 = call f70(l2, l10)
     l18 = l17
-    l19 = call f70(l2, l10, l18)
+    l19 = call f71(l2, l10, l18)
     koji_unsafe_write_int([Value(Local(8)), Value(Int(0)), Value(Local(19))])
     l20 = IntAdd l10, l18
     l10 = l20
@@ -61119,7 +61271,7 @@ function f79 chars(l0: Str): List(Char)
     l9 = l22
     goto b1
 
-function f80 charOf(l0: Int): Record(19)
+function f81 charOf(l0: Int): Record(19)
     local l1: Bool
     local l2: Bool
     local l3: Bool
@@ -61162,7 +61314,7 @@ function f80 charOf(l0: Int): Record(19)
     l10 = record variant 0 (l9)
     return l10
 
-function f81 intOf(l0: Str): Record(21)
+function f82 intOf(l0: Str): Record(21)
     local l1: Int
     local l2: Int // bytes
     local l3: Int
@@ -61220,9 +61372,9 @@ function f81 intOf(l0: Str): Record(21)
     l2 = l1
     l3 = koji_unsafe_string_size([Value(Local(0))])
     l4 = l3
-    l5 = call f59(l2, 0, l4)
+    l5 = call f60(l2, 0, l4)
     l6 = l5
-    l7 = call f60(l2, l6, l4)
+    l7 = call f61(l2, l6, l4)
     l8 = l7
     l9 = l6
     l10 = false
@@ -61343,7 +61495,7 @@ function f81 intOf(l0: Str): Record(21)
     l52 = record variant 0 (l50)
     return l52
 
-function f82 floatOf(l0: Str): Record(22)
+function f83 floatOf(l0: Str): Record(22)
     local l1: Int
     local l2: Int // bytes
     local l3: Int
@@ -61394,9 +61546,9 @@ function f82 floatOf(l0: Str): Record(22)
     l2 = l1
     l3 = koji_unsafe_string_size([Value(Local(0))])
     l4 = l3
-    l5 = call f59(l2, 0, l4)
+    l5 = call f60(l2, 0, l4)
     l6 = l5
-    l7 = call f60(l2, l6, l4)
+    l7 = call f61(l2, l6, l4)
     l8 = l7
     l9 = l6
     goto b1
@@ -61409,19 +61561,19 @@ function f82 floatOf(l0: Str): Record(22)
     l9 = l17
     goto b1
   b3:
-    l19 = call f75(l2, l9, l8)
+    l19 = call f76(l2, l9, l8)
     l20 = IntCompare(Equal) l19, 48
     l18 = l20
     branch l18, b8, b9
   b4:
-    l13 = call f75(l2, l9, l8)
+    l13 = call f76(l2, l9, l8)
     l14 = IntCompare(Equal) l13, 43
     l12 = l14
     branch l12, b7, b6
   b5:
     branch l10, b2, b3
   b6:
-    l15 = call f75(l2, l9, l8)
+    l15 = call f76(l2, l9, l8)
     l16 = IntCompare(Equal) l15, 45
     l12 = l16
     goto b7
@@ -61430,7 +61582,7 @@ function f82 floatOf(l0: Str): Record(22)
     goto b5
   b8:
     l21 = IntAdd l9, 1
-    l22 = call f75(l2, l21, l8)
+    l22 = call f76(l2, l21, l8)
     l23 = IntCompare(Equal) l22, 120
     l18 = l23
     goto b9
@@ -61438,15 +61590,15 @@ function f82 floatOf(l0: Str): Record(22)
     branch l18, b10, b11
   b10:
     l24 = 0
-    l25 = call f61(l2, l6, l8)
-    l26 = call f88(l25, l24) writeback 1 -> l24
+    l25 = call f62(l2, l6, l8)
+    l26 = call f89(l25, l24) writeback 1 -> l24
     l27 = l26
     l28 = IntCompare(Equal) l24, 1
     branch l28, b12, b13
   b11:
     l35 = IntToFloat 0
     l36 = l35
-    l37 = call f83(l2, l6, l8, l36) writeback 3 -> l36
+    l37 = call f84(l2, l6, l8, l36) writeback 3 -> l36
     l38 = l37
     l39 = IntCompare(Equal) l38, 1
     branch l39, b16, b17
@@ -61479,7 +61631,7 @@ function f82 floatOf(l0: Str): Record(22)
     l45 = record variant 0 (l36)
     return l45
 
-function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
+function f84 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l4: Int // at
     local l5: Bool // negative
     local l6: Bool
@@ -61595,14 +61747,14 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l6 = l7
     branch l6, b1, b2
   b1:
-    l8 = call f75(l0, l4, l2)
-    l9 = call f87(l8)
+    l8 = call f76(l0, l4, l2)
+    l9 = call f88(l8)
     l6 = l9
     goto b2
   b2:
     branch l6, b3, b4
   b3:
-    l10 = call f75(l0, l4, l2)
+    l10 = call f76(l0, l4, l2)
     l11 = IntCompare(Equal) l10, 45
     l5 = l11
     l12 = IntAdd l4, 1
@@ -61620,9 +61772,9 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l18 = l19
     branch l18, b8, b9
   b6:
-    l22 = call f75(l0, l4, l2)
+    l22 = call f76(l0, l4, l2)
     l23 = IntSub l22, 48
-    call f84(l23, l13, l14, l15, l16, false) writeback 1 -> l13, 2 -> l14, 3 -> l15, 4 -> l16
+    call f85(l23, l13, l14, l15, l16, false) writeback 1 -> l13, 2 -> l14, 3 -> l15, 4 -> l16
     l24 = IntAdd l17, 1
     l17 = l24
     l25 = IntAdd l4, 1
@@ -61630,12 +61782,12 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     goto b5
   b7:
     l26 = 0
-    l27 = call f75(l0, l4, l2)
+    l27 = call f76(l0, l4, l2)
     l28 = IntCompare(Equal) l27, 46
     branch l28, b10, b11
   b8:
-    l20 = call f75(l0, l4, l2)
-    l21 = call f85(l20)
+    l20 = call f76(l0, l4, l2)
+    l21 = call f86(l20)
     l18 = l21
     goto b9
   b9:
@@ -61653,9 +61805,9 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l30 = l31
     branch l30, b15, b16
   b13:
-    l34 = call f75(l0, l4, l2)
+    l34 = call f76(l0, l4, l2)
     l35 = IntSub l34, 48
-    call f84(l35, l13, l14, l15, l16, true) writeback 1 -> l13, 2 -> l14, 3 -> l15, 4 -> l16
+    call f85(l35, l13, l14, l15, l16, true) writeback 1 -> l13, 2 -> l14, 3 -> l15, 4 -> l16
     l36 = IntAdd l26, 1
     l26 = l36
     l37 = IntAdd l4, 1
@@ -61664,8 +61816,8 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
   b14:
     goto b11
   b15:
-    l32 = call f75(l0, l4, l2)
-    l33 = call f85(l32)
+    l32 = call f76(l0, l4, l2)
+    l33 = call f86(l32)
     l30 = l33
     goto b16
   b16:
@@ -61680,12 +61832,12 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     return 1
   b20:
     l41 = 0
-    l43 = call f75(l0, l4, l2)
+    l43 = call f76(l0, l4, l2)
     l44 = IntCompare(Equal) l43, 101
     l42 = l44
     branch l42, b22, b21
   b21:
-    l45 = call f75(l0, l4, l2)
+    l45 = call f76(l0, l4, l2)
     l46 = IntCompare(Equal) l45, 69
     l42 = l46
     goto b22
@@ -61702,14 +61854,14 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l72 = IntCompare(NotEqual) l4, l2
     branch l72, b42, b43
   b25:
-    l51 = call f75(l0, l4, l2)
-    l52 = call f87(l51)
+    l51 = call f76(l0, l4, l2)
+    l52 = call f88(l51)
     l49 = l52
     goto b26
   b26:
     branch l49, b27, b28
   b27:
-    l53 = call f75(l0, l4, l2)
+    l53 = call f76(l0, l4, l2)
     l54 = IntCompare(Equal) l53, 45
     l48 = l54
     l55 = IntAdd l4, 1
@@ -61720,8 +61872,8 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l56 = l57
     branch l56, b29, b30
   b29:
-    l58 = call f75(l0, l4, l2)
-    l59 = call f85(l58)
+    l58 = call f76(l0, l4, l2)
+    l59 = call f86(l58)
     l56 = l59
     goto b30
   b30:
@@ -61741,15 +61893,15 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
   b35:
     branch l48, b40, b41
   b36:
-    l63 = call f75(l0, l4, l2)
-    l64 = call f85(l63)
+    l63 = call f76(l0, l4, l2)
+    l64 = call f86(l63)
     l61 = l64
     goto b37
   b37:
     branch l61, b34, b35
   b38:
     l66 = IntMul l41, 10
-    l67 = call f75(l0, l4, l2)
+    l67 = call f76(l0, l4, l2)
     l68 = IntAdd l66, l67
     l69 = IntSub l68, 48
     l41 = l69
@@ -61824,7 +61976,7 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l85 = l74
     goto b54
   b54:
-    l88 = call f86(l85)
+    l88 = call f87(l85)
     l89 = l88
     l91 = IntCompare(Less) l74, 0
     branch l91, b55, b56
@@ -61861,7 +62013,7 @@ function f83 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
   b64:
     return 0
 
-function f84 keepDigit(l0: Int, l1: Int, l2: Int, l3: Bool, l4: Int, l5: Bool): Void
+function f85 keepDigit(l0: Int, l1: Int, l2: Int, l3: Bool, l4: Int, l5: Bool): Void
     local l6: Bool
     local l7: Int
     local l8: Int
@@ -61908,7 +62060,7 @@ function f84 keepDigit(l0: Int, l1: Int, l2: Int, l3: Bool, l4: Int, l5: Bool): 
   b10:
     return
 
-function f85 isDigit(l0: Int): Bool
+function f86 isDigit(l0: Int): Bool
     local l1: Bool
     local l2: Bool
     local l3: Bool
@@ -61923,7 +62075,7 @@ function f85 isDigit(l0: Int): Bool
   b2:
     return l1
 
-function f86 tenTo(l0: Int): Float
+function f87 tenTo(l0: Int): Float
     local l1: Float
     local l2: Float // result
     local l3: Int
@@ -61952,7 +62104,7 @@ function f86 tenTo(l0: Int): Float
   b3:
     return l2
 
-function f87 isSign(l0: Int): Bool
+function f88 isSign(l0: Int): Bool
     local l1: Bool
     local l2: Bool
     local l3: Bool
@@ -61967,7 +62119,7 @@ function f87 isSign(l0: Int): Bool
   b2:
     return l1
 
-function f88 hexFloat(l0: Str, l1: Int): Float
+function f89 hexFloat(l0: Str, l1: Int): Float
     local l2: List(Char)
     local l3: List(Char) // chars
     local l4: Int // at
@@ -62180,7 +62332,7 @@ function f88 hexFloat(l0: Str, l1: Int): Float
     local l211: Float
     local l212: Float
   b0:
-    l2 = call f79(l0)
+    l2 = call f80(l0)
     l3 = l2
     l4 = 0
     l5 = false
@@ -62302,7 +62454,7 @@ function f88 hexFloat(l0: Str, l1: Int): Float
     l54 = IntAdd l35, 1
     l55 = l54
     l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
-    l57 = call f81(l56)
+    l57 = call f82(l56)
     l58 = l57
     l59 = RecordTag l58
     l60 = IntCompare(Equal) l59, 0
@@ -62319,7 +62471,7 @@ function f88 hexFloat(l0: Str, l1: Int): Float
     l72 = IntAdd l35, 1
     l73 = l72
     l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
-    l75 = call f58(l74)
+    l75 = call f59(l74)
     l76 = IntAdd l35, 1
     l77 = l76
     l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
@@ -62431,7 +62583,7 @@ function f88 hexFloat(l0: Str, l1: Int): Float
     goto b55
   b59:
     l111 = l3[l109]
-    l112 = call f89(l111)
+    l112 = call f90(l111)
     l113 = l112
     l114 = IntCompare(Less) l113, 0
     branch l114, b60, b61
@@ -62643,15 +62795,15 @@ function f88 hexFloat(l0: Str, l1: Int): Float
     l204 = koji_unsafe_wide_to_float([Value(Local(158))])
     l205 = FloatMul l136, l204
     l206 = IntDiv l159, 2
-    l207 = call f90(l206)
+    l207 = call f91(l206)
     l208 = FloatMul l205, l207
     l209 = IntDiv l159, 2
     l210 = IntSub l159, l209
-    l211 = call f90(l210)
+    l211 = call f91(l210)
     l212 = FloatMul l208, l211
     return l212
 
-function f89 hexValue(l0: Char): Int
+function f90 hexValue(l0: Char): Int
     local l1: Int
     local l2: Int // code
     local l3: Bool
@@ -62712,7 +62864,7 @@ function f89 hexValue(l0: Char): Int
     l15 = IntNeg 1
     return l15
 
-function f90 powerOfTwo(l0: Int): Float
+function f91 powerOfTwo(l0: Int): Float
     local l1: Float
     local l2: Float // result
     local l3: Float
@@ -62785,13 +62937,13 @@ function f90 powerOfTwo(l0: Int): Float
   b13:
     return l16
 
-function f91 readLine(l0: Int): Record(9)
+function f92 readLine(l0: Int): Record(9)
     local l1: Record(9)
   b0:
-    l1 = call f92(s2, l0)
+    l1 = call f93(s2, l0)
     return l1
 
-function f92 readLineAfter(l0: Str, l1: Int): Record(9)
+function f93 readLineAfter(l0: Str, l1: Int): Record(9)
     local l2: Int
     local l3: Int // status
     local l4: Str
@@ -62819,7 +62971,7 @@ function f92 readLineAfter(l0: Str, l1: Int): Record(9)
     l10 = record variant 0 (l5)
     return l10
 
-function f93 decimalOf(l0: Str): Record(23)
+function f94 decimalOf(l0: Str): Record(23)
     local l1: Int
     local l2: Int // status
     local l3: Decimal
@@ -62858,7 +63010,7 @@ function f93 decimalOf(l0: Str): Record(23)
     l13 = record variant 0 (l4)
     return l13
 
-function f94 drop Record(1)(l0: Record(1)): Void
+function f95 drop Record(1)(l0: Record(1)): Void
     local l1: Record(1)
   b0:
     l1 = l0

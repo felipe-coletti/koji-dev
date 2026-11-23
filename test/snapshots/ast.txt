@@ -13,6 +13,22 @@
 ==== examples/condition.kj
 (at 1 (mut x int (int 10)))
 (at 3 (if (binary >= (name x) (int 5)) (block (at 4 (call (name print) (string 'x is greater than 5.')))) (block (at 6 (call (name print) (string 'x isn\'t greater than 5.'))))))
+==== examples/decimals.kj
+(at 1 (mut a decimal (int 10)))
+(at 3 (call (name print) (name a)))
+(at 5 (assign = (name a) (decimal 0.1)))
+(at 7 (call (name print) (name a)))
+(at 9 (immut b decimal (decimal 0.2)))
+(at 11 (immut c decimal (binary + (name a) (name b))))
+(at 13 (call (name print) (name c)))
+(at 14 (call (name print) (call (name float) (name c))))
+(at 18 (immut x float (float 0x1.999999999999ap-4)))
+(at 19 (immut y float (call (name float) (decimal 0.2))))
+(at 21 (immut z float (binary + (name x) (name y))))
+(at 23 (call (name print) (name z)))
+(at 24 (call (name print) (call (name decimal) (name z))))
+(at 28 (call (name print) (binary == (call (name float) (name c)) (name z))))
+(at 29 (call (name print) (binary == (name c) (call (name decimal) (name z)))))
 ==== examples/functions.kj
 (at 1 (function factorial () ((param x int)) int (block (at 2 (if (binary <= (name x) (int 1)) (block (at 2 (return (int 1)))) _)) (at 4 (return (binary * (name x) (call (name factorial) (binary - (name x) (int 1)))))))))
 (at 7 (immut double _ (lambda ((param x int)) _ (binary * (name x) (int 2)))))
