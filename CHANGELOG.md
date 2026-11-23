@@ -2,20 +2,78 @@
 
 ## 0.1.0 (preview)
 
-The first release of Koji: a preview, to try the language and tell what is missing. Expect
-breaking changes before 1.0.
+The first release of Koji, a statically typed language that aims to be simple, readable and
+fast, compiled to machine code by a compiler written in Koji. It is a preview: try it, and tell us
+what is missing or wrong. Expect breaking changes before 1.0.
+
+```koji
+import http
+import task
+
+type Shape = {
+    Circle(radius: decimal)
+    Square(side: decimal)
+}
+
+function area(shape: Shape): decimal {
+    return match (shape) {
+        Circle(radius) => 3.14 * radius * radius
+        Square(side) => side * side
+    }
+}
+
+// Errors are values: `?` passes them on.
+function half(text: string): Result[int, ParseError] {
+    immut n = int(text)?
+    return Ok(n / 2)
+}
+
+print(area(Circle(2)), area(Square(1.5)), 0.1 + 0.2) // 12.56 2.25 0.3
+print(half('42'), half('x')) // Ok(21) Err(InvalidNumber('x'))
+
+// Requests at the same time, on one thread.
+immut pages = task.all([
+    () => http.get('https://example.com'),
+    () => http.get('https://example.org'),
+])
+```
+
+### Getting it
+
+Download the package of your platform below, unpack it and put its directory on your `PATH`:
+
+| Platform | Package |
+| --- | --- |
+| Linux, x86-64 | `koji-0.1.0-linux-x64.tar.gz` |
+| Linux, arm64 | `koji-0.1.0-linux-arm64.tar.gz` |
+| macOS, Apple silicon | `koji-0.1.0-macos-arm64.tar.gz` |
+| macOS, Intel | `koji-0.1.0-macos-x64.tar.gz` |
+| Windows, x86-64 | `koji-0.1.0-windows-x64.zip` |
+
+```sh
+tar -xzf koji-0.1.0-linux-x64.tar.gz
+export PATH=$PWD/koji-0.1.0-linux-x64:$PATH
+kojic run hello.kj
+```
+
+`SHA256SUMS` has the checksums of the packages. On macOS, a downloaded `kojic` is quarantined:
+`xattr -d com.apple.quarantine koji-0.1.0-macos-arm64/kojic` lets it run. Koji also builds from
+its repository with nothing but `gzip` (`bootstrap/build.sh`, or `bootstrap\build.cmd` on Windows):
+see [Getting Started](https://github.com/koji-language/koji/blob/main/doc/getting-started.md).
 
 ### The language
 
--   Strong, static typing with inference: `int`, `float`, `decimal` (the default of literals with a
-    point), `string`, `char`, `byte`, `boolean`, lists, maps, sets, records and sum types.
+-   Strong, static typing with inference: `int`, `float`, `decimal` (exact, the default of
+    literals with a point), `string`, `char`, `byte`, `boolean`, lists, maps, sets, records and
+    sum types.
 -   `match` with guards and exhaustiveness, `if` as an expression, no `null` (`Option`), errors as
     values (`Result` and `?`), panics for bugs, no exceptions.
 -   Value semantics with copy-on-write, move-only types with `drop`, `mut` and `take` parameters.
 -   Generics with the `equatable` and `orderable` constraints, methods, closures that capture a copy.
 -   Modules with mandatory `export`, opaque types, packages from repositories of git (`koji.mod`,
     `koji.sum`, minimal version selection).
--   Tasks in groups, channels and shared values, on one thread, with no call blocking the others.
+-   Tasks in groups, channels and shared values, on one thread; no call blocks the other tasks,
+    and a task that computes is preempted.
 -   `test` blocks and `kojic test`; `foreign` blocks for the functions of libraries of the system.
 
 ### The standard library
@@ -26,17 +84,17 @@ environment), `task` and `time`.
 
 ### The compiler
 
--   `kojic` is written in Koji and builds itself from a seed of its own executables
-    (`bootstrap/build.sh`, `bootstrap\build.cmd`): building Koji needs nothing but `gzip` (PowerShell
-    on Windows), no C compiler.
+-   `kojic` is written in Koji and builds itself from a seed of its own executables: building
+    Koji needs no C compiler, no Rust, nothing but `gzip`. Its own tests are written in Koji too.
 -   It generates machine code itself (x86-64 and arm64) and links executables with its own linker
     (ELF, Mach-O and PE), the shared libraries of `foreign` blocks included on Linux and Windows.
 -   `kojic run`, `build`, `check`, `test`, `lsp` (a language server), `init`, `add`, `update`,
-    `version`.
+    `version`. A [VS Code extension](https://github.com/koji-language/koji-vscode) gives the
+    highlighting and the language server; the TextMate grammar is in `editors/textmate/`.
 
 ### Platforms
 
-| Platform | State |
+| Platform | Tested |
 | --- | --- |
 | Linux, x86-64 | the whole test suite, in CI |
 | Linux, arm64 | the whole test suite, in CI |
@@ -47,5 +105,11 @@ environment), `task` and `time`.
 
 -   Tasks run on one thread.
 -   `regex` has no look-around.
+-   The parameters of an anonymous function given to a generic method (`.mapErr((e) => ...)`)
+    need their type written.
 -   On macOS, the libraries of `foreign` blocks are linked by the linker of the system.
--   The code is about 1.3 times as slow as C compiled by gcc on the compiler itself.
+-   The code is about 1.3 times as slow as C compiled by gcc (measured on the compiler itself).
+
+### Feedback
+
+Issues and ideas are welcome at https://github.com/koji-language/koji/issues.
