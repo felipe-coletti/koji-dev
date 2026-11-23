@@ -3171,3 +3171,91 @@ fn divisions_by_constants() {
     let expected = "0: 0 0 0 0 0 0 0 0 0 0\n1: 0 1 0 1 0 1 0 1 0 1\n-1: 0 -1 0 -1 0 -1 0 -1 0 -1\n7: 0 7 0 7 0 7 1 0 0 1\n-7: 0 -7 0 -7 0 -7 -1 0 0 -1\n99: 9 9 0 99 6 3 14 1 0 1\n-99: -9 -9 0 -99 -6 -3 -14 -1 0 -1\n1000001: 100000 1 10000 1 62500 1 142857 2 0 1\n-1000001: -100000 -1 -10000 -1 -62500 -1 -142857 -2 0 -1\n9223372036854775807: 922337203685477580 7 92233720368547758 7 576460752303423487 15 1317624576693539401 0 9223372036 1\n-9223372036854775808: -922337203685477580 -8 -92233720368547758 -8 -576460752303423488 0 -1317624576693539401 -1 -9223372036 0\n123456789012345: 12345678901234 5 1234567890123 45 7716049313271 9 17636684144620 5 123456 1\n-98765432109876: -9876543210987 -6 -987654321098 -76 -6172839506867 -4 -14109347444268 0 -98765 0\n";
     assert_same("divisions_by_constants", source, expected);
 }
+
+#[test]
+fn koji_links_executables_itself() {
+    // Koji's linker (compiler/linker.kj), without the linker of the system (KOJI_LINKER=koji makes a
+    // failure an error instead of a fallback): an executable of the program and of the native
+    // library, linked dynamically with the C library, that runs (under valgrind), with tasks, files
+    // and the threads of the runtime.
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        return;
+    }
+    let source = "import file\nimport task\nimport time\n\nmut results: int[] = []\n\ntask.group((group) => {\n    for i in range(3) {\n        group.spawn(() => {\n            time.sleep(0.01 * (3 - i))\n            results.push(i)\n        })\n    }\n\n    group.spawn(() => {\n        print(file.exists('/'))\n    })\n})\n\nprint(results)\nprint(`${7 / 2} ${'héllo'.upper()}`)\n";
+    let path = source_file("own_linker", source);
+    let executable = path.with_extension("");
+    let built = koji::finish(koji::kojic().env("KOJI_LINKER", "koji").arg("build").arg(&path).arg("-o").arg(&executable), "");
+    assert_eq!(built.code, Some(0), "{}", built.stderr);
+    let run = if has_valgrind() {
+        Command::new("valgrind").env("KOJI_POOL", "0").args(["-q", "--error-exitcode=99"]).arg(&executable).output().unwrap()
+    } else {
+        Command::new(&executable).output().unwrap()
+    };
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "true\n[2, 1, 0]\n3 HÉLLO\n");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+}
+
+#[test]
+fn the_machine_ir_compiles_functions() {
+    // The machine IR (compiler/mir.kj): functions of ints, booleans and chars (recursion, loops,
+    // ranges, six arguments, checked arithmetic), their registers allocated by linear scan.
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        return;
+    }
+    let source = "function fib(n: int): int {\n    if (n < 2) { return n }\n    return fib(n - 1) + fib(n - 2)\n}\nfunction collatz(start: int): int {\n    mut n = start\n    mut steps = 0\n    while (n != 1) {\n        if (n % 2 == 0) { n = n / 2 } else { n = 3 * n + 1 }\n        steps += 1\n    }\n    return steps\n}\nfunction sumTo(limit: int): int {\n    mut total = 0\n    for i in range(limit) { total += i * i % 7 }\n    for i in range(limit, 0, -1) { total -= i % 3 }\n    return total\n}\nfunction isLetter(c: char): boolean { return c >= 'a' and c <= 'z' or c >= 'A' and c <= 'Z' }\nfunction mix(a: int, b: int, c: int, d: int, e: int, f: int): int { return (a - b) * c + d / e - f }\nprint(string(fib(25)))\nprint(string(collatz(27)))\nprint(string(sumTo(1000)))\nprint(string(isLetter('q')) + string(isLetter('3')))\nprint(string(mix(9, 4, 3, 100, 7, 2)))\n";
+    let path = source_file("machine_ir", source);
+    let executable = path.with_extension("");
+    let built = koji::finish(koji::kojic().arg("build").arg(&path).arg("-o").arg(&executable), "");
+    assert_eq!(built.code, Some(0), "{}", built.stderr);
+    let run = if has_valgrind() {
+        Command::new("valgrind").args(["-q", "--error-exitcode=99"]).arg(&executable).output().unwrap()
+    } else {
+        Command::new(&executable).output().unwrap()
+    };
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "75025\n111\n1001\ntruefalse\n27\n");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+}
+
+#[test]
+fn the_machine_ir_compiles_floats() {
+    // Floats in the machine IR: in xmm registers, checked as the language says (a
+    // result that is not finite, a division by zero), arguments of both classes moved in parallel
+    // (here in a cycle of xmm registers: a call with its arguments rotated).
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        return;
+    }
+    let source = "function series(n: int, x: float): float {\n    if (n == 0) { return float(1) }\n    return float(1) + x * series(n - 1, x) / float(n)\n}\nfunction horner(n: int, x: float, a: float, b: float, c: float, d: float): float {\n    if (n == 0) { return a }\n    immut inner = horner(n - 1, x, b, c, d, a)\n    return inner * x + -b\n}\nfunction signs(n: int, x: float): int {\n    if (n == 0) { return 0 }\n    mut s = 0\n    if (x < float(0)) { s = -1 }\n    if (x >= float(1)) { s = 1 }\n    return s + signs(n - 1, x - float(0.5))\n}\nfunction mixed(n: int, x: float): float {\n    if (n <= 0) { return x % float(7) }\n    immut t = int(x * float(10))\n    return mixed(n - 1, x ** float(1.01) + float(t % 3))\n}\nprint(string(series(20, float(1))))\nprint(string(horner(6, float(0.5), float(1), float(2), float(3), float(4))))\nprint(string(signs(10, float(2.2))))\nprint(string(mixed(5, float(1.5))))\n";
+    let path = source_file("machine_ir_floats", source);
+    let executable = path.with_extension("");
+    let built = koji::finish(koji::kojic().arg("build").arg(&path).arg("-o").arg(&executable), "");
+    assert_eq!(built.code, Some(0), "{}", built.stderr);
+    let run = if has_valgrind() {
+        Command::new("valgrind").args(["-q", "--error-exitcode=99"]).arg(&executable).output().unwrap()
+    } else {
+        Command::new(&executable).output().unwrap()
+    };
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "0x1.0d837220475dep0\n-0x1.33p2\n-2\n0x1.88065f96266c9p0\n");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+}
+
+#[test]
+fn the_machine_ir_counts_references() {
+    // Strings in the machine IR: references moved at their last reads (`text = text +
+    // more` adds in place), released when a variable is given another value and when the function
+    // returns, retained when shared; library calls; `mut` parameters given their references.
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        return;
+    }
+    let source = "mut log = 'start'\n\nfunction greet(name: string, times: int): string {\n    mut text = ''\n\n    for i in range(times) {\n        text = text + name + string(i)\n    }\n\n    return text\n}\n\nfunction pick(a: string, b: string, first: boolean): string {\n    if (first) { return a }\n\n    return b\n}\n\nfunction longer(a: string, b: string): boolean {\n    return a.length() > b.length()\n}\n\nfunction note(text: string) {\n    log = log + ',' + text\n}\n\nfunction compare(a: string, b: string): string {\n    if (a < b) { return 'less' }\n\n    if (a == b) { return 'equal' }\n\n    return 'greater'\n}\n\nimmut g = greet('ab', 4)\nprint(g)\nprint(pick('x', 'y', false))\nprint(string(longer(g, 'zz')))\nnote('one')\nnote(g)\nprint(log)\nprint(compare('a', 'b') + compare('b', 'b') + compare('c', 'b'))\nprint(string(2.5) + string(true) + string('é'.length()))\nmut s = 'q'\ns = s + s\ns = s + 'w'\nprint(s)\nprint(string('ab' in 'xaby'))\n\nmut total = 0\nmut names = 'g'\n\nfunction bump(mut n: int, by: int): int {\n    n += by\n    return n * 2\n}\n\nfunction grow(mut text: string, more: string) {\n    text = text + more\n}\n\nfunction swap(mut a: string, mut b: string): string {\n    immut t = a\n    a = b\n    b = t\n    return a\n}\n\nfunction same(mut text: string): string {\n    text = text + '!'\n    return text\n}\n\nfunction scale(mut x: float, k: float) {\n    x = x * k\n}\n\nmut n = 1\nimmut r = bump(mut n, 5)\nprint(`${n} ${r}`)\nmut t = 'ab'\ngrow(mut t, 'cd')\ngrow(mut t, t)\nprint(t)\nmut p = 'p'\nmut q = 'q'\nprint(swap(mut p, mut q) + p + q)\nprint(same(mut t) + t)\ngrow(mut names, 'h')\nprint(names)\nbump(mut total, 3)\nprint(string(total))\nmut f = float(1.5)\nscale(mut f, float(4))\nprint(string(f))\n";
+    let path = source_file("machine_ir_references", source);
+    let executable = path.with_extension("");
+    let built = koji::finish(koji::kojic().arg("build").arg(&path).arg("-o").arg(&executable), "");
+    assert_eq!(built.code, Some(0), "{}", built.stderr);
+    let run = if has_valgrind() {
+        Command::new("valgrind").args(["-q", "--error-exitcode=99", "--leak-check=full", "--errors-for-leak-kinds=definite"]).arg(&executable).output().unwrap()
+    } else {
+        Command::new(&executable).output().unwrap()
+    };
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "ab0ab1ab2ab3\ny\ntrue\nstart,one,ab0ab1ab2ab3\nlessequalgreater\n2.5true1\nqqw\ntrue\n6 12\nabcdabcd\nqqp\nabcdabcd!abcdabcd!\ngh\n3\n0x1.8p2\n");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+}
