@@ -1,5 +1,5 @@
-// Inlining for the native backend (native.kj): a call of a small function (as cgen.kj finds them,
-// those that C inlines: `Lexer.at`, `Parser.current`) is replaced by the blocks of the function, its
+// Inlining for the native backend (native.kj): a call of a small function (`inlinable` finds them:
+// `Lexer.at`, `Parser.current`) is replaced by the blocks of the function, its
 // locals new locals of the caller. A parameter the function never changes is its argument itself
 // (a local, a constant, or a global that never changes), with no reference of its own: the caller
 // reads it where the function did, so it stays alive until then (liveness.kj), and a value changed
@@ -10,7 +10,7 @@
 // function of the same file is inlined (the messages of its panics name the file of the function
 // generated).
 
-import { Ty, Operand, Place, Step, Target, StdArg, Writeback, MapEntry, Instruction, Terminator, IrBlock, IrLocal, IrFunction, IrProgram, isManaged } from 'ir.kj'
+import { Ty, Operand, Place, Step, Target, StdArg, Writeback, MapEntry, Instruction, Terminator, IrBlock, IrFunction, IrProgram, isManaged } from 'ir.kj'
 import { changes, constantGlobals } from 'borrow.kj'
 import { uses, terminatorUses, successors } from 'liveness.kj'
 import { addBit, removeBit, hasBit, liveness } from 'bits.kj'
@@ -30,8 +30,7 @@ type Names = {
 immut inlinedBlocks = 8
 immut inlinedSize = 40
 
-// The functions small enough to inline (as `smallFunctions` of cgen.kj, with other limits): they
-// call no others but small ones, so a recursive function is never one of them.
+// The functions small enough to inline: they call no others but small ones, so a recursive function is never one of them.
 function inlinable(program: IrProgram, blocks: int, most: int): boolean[] {
     mut sizes: int[] = []
 
@@ -92,17 +91,23 @@ function inlinable(program: IrProgram, blocks: int, most: int): boolean[] {
     return result
 }
 
-// The platform the native backend compiles for (see target.kj): Linux on the processor it runs on, or
-// the one KOJI_TARGET names (`x64`, `arm64`, `macos-x64`, `macos-arm64`): the system times 3 plus the processor.
+// The platform the native backend compiles for (see target.kj): the one it runs on, or
+// the one KOJI_TARGET names (`x64`, `arm64`, `macos-x64`, `macos-arm64`, `windows-x64`): the system times 3 plus the processor.
 export function targetPlatform(): int {
     return match (system.env('KOJI_TARGET')) {
         Some(name) => match (name) {
             'arm64' => 1
             'macos-x64' => 3
             'macos-arm64' => 4
+            'windows-x64' => 6
             _ => 0
         }
-        None => if (system.architecture == system.Arm64) { 1 } else { 0 }
+        // The system and the processor it runs on.
+        None => match (system.os) {
+            Windows => 6
+            MacOS => if (system.architecture == system.Arm64) { 4 } else { 3 }
+            _ => if (system.architecture == system.Arm64) { 1 } else { 0 }
+        }
     }
 }
 
@@ -121,6 +126,79 @@ function forSystem(routine: IrFunction, globals: Platformed, platform: int): IrF
         }
 
         if (folded.goes[block] >= 0) { result.blocks[block] = { instructions: routine.blocks[block].instructions, terminator: GotoT(folded.goes[block]) } }
+    }
+
+    // The comparisons with `system.os` and `system.architecture` and their tags, known: constants
+    // (so that a function that runs before the modules do, `koji_init`, reads nothing of them).
+    for block in range(result.blocks.length()) {
+        if (not folded.reached[block]) { continue }
+
+        mut kept: Instruction[] = []
+
+        for instruction in result.blocks[block].instructions {
+            immut dest = match (instruction) {
+                BinaryIns(id, _, _, _, _) => id
+                UnaryIns(id, _, _, _) => id
+                _ => -1
+            }
+
+            if (dest >= 0 and dest < folded.flags.length()) {
+                match (folded.flags[dest]) {
+                    Some(flag) => {
+                        kept.push(CopyIns(LocalPlace(dest), BoolOp(flag)))
+                        continue
+                    }
+                    None => {}
+                }
+
+                match (folded.numbers[dest]) {
+                    Some(number) => {
+                        kept.push(CopyIns(LocalPlace(dest), IntOp(number)))
+                        continue
+                    }
+                    None => {}
+                }
+            }
+
+            kept.push(instruction)
+        }
+
+        result.blocks[block] = { instructions: kept, terminator: result.blocks[block].terminator }
+    }
+
+    // What they compared and nothing else reads: the global read, the variant made, left out.
+    mut reads: int[] = []
+
+    for local in result.locals {
+        reads.push(0)
+    }
+
+    for each in result.blocks {
+        for instruction in each.instructions {
+            for local in uses(instruction) {
+                reads[local] += 1
+            }
+        }
+
+        for local in terminatorUses(each.terminator) {
+            reads[local] += 1
+        }
+    }
+
+    for block in range(result.blocks.length()) {
+        mut kept: Instruction[] = []
+
+        for instruction in result.blocks[block].instructions {
+            immut unread = match (instruction) {
+                RecordNewIns(dest, _, fields) => fields.length() == 0 and reads[dest] == 0
+                CopyIns(LocalPlace(dest), GlobalOp(id)) => (id == globals.system or id == globals.architecture) and reads[dest] == 0
+                _ => false
+            }
+
+            if (not unread) { kept.push(instruction) }
+        }
+
+        result.blocks[block] = { instructions: kept, terminator: result.blocks[block].terminator }
     }
 
     return result

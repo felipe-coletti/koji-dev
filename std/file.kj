@@ -7,8 +7,7 @@ import { cString, cText, hasNul, isUtf8, textOf } from 'koji:core'
 
 // The C library. A file is opened with `fopen` (which takes no variadic arguments, unlike
 // `open`), then read and written through its descriptor, without the buffers of `FILE`. The calls
-// that may wait are made by a thread that helps while other tasks run (`koji_blocking_*` of
-// runtime/prelude.h).
+// that may wait are made by a thread that helps while other tasks run (`koji_blocking_*`).
 extern function koji_blocking_fopen(path: Address, mode: Address): Address
 extern function fclose(file: Address): CInt
 extern function fileno(file: Address): CInt
@@ -22,6 +21,11 @@ extern function koji_blocking_access(path: Address, mode: CInt): CInt
 extern function koji_blocking_unlink(path: Address): CInt
 extern function koji_blocking_mkdir(path: Address, mode: CInt): CInt
 extern function chmod(path: Address, mode: CInt): CInt
+extern function rmdir(path: Address): CInt
+// Windows (ucrtbase), and the library there (koji:windows).
+extern function windowsFileno(file: Address): CInt from '_fileno'
+extern function windowsChmod(path: Address, mode: CInt): CInt from '_chmod'
+extern function koji_windows_closedir(directory: Address): CInt
 extern function strlen(text: Address): CSize
 extern function strerror(code: CInt): Address
 extern function realloc(memory: Address, size: CSize): Address
@@ -76,18 +80,27 @@ export function open(path: string, mode: Mode): Result[File, FileError] {
     if (hasNul(path)) { return Err(invalidPath(path)) }
 
     immut cPath = cString(path)
-    // `e`: the descriptor is not given to the programs this one runs.
+    // `e`: the descriptor is not given to the programs this one runs (on Windows, `N`; `b`: the
+    // bytes as they are, no line breaks of two characters).
+    immut windows = system.os == system.Windows
     immut cMode = cString(match (mode) {
-        Read => 're'
-        Write => 'we'
-        Append => 'ae'
+        Read => if (windows) { 'rbN' } else { 're' }
+        Write => if (windows) { 'wbN' } else { 'we' }
+        Append => if (windows) { 'abN' } else { 'ae' }
     })
     immut handle = koji_blocking_fopen(cPath, cMode)
     immut code = koji_system_errno()
-    free(cPath)
     free(cMode)
 
-    if (isNull(handle)) { return Err(failure(path, code)) }
+    if (isNull(handle)) {
+        // Windows does not open a directory (EACCES), where the others say so when it is read:
+        // the same error everywhere (EISDIR).
+        immut directory = windows and code == 13 and opensAsDirectory(cPath)
+        free(cPath)
+        return Err(failure(path, if (directory) { 21 } else { code }))
+    }
+
+    free(cPath)
 
     return Ok({ handle: handle, path: path, mode: mode })
 }
@@ -96,7 +109,7 @@ export function open(path: string, mode: Mode): Result[File, FileError] {
 function File.read(self, here: Location): Result[string, FileError] {
     if (self.mode != Read) { panicAt(here, `file '${self.path}' was not opened for reading (Read)`) }
 
-    immut fd = fileno(self.handle)
+    immut fd = descriptor(self.handle)
     mut capacity = 8192
     mut buffer = allocate(capacity)
     mut size = 0
@@ -138,7 +151,7 @@ function File.read(self, here: Location): Result[string, FileError] {
 function File.readBytes(self, here: Location): Result[byte[], FileError] {
     if (self.mode != Read) { panicAt(here, `file '${self.path}' was not opened for reading (Read)`) }
 
-    immut fd = fileno(self.handle)
+    immut fd = descriptor(self.handle)
     immut chunk = allocate(65536)
     mut bytes: byte[] = []
 
@@ -190,7 +203,7 @@ function File.writeBytes(self, bytes: byte[], here: Location): Result[void, File
 }
 
 function File.writeAt(self, bytes: Address, size: int): Result[void, FileError] {
-    immut fd = fileno(self.handle)
+    immut fd = descriptor(self.handle)
     mut done = 0
 
     while (done < size) {
@@ -213,6 +226,11 @@ function File.writeAt(self, bytes: Address, size: int): Result[void, FileError] 
 // Closes the file (dropping it closes it).
 function File.close(take self) {}
 
+// The descriptor of a stream of C.
+function descriptor(handle: Address): int {
+    return if (system.os == system.Windows) { windowsFileno(handle) } else { fileno(handle) }
+}
+
 // The names of the entries of the directory at `path`, sorted.
 export function list(path: string): Result[string[], FileError] {
     if (hasNul(path)) { return Err(invalidPath(path)) }
@@ -227,6 +245,7 @@ export function list(path: string): Result[string[], FileError] {
     // Where `d_name` is in a `struct dirent`.
     immut nameAt = match (system.os) {
         MacOS => 21
+        Windows => 40
         _ => 19
     }
     mut names: string[] = []
@@ -242,7 +261,7 @@ export function list(path: string): Result[string[], FileError] {
         if (text != '.' and text != '..') { names.push(text) }
     }
 
-    closedir(directory)
+    if (system.os == system.Windows) { koji_windows_closedir(directory) } else { closedir(directory) }
     names.sort()
     return Ok(names)
 }
@@ -268,12 +287,36 @@ export function remove(path: string): Result[void, FileError] {
     return Ok()
 }
 
+// Whether the path is a directory that can be read (Windows).
+function opensAsDirectory(cPath: Address): boolean {
+    immut directory = koji_blocking_opendir(cPath)
+
+    if (isNull(directory)) { return false }
+
+    koji_windows_closedir(directory)
+    return true
+}
+
+// Removes the directory at `path`, which must be empty.
+export function removeDir(path: string): Result[void, FileError] {
+    if (hasNul(path)) { return Err(invalidPath(path)) }
+
+    immut cPath = cString(path)
+    immut removed = rmdir(cPath) == 0
+    immut code = koji_system_errno()
+    free(cPath)
+
+    if (not removed) { return Err(failure(path, code)) }
+
+    return Ok()
+}
+
 // Sets the permissions of the file at `path` (the bits of Unix: 0o755 is `0x1ED`).
 export function setPermissions(path: string, mode: int): Result[void, FileError] {
     if (hasNul(path)) { return Err(invalidPath(path)) }
 
     immut cPath = cString(path)
-    immut changed = chmod(cPath, mode) == 0
+    immut changed = if (system.os == system.Windows) { windowsChmod(cPath, mode) == 0 } else { chmod(cPath, mode) == 0 }
     immut code = koji_system_errno()
     free(cPath)
 
@@ -345,7 +388,7 @@ function isDirectory(path: string): boolean {
     return reachable(`${path}/.`)
 }
 
-// `access(path, F_OK)`, by a thread that helps while other tasks run (runtime/prelude.h).
+// `access(path, F_OK)`, by a thread that helps while other tasks run (koji:prelude).
 function reachable(path: string): boolean {
     immut cPath = cString(path)
     immut found = koji_blocking_access(cPath, 0) == 0

@@ -4,12 +4,19 @@ This guide shows how to build Koji, write a first program and run it.
 
 ## Requirements
 
-The Koji compiler, `kojic`, is written in Koji, and compiles programs to C. Building it needs:
+The Koji compiler, `kojic`, is written in Koji, and compiles programs to machine code (Linux on x86-64 and arm64, macOS on x86-64 and arm64, Windows on x86-64). Building it needs `gzip` on Linux or macOS, or PowerShell on Windows: no C compiler. (macOS is new: Koji builds and links for it, and is not yet run there by its tests.)
 
--   a C compiler (`cc`, such as gcc or clang), which `kojic` also uses to build programs;
--   `gzip` and `ar`.
+## Installing a release
 
-The runtime library that compiled programs are linked with is written in Koji too; its C is in `bootstrap/libkoji.c.gz`, next to the seed.
+A release has a package for each platform (`koji-<version>-<platform>.tar.gz`, a `.zip` for Windows): `kojic` and the runtime library next to it. Unpack it and add its directory to your `PATH`:
+
+```sh
+tar -xzf koji-0.1.0-linux-x64.tar.gz
+export PATH=$PWD/koji-0.1.0-linux-x64:$PATH
+kojic version
+```
+
+On macOS, a downloaded executable is quarantined by the system: `xattr -d com.apple.quarantine koji-0.1.0-macos-arm64/kojic` lets it run (or build Koji from the repository, below).
 
 ## Building
 
@@ -21,15 +28,17 @@ cd koji
 bootstrap/build.sh
 ```
 
-The compiler is written in Koji, so it needs a compiler to be built: the script starts from the C that the compiler generated for itself (`bootstrap/kojic.c.gz`, the seed), compiles it with the C compiler, and with it builds the compiler of `compiler/`.
+The compiler is written in Koji, so it needs a compiler to be built: the script starts from an executable of the compiler for your platform (`bootstrap/seed/kojic-<platform>.gz`, the seed), which builds the runtime library and the compiler of `compiler/`, machine code and linking included.
 
-The compiler is created at `build/kojic`, and the runtime library at `build/libkoji_runtime.a`. `kojic` finds the runtime library next to itself; another one can be given in the environment variable `KOJI_RUNTIME`. `KOJI_CC` chooses the C compiler (default: `cc`). To call it as `kojic` from anywhere, add `build` to your `PATH`:
+On macOS, the same script uses the seed for macOS. On Windows (x86-64), run `bootstrap\build.cmd` instead: it unpacks the seed for Windows with PowerShell and builds `build\kojic.exe` the same way.
+
+The compiler is created at `build/kojic`, and the runtime library at `build/libkoji_runtime.a`. `kojic` finds the runtime library next to itself; another one can be given in the environment variable `KOJI_RUNTIME`. To call it as `kojic` from anywhere, add `build` to your `PATH`:
 
 ```sh
 export PATH=$PWD/build:$PATH
 ```
 
-After a change to the compiler, `bootstrap/build.sh --seed` also writes the seed again from the compiler it built, so that the next build starts from it.
+When the compiler starts to use something the seed cannot compile, `bootstrap/build.sh --seed` also writes the seeds of every platform again from the compiler it built, so that the next build starts from them (they are not written again after every change: each is megabytes).
 
 A compiled program keeps the memory of the small values it drops for the next ones, which is faster than asking the system each time. To check a program with valgrind, run it with `KOJI_POOL=0`: each value then gets its own memory from the system, and valgrind sees the use of a value after it was freed.
 
@@ -81,7 +90,7 @@ The message gives the file, the line and the column of the error, and shows the 
 | --- | --- |
 | `kojic run <file.kj> [arguments]` | Checks and runs a program; the arguments after the file are for the program (`system.args()`) |
 | `kojic check <file.kj>` | Only checks syntax and types |
-| `kojic build <file.kj> [-o <output>]` | Compiles a program to an executable (needs a C compiler) |
+| `kojic build <file.kj> [-o <output>]` | Compiles a program to an executable |
 | `kojic test [file.kj \| directory]...` | Runs the tests of files, the `test` blocks (see [Testing](testing.md)) |
 | `kojic lsp` | The language server, for editors (on the standard input and output) |
 | `kojic help` | Shows the available commands |
@@ -95,7 +104,7 @@ kojic build hello.kj
 
 ## Editor Support
 
-`editors/vscode` is an extension of Visual Studio Code with the syntax highlighting of Koji and its language server: see its [README](../editors/vscode/README.md) to install it. Its grammar is a TextMate grammar, which other editors read too.
+[koji-vscode](https://github.com/koji-language/koji-vscode) is the extension of Visual Studio Code, with the syntax highlighting of Koji and its language server (`kojic lsp`). The grammar of the syntax, which other editors can use too, is `editors/textmate/koji.tmLanguage.json`.
 
 `kojic lsp` is the language server, for any editor that speaks the Language Server Protocol (VS Code, Neovim, Helix, Zed, Emacs...): it shows every error of a file as it is edited, the type of what is under the cursor, and goes to where a name is declared, in the file or in the module it comes from.
 
@@ -110,12 +119,15 @@ kojic run examples/shapes.kj
 
 ## Running the Tests
 
-If you want to contribute, run the test suite with [Rust](https://www.rust-lang.org/tools/install)'s `cargo` (the tests are written in Rust; building Koji does not need it):
+If you want to contribute, run the test suite: it is written in Koji, and runs with the compiler built by `bootstrap/build.sh`, from the root of the repository:
 
 ```sh
-cargo test
+sh bootstrap/build.sh
+build/kojic test test/*.kj
 ```
 
-The tests build the compiler from the seed, like `bootstrap/build.sh`, and run it on their programs. `test/crypto.rs` tests the cryptography of the runtime by C programs linked with it, and the test of `https://` uses the `openssl` command when it is there. `cargo test --test bootstrap -- --ignored` also checks that the compiler compiles itself to the same C (the fixed point). The stages of the compiler are compared with snapshots (`test/snapshots/`): after a change of a stage, `KOJI_UPDATE_SNAPSHOTS=1 cargo test --test stages` writes them again.
+The programs of `test/cases/` are run by `kojic run`, or built by `kojic build` and run (under valgrind when it is installed), against what they must print, several at a time (`KOJI_TEST_JOBS`, 8 by default); `test/*.kj` test the rest: the commands of the compiler, servers, the cryptography of the runtime, the platforms Koji builds for, and that the compiler compiles itself to the same executable, byte for byte (the fixed point). The test of `https://` uses the `openssl` command when it is there, and those of other platforms qemu, lld or Wine when they are there. `KOJI_COMPILER` names another compiler to test; `KOJI_TEST_WINDOWS=1` builds the programs of the cases for Windows and runs them with Wine (in a prefix of its own, `build/test/wine`, or `KOJI_WINEPREFIX`, with one wineserver for all of them).
+
+The stages of the compiler are compared with snapshots (`test/snapshots/`): after a change of a stage, `KOJI_UPDATE_SNAPSHOTS=1 build/kojic test test/stages.kj` writes them again. After a change of `std/`, `build/kojic run bootstrap/generate/stdlib.kj > compiler/stdlib.kj` writes the sources the compiler carries again (then build it again).
 
 See the [contributing guide](../CONTRIBUTING.md) for details.

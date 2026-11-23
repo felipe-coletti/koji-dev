@@ -1,6 +1,6 @@
 // `koji:text`: the strings of the runtime, in the library of the runtime written in Koji (C calls
 // these functions by their names). A string is immutable text with a count of references, laid
-// out for C (runtime/prelude.h): the count, the length in bytes, the bytes its block holds, then
+// out for C (koji:prelude): the count, the length in bytes, the bytes its block holds, then
 // the UTF-8 bytes. A function gives a new reference to the string it returns; it reads the strings
 // it is given, but those it takes (`take`: the caller gives its reference).
 
@@ -12,7 +12,8 @@ extern function memcpy(target: Address, source: Address, size: CSize): Address
 extern function koji_memory_give(block: Address, words: int)
 extern function memcmp(a: Address, b: Address, size: CSize): CInt
 extern function memchr(bytes: Address, value: CInt, size: CSize): Address
-extern function memmem(haystack: Address, haystackSize: CSize, needle: Address, needleSize: CSize): Address
+// `memmem`, by the library (koji:windows: Windows has none).
+extern function koji_find_bytes(haystack: Address, haystackSize: CSize, needle: Address, needleSize: CSize): Address
 
 extern function koji_string_concat(a: string, b: string): string {
     immut sizeA = stringSize(a)
@@ -241,7 +242,7 @@ extern function koji_string_contains_char(haystack: string, c: char): boolean {
 function containsText(haystack: string, needle: string): boolean {
     if (stringSize(needle) == 0) { return true }
 
-    immut found = memmem(stringBytes(haystack), stringSize(haystack), stringBytes(needle), stringSize(needle))
+    immut found = koji_find_bytes(stringBytes(haystack), stringSize(haystack), stringBytes(needle), stringSize(needle))
     return distance(stringBytes(haystack), found) >= 0
 }
 
@@ -814,7 +815,7 @@ function hexAt(digits: Address, at: int, count: int): int {
 }
 
 // The block of a string: 3 words (its count of references, its size and the bytes its block holds,
-// a multiple of 8), then its bytes, from the pool for a short one (runtime/prelude.h makes them).
+// a multiple of 8), then its bytes, from the pool for a short one.
 
 // A new string of the bytes `bytes[..size]` (bytes that are not UTF-8 become U+FFFD).
 extern function koji_string_new(bytes: Address, size: CSize): string {
@@ -835,3 +836,4 @@ extern function koji_string_free(text: Address) {
     immut capacity: int = read(text, 16)
     koji_memory_give(text, 3 + capacity / 8)
 }
+

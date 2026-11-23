@@ -1,8 +1,8 @@
 // The lowering of the IR to the machine IR (mir.kj): the semantics of Koji decided once for every
 // processor. Values are of one word (ints, booleans, chars, bytes, floats, and the references of
 // strings, lists, records, maps and closures) or of two (decimals and U128: a pair of virtual
-// registers); the functions of the library that the C backend writes inline (the memory of
-// `koji:unsafe`, the pool, the accessors) are written inline here too, the instructions of the
+// registers); the functions of the library that are best inline (the memory of
+// `koji:unsafe`, the pool, the accessors) are written inline here, the instructions of the
 // processor that `koji:unsafe` names as `MMachine`.
 //
 // The references are counted as in the other backends (see "Reference counting" in
@@ -13,7 +13,7 @@
 // reference at each point is known (`held`): only those are released, and a local held where
 // paths meet is set to none at the end of the paths where it is not.
 
-import { Ty, Operand, Place, Target, Step, Instruction, Terminator, IrFunction, IrProgram, StdArg, isManaged, itemOf, tyText } from 'ir.kj'
+import { Ty, Operand, Place, Target, Instruction, Terminator, IrFunction, IrProgram, StdArg, isManaged, itemOf, tyText } from 'ir.kj'
 import { MValue, MAddress, MCallee, MInstruction, MTerminator, MBlock, MPanic, MFunctionCode } from 'mir.kj'
 import { lastUses, defs, uses, terminatorUses, successors, targetReads } from 'liveness.kj'
 import { addBit, removeBit, hasBit, bitMembers } from 'bits.kj'
@@ -225,17 +225,6 @@ function wideLowered(program: IrProgram, routine: IrFunction, instruction: Instr
         MapRemoveIns(_, _, _, _) => true
         _ => false
     }
-}
-
-// The `mut` parameters of a function (each given the address where its final value goes).
-function mutCount(routine: IrFunction): int {
-    mut count = 0
-
-    for writeback in routine.writeback {
-        if (writeback) { count += 1 }
-    }
-
-    return count
 }
 
 // A variable, or a place inside one (its steps of simple operands).
@@ -782,13 +771,6 @@ function Lowering.operandInSlot(mut self, operand: Operand): MValue {
         self.current.push(MStore(MSlot(slot, 8 * i), words[i], 8))
     }
 
-    return self.addressOf(MSlot(slot, 0))
-}
-
-// A value in a new slot of the frame: its address (for the library, which takes items and keys so).
-function Lowering.inSlot(mut self, value: MValue): MValue {
-    immut slot = self.slot()
-    self.current.push(MStore(MSlot(slot, 0), value, 8))
     return self.addressOf(MSlot(slot, 0))
 }
 
@@ -1586,6 +1568,12 @@ function Lowering.reassigned(self, local: int, dest: int, block: int, position: 
 
 function Lowering.movable(self, local: int, block: int, position: int): int {
     return if (self.owned[local] and not self.writeback[local] and local in self.live[block][position]) { local } else { -1 }
+}
+
+// A function of the C library called by the lowering itself: on Windows, by the convention of
+// Windows (see `callForeign`).
+function cCallee(name: string, count: int): MCallee {
+    return if (targetPlatform() / 3 == 2) { MVariadic(name, count) } else { MExternal(name) }
 }
 
 function makesCalls(routine: IrFunction): boolean {
@@ -2707,7 +2695,7 @@ function Lowering.instruction(mut self, instruction: Instruction) {
                     } else {
                         // fmod of the library of C.
                         immut remainder = self.floatTemporary()
-                        self.current.push(MCall(MExternal('fmod'), [first, second], [remainder]))
+                        self.current.push(MCall(cCallee('fmod', 2), [first, second], [remainder]))
                         self.current.push(MUnary(dest, 'fcheck', MReg(remainder), overflow))
                     }
                 }
@@ -3315,6 +3303,14 @@ function Lowering.libraryCall(mut self, dest: Option[int], name: string, args: S
 
     if (pairs.length() > 0) { self.current.push(MPairs(pairs, aligned)) }
 
+    // On Windows, a function of C (of a DLL) is called by its convention, not by the one of the
+    // code of Koji (System V): as a variadic one with all its arguments fixed. Not those of the
+    // library (`koji_...`), which modules declare too.
+    if (targetPlatform() / 3 == 2 and not variadic and not symbol.startsWith('koji_')) {
+        variadic = true
+        fixed = values.length()
+    }
+
     if (variadic) {
         match (dest) {
             Some(local) => {
@@ -3369,8 +3365,8 @@ function Lowering.inlineLibrary(mut self, dest: Option[int], name: string, value
         'koji_unsafe_offset' => self.current.push(MBinary(result, 'add', values[0], values[1], -1))
         'koji_unsafe_distance' => self.current.push(MBinary(result, 'sub', values[1], values[0], -1))
         // The memory of the system, and a string of a copy of bytes.
-        'koji_unsafe_allocate' => self.current.push(MCall(MExternal('malloc'), [values[0]], [result]))
-        'koji_unsafe_free' => self.current.push(MCall(MExternal('free'), [values[0]], []))
+        'koji_unsafe_allocate' => self.current.push(MCall(cCallee('malloc', 1), [values[0]], [result]))
+        'koji_unsafe_free' => self.current.push(MCall(cCallee('free', 1), [values[0]], []))
         'koji_unsafe_new_string' => self.current.push(MCall(MExternal('koji_string_from_utf8'), [values[0], values[1]], [result]))
         'koji_unsafe_set_string_size' => self.current.push(MStore(MBase(self.register(values[0]), 8), values[1], 8))
         'koji_unsafe_set_list_length' => self.current.push(MStore(MBase(self.register(values[0]), 32), values[1], 8))

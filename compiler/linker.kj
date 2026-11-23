@@ -85,7 +85,6 @@ export function archiveObjects(bytes: byte[]): Result[byte[][], string] {
 // An archive of objects (`ar` of GNU, with the table of the symbols they define that linkers read).
 export function archive(objects: byte[][]): byte[] {
     mut names: string[][] = []
-    mut count = 0
 
     for object in objects {
         immut defined = match (parseObject(object)) {
@@ -93,7 +92,17 @@ export function archive(objects: byte[][]): byte[] {
             Err(_) => []
         }
         names.push(defined)
-        count += defined.length()
+    }
+
+    return archiveNamed(objects, names)
+}
+
+// The same, with the global symbols of each object given (objects of COFF).
+export function archiveNamed(objects: byte[][], names: string[][]): byte[] {
+    mut count = 0
+
+    for each in names {
+        count += each.length()
     }
 
     // The table: the number of symbols, the offset of the member of each (big-endian words of 4
@@ -202,10 +211,38 @@ export function sharedSymbols(bytes: byte[]): Result[Set[string], string] {
     return Ok(found)
 }
 
+// The name of a shared library for the dynamic loader (its DT_SONAME, `libsqlite3.so.0`), or ''
+// when it has none.
+export function sharedName(bytes: byte[]): string {
+    if (bytes.length() < 64 or bytes[0] != 0x7F or bytes[1] != 0x45 or bytes[4] != 2 or bytes[5] != 1) { return '' }
+
+    immut sectionsAt = readNumber(bytes, 40, 8)
+    immut count = readNumber(bytes, 60, 2)
+
+    for i in range(count) {
+        immut at = sectionsAt + 64 * i
+
+        // SHT_DYNAMIC, its strings in the section `link`: its entries of 16 bytes, a tag and a value.
+        if (readNumber(bytes, at + 4, 4) != 6) { continue }
+
+        immut entriesAt = readNumber(bytes, at + 24, 8)
+        immut size = readNumber(bytes, at + 32, 8)
+        immut stringsAt = readNumber(bytes, sectionsAt + 64 * readNumber(bytes, at + 40, 4) + 24, 8)
+
+        for entry in range(entriesAt, entriesAt + size, 16) {
+            // DT_SONAME.
+            if (readNumber(bytes, entry, 8) == 14) { return cString(bytes, stringsAt + readNumber(bytes, entry + 8, 8)) }
+        }
+    }
+
+    return ''
+}
+
 // The executable of the objects, linked with the shared libraries `libraries` (their names for the
 // dynamic loader, `libc.so.6`) that define the symbols `provided`, or why this linker cannot make
-// it (a symbol no object nor library defines among them).
-export function linkExecutable(objects: byte[][], libraries: string[], provided: Set[string]): Result[byte[], string] {
+// it (a symbol no object nor library defines among them). `unchecked`: the libraries were not all
+// read (those of another processor), and a symbol no object defines is taken to be in them.
+export function linkExecutable(objects: byte[][], libraries: string[], provided: Set[string], unchecked: boolean): Result[byte[], string] {
     mut inputs: InputObject[] = []
 
     for object in objects {
@@ -266,7 +303,7 @@ export function linkExecutable(objects: byte[][], libraries: string[], provided:
             if (symbol.section != 0 or symbol.info >> 4 == 0 or defined.has(symbol.name) or externalIndex.has(symbol.name)) { continue }
 
             // A weak symbol may stay undefined; another must be in a library.
-            if (not provided.has(symbol.name) and symbol.info >> 4 != 2) { return Err(`undefined symbol '${symbol.name}'`) }
+            if (not unchecked and not provided.has(symbol.name) and symbol.info >> 4 != 2) { return Err(`undefined symbol '${symbol.name}'`) }
 
             externalIndex[symbol.name] = externals.length()
             externals.push(symbol.name)
