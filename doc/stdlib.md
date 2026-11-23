@@ -19,8 +19,17 @@ The **Koji Standard Library** provides a collection of built-in modules to help 
 -   [`math`](standard-library/math.md)  
     Perform basic mathematical operations and access constants like `pi`.
 
+-   [`cli`](standard-library/cli.md)  
+    Read the options and arguments of a program of the command line, with its help.
+
+-   [`task`](standard-library/task.md)  
+    Run functions at the same time: groups of tasks, channels and shared values.
+
 -   [`http`](standard-library/http.md)  
-    Send HTTP requests such as GET, POST, PUT, and DELETE.
+    Send HTTP requests such as GET, POST, PUT, and DELETE, and serve them.
+
+-   [`hash`](standard-library/hash.md)  
+    Compute the SHA-256 and SHA-512 digests of texts.
 
 -   [`json`](standard-library/json.md)  
     Parse JSON strings and convert data to JSON format.

@@ -11,6 +11,21 @@ export type TypeExpr = {
     FunctionOf(params: TypeExpr[], returns: TypeExpr)
 }
 
+// A handle of a foreign block (`type Database = handle(sqlite3_close)`), and a function.
+export type ForeignHandle = {
+    name: string
+    destructor: string
+}
+
+export type ForeignFunction = {
+    name: string
+    // The name of the function in the library.
+    symbol: string
+    params: Param[]
+    returns: Option[TypeExpr]
+    blocking: boolean
+}
+
 export type Param = {
     name: string
     annotation: Option[TypeExpr]
@@ -76,6 +91,16 @@ export type ObjectEntry = {
 export type Node = {
     id: int
     kind: NodeKind
+    span: Span
+}
+
+// Where a node is in its file: its first line and column, and the line and column after it (line 0
+// when unknown: inside an interpolation). Columns count characters, from 1.
+export type Span = {
+    line: int
+    column: int
+    endLine: int
+    endColumn: int
 }
 
 export type NodeKind = {
@@ -111,12 +136,19 @@ export type NodeKind = {
     VarDecl(name: string, annotation: Option[TypeExpr], value: Node, isImmut: boolean)
     FunctionDecl(name: string, owner: Option[string], typeParams: TypeParam[], params: Param[], returns: Option[TypeExpr], body: Node)
     // `extern function sqrt(x: float): float`: a function of the system's C library, for the
-    // standard library (with `koji:unsafe`).
-    ExternDecl(name: string, params: Param[], returns: Option[TypeExpr])
+    // standard library (with `koji:unsafe`); `from 'symbol'` names it in the library when the name
+    // is another, and `extern blocking function` is made by a thread that helps (koji:task) while
+    // other tasks are alive.
+    ExternDecl(name: string, params: Param[], returns: Option[TypeExpr], symbol: string, blocking: boolean)
+    // `foreign 'library' { ... }`: its handles and functions (compiler/foreign.kj writes their module).
+    Foreign(library: string, handles: ForeignHandle[], functions: ForeignFunction[])
     TypeDecl(name: string, params: TypeParam[], definition: TypeDef)
     ImportModule(name: string, path: string)
     ImportNames(names: string[], path: string)
     Try(value: Node)
+    // A call of `assert` (the built-in one, unless the program has its own), with the text of its
+    // condition as written, which a failure shows.
+    Asserted(text: string, call: Node)
     // `opaque`: other modules use the type, but do not see its structure.
     Export(declaration: Node, opaque: boolean)
     // `extern function name(...) { ... }`: a function of Koji that C calls by its name (the library
@@ -142,6 +174,8 @@ immut powerPower = 13
 
 type Parser = {
     tokens: Spanned[]
+    // The characters of the source (for the text of an `assert`; none inside an interpolation).
+    source: char[]
     position: int
     // How many loops and functions enclose the current point (for `break` and `return`).
     loopDepth: int
@@ -150,6 +184,9 @@ type Parser = {
     newlineEndsExpression: boolean
     // The id of the next node.
     nextId: int
+    // Where the expressions and statements being read start (indexes of tokens): a node starts
+    // where the innermost one does, and ends at the last token read.
+    starts: int[]
 }
 
 // The token as error messages show it: `'x'`, `'=>'`, `42`, `the end of the file`.
@@ -170,13 +207,34 @@ export function describe(token: Token): string {
     }
 }
 
-function Parser.create(tokens: Spanned[]): Parser {
-    return { tokens: tokens, position: 0, loopDepth: 0, functionDepth: 0, newlineEndsExpression: false, nextId: 0 }
+function Parser.create(tokens: Spanned[], source: char[]): Parser {
+    return { tokens: tokens, source: source, position: 0, loopDepth: 0, functionDepth: 0, newlineEndsExpression: false, nextId: 0, starts: [] }
 }
 
 function Parser.node(mut self, kind: NodeKind): Node {
     self.nextId += 1
-    return { id: self.nextId - 1, kind: kind }
+    return { id: self.nextId - 1, kind: kind, span: self.spanFrom(if (self.starts.length() > 0) { self.starts[self.starts.length() - 1] } else { self.position - 1 }) }
+}
+
+// A node that wraps another (`Located`, `Export`): where the other is.
+function Parser.wrapping(mut self, kind: NodeKind, inner: Node): Node {
+    mut node = self.node(kind)
+
+    if (inner.span.line > 0) { node.span = inner.span }
+
+    return node
+}
+
+// From the token `start` to the last token read.
+function Parser.spanFrom(self, start: int): Span {
+    immut first = if (start < 0) { 0 } else { start }
+    immut last = if (self.position - 1 < first) { first } else { self.position - 1 }
+
+    if (last >= self.tokens.length()) { return { line: 0, column: 0, endLine: 0, endColumn: 0 } }
+
+    immut a = self.tokens[first]
+    immut b = self.tokens[last]
+    return { line: a.line, column: a.column, endLine: b.endLine, endColumn: b.endColumn }
 }
 
 function Parser.tokenAt(self, index: int): Token {
@@ -231,8 +289,22 @@ function Parser.isKeyword(self, name: string): boolean {
 }
 
 // An error at the current line.
+// A syntax error at the current token: `line 3:12: message` (`line 3: message` without a column).
 function Parser.failure(self, message: string): string {
-    return atLine(self.currentLine(), message)
+    immut line = self.currentLine()
+
+    if (line == 0 or self.position >= self.tokens.length()) { return atLine(line, message) }
+
+    return `line ${line}:${self.tokens[self.position].column}: ${message}`
+}
+
+// A syntax error at the token just read.
+function Parser.failureBefore(self, message: string): string {
+    immut index = self.position - 1
+
+    if (index < 0 or index >= self.tokens.length() or self.tokens[index].line == 0) { return atLine(self.currentLine(), message) }
+
+    return `line ${self.tokens[index].line}:${self.tokens[index].column}: ${message}`
 }
 
 function atLine(line: int, message: string): string {
@@ -321,12 +393,24 @@ function Parser.locatedStatement(mut self): Result[Node, string] {
 
     if (line == 0) { return Ok(statement) }
 
-    return Ok(self.node(Located(line, statement)))
+    return Ok(self.wrapping(Located(line, statement), statement))
 }
 
 function Parser.statement(mut self): Result[Node, string] {
+    self.starts.push(self.position)
+    immut result = self.statementFrom()
+    self.starts.pop()
+    return result
+}
+
+function Parser.statementFrom(mut self): Result[Node, string] {
+    // A test is read by the loop of the top level: here it is inside a block.
+    if (self.startsTest()) { return Err(self.failure("a test can only be at the top level of a file")) }
+
     // `extern function`: `extern` is a name anywhere else.
-    if (self.current() == Identifier('extern') and self.peek() == Keyword('function')) { return self.externDeclaration() }
+    if (self.current() == Identifier('extern') and (self.peek() == Keyword('function') or self.peek() == Identifier('blocking'))) { return self.externDeclaration() }
+
+    if (self.startsForeign()) { return Err(self.failure('a foreign block can only be at the top level of a file')) }
 
     match (self.current()) {
         Keyword('break') => {
@@ -637,17 +721,97 @@ function Parser.functionDeclaration(mut self): Result[Node, string] {
 
 function Parser.externDeclaration(mut self): Result[Node, string] {
     self.advance()
-    self.advance()
+    immut blocking = self.current() == Identifier('blocking')
+
+    if (blocking) { self.advance() }
+
+    self.expect(Keyword('function'), "'function'")?
     immut name = self.expectIdentifier('function name')?
     immut params = self.params()?
     immut returns = self.optionalReturnType()?
 
-    if (self.isSymbol('{')) {
+    if (self.isSymbol('{') and not blocking) {
         immut body = self.functionBody(true)?
         return Ok(self.node(ForC(self.node(FunctionDecl(name, None, [], params, returns, body)))))
     }
 
-    return Ok(self.node(ExternDecl(name, params, returns)))
+    mut symbol = name
+
+    if (self.isKeyword('from')) {
+        self.advance()
+        symbol = self.expectString('the name of the function in its library')?
+    }
+
+    return Ok(self.node(ExternDecl(name, params, returns, symbol, blocking)))
+}
+
+// `foreign 'library' {`, at the top level.
+function Parser.startsForeign(self): boolean {
+    if (self.current() != Identifier('foreign')) { return false }
+
+    return match (self.peek()) {
+        StringLiteral(_) => true
+        _ => false
+    }
+}
+
+// `foreign 'sqlite3' { type Database = handle(sqlite3_close) ... function sqlite3_open(...): CInt }`:
+// handles, and functions without bodies (`blocking function` for those that wait, `from 'symbol'`
+// for another name in the library).
+function Parser.foreignBlock(mut self): Result[Node, string] {
+    self.advance()
+    immut library = self.expectString('the name of the library')?
+
+    if (library == '' or library.startsWith('-') or ' ' in library) { return Err(self.failure(`'${library}' is not the name of a library`)) }
+
+    self.expectSymbol('{', "'{' after the name of the library")?
+    mut handles: ForeignHandle[] = []
+    mut functions: ForeignFunction[] = []
+
+    while (true) {
+        self.skipSeparators()
+
+        if (self.isSymbol('}')) { break }
+
+        if (self.isKeyword('type')) {
+            self.advance()
+            immut name = self.expectName('the name of the handle')?
+            self.expectSymbol('=', "'=' after the name of the handle")?
+
+            if (self.current() != Identifier('handle')) { return Err(self.failure("a type of a foreign block is a handle: 'type Name = handle(destructor)'")) }
+
+            self.advance()
+            self.expectSymbol('(', "'(' before the destructor of the handle")?
+            immut destructor = self.expectIdentifier('the function that destroys the handle')?
+            self.expectSymbol(')', "')' after the destructor of the handle")?
+            handles.push({ name: name, destructor: destructor })
+            continue
+        }
+
+        immut blocking = self.current() == Identifier('blocking')
+
+        if (blocking) { self.advance() }
+
+        if (not self.isKeyword('function')) { return Err(self.failure("a foreign block declares handles ('type Name = handle(destructor)') and functions without bodies ('function name(x: int): int')")) }
+
+        self.advance()
+        immut name = self.expectIdentifier('function name')?
+        immut params = self.params()?
+        immut returns = self.optionalReturnType()?
+        mut symbol = name
+
+        if (self.isKeyword('from')) {
+            self.advance()
+            symbol = self.expectString('the name of the function in its library')?
+        }
+
+        if (self.isSymbol('{')) { return Err(self.failure(`the foreign function '${name}' has no body: it is the function of the library`)) }
+
+        functions.push({ name: name, symbol: symbol, params: params, returns: returns, blocking: blocking })
+    }
+
+    self.advance()
+    return Ok(self.node(Foreign(library, handles, functions)))
 }
 
 // Whether the `(` at `open` starts an anonymous function: `(...) =>` or `(...): type =>`.
@@ -700,11 +864,12 @@ function Parser.export(mut self): Result[Node, string] {
         return Err(self.failure(`expected 'function', 'mut', 'immut' or 'type' after 'export', found ${describe(next)}`))
     }
 
-    immut declaration = self.node(Export(self.statement()?, opaque))
+    immut exported = self.statement()?
+    immut declaration = self.wrapping(Export(exported, opaque), exported)
 
     if (line == 0) { return Ok(declaration) }
 
-    return Ok(self.node(Located(line, declaration)))
+    return Ok(self.wrapping(Located(line, declaration), declaration))
 }
 
 function Parser.importStatement(mut self): Result[Node, string] {
@@ -946,6 +1111,13 @@ function operatorText(token: Token): string {
 }
 
 function Parser.expression(mut self, minimum: int): Result[Node, string] {
+    self.starts.push(self.position)
+    immut result = self.expressionFrom(minimum)
+    self.starts.pop()
+    return result
+}
+
+function Parser.expressionFrom(mut self, minimum: int): Result[Node, string] {
     mut left = self.prefix()?
 
     while (true) {
@@ -1008,7 +1180,7 @@ function Parser.prefix(mut self): Result[Node, string] {
         Int(value) => Ok(self.node(IntLiteral(value)))
         Decimal(text) => Ok(self.node(DecimalLiteral(text)))
         Float(value, text) => Ok(self.node(FloatLiteral(value, text)))
-        BadNumber(_, reason) => Err(atLine(line, reason))
+        BadNumber(_, reason) => Err(self.failureBefore(reason))
         StringLiteral(value) => Ok(self.node(StringNode(value)))
         TemplateString(raw) => self.template(raw, line)
         Boolean(value) => Ok(self.node(BooleanLiteral(value)))
@@ -1038,7 +1210,7 @@ function Parser.prefix(mut self): Result[Node, string] {
             self.expectSymbol(')', "')'")?
             Ok(inner)
         }
-        other => Err(atLine(line, `unexpected expression: ${describe(other)}`))
+        other => Err(self.failureBefore(`unexpected expression: ${describe(other)}`))
     }
 }
 
@@ -1099,11 +1271,92 @@ function Parser.call(mut self, callee: Node): Result[Node, string] {
     self.advance()
     immut saved = self.newlineEndsExpression
     self.newlineEndsExpression = false
-    immut args = self.arguments()
+    immut asserting = match (callee.kind) {
+        Name(name) => name == 'assert' and not self.isSymbol(')')
+        _ => false
+    }
+    immut first = self.tokens[self.position].start
+    mut last = first
+    immut args = if (asserting) { self.assertArguments(mut last) } else { self.arguments() }
     self.newlineEndsExpression = saved
     immut values = args?
     self.expectSymbol(')', "')' at the end of the arguments")?
-    return Ok(self.node(Call(callee, values)))
+    immut call = self.node(Call(callee, values))
+
+    if (not asserting) { return Ok(call) }
+
+    return Ok(self.node(Asserted(self.sourceText(first, last), call)))
+}
+
+// The arguments of `assert`, and where its first one (the condition) ends, in `last`.
+function Parser.assertArguments(mut self, mut last: int): Result[Node[], string] {
+    mut args = [self.argument()?]
+    last = self.tokens[self.position - 1].end
+
+    while (self.another(')')) {
+        args.push(self.argument()?)
+    }
+
+    return Ok(args)
+}
+
+// `test 'name' { ... }` at the top level of a file: `test`, a word only there, then a string.
+function Parser.startsTest(self): boolean {
+    if (self.current() != Identifier('test')) { return false }
+
+    return match (self.peek()) {
+        StringLiteral(_) => true
+        _ => false
+    }
+}
+
+// A test: a function of its own, named `test 'name'` (no program can name one so), which only
+// `kojic test` calls. Its name is unique in its file.
+function Parser.test(mut self, mut tests: Set[string]): Result[Node, string] {
+    immut line = self.currentLine()
+    immut start = self.position
+    self.advance()
+    immut name = match (self.current()) {
+        StringLiteral(value) => value
+        _ => ''
+    }
+
+    if (tests.has(name)) { return Err(self.failure(`a test named '${name}' is already in this file`)) }
+
+    tests.add(name)
+    self.advance()
+
+    if (not self.isSymbol('{')) { return Err(self.failure("expected '{' after the name of the test")) }
+
+    immut body = self.functionBody(true)?
+    self.starts.push(start)
+    immut declaration = self.node(FunctionDecl(testName(name), None, [], [], None, body))
+    immut located = self.node(Located(line, declaration))
+    self.starts.pop()
+    return Ok(located)
+}
+
+// The name of the function of a test.
+export function testName(name: string): string {
+    return `test ${name.debug()}`
+}
+
+// Whether a function is a test (its name is not an identifier).
+export function isTestName(name: string): boolean {
+    return name.startsWith('test \'')
+}
+
+// The characters of the source from `start` to `end` (none inside an interpolation).
+function Parser.sourceText(self, start: int, end: int): string {
+    mut text = ''
+
+    if (end > self.source.length()) { return text }
+
+    for i in range(start, end) {
+        text += string(self.source[i])
+    }
+
+    return text
 }
 
 function Parser.arguments(mut self): Result[Node[], string] {
@@ -1312,8 +1565,8 @@ function Parser.pattern(mut self): Result[Pattern, string] {
                 Int(value) => Ok(Literal(self.node(IntLiteral(-value))))
                 Decimal(text) => Ok(Literal(self.node(DecimalLiteral(`-${text}`))))
                 Float(value, text) => Ok(Literal(self.node(FloatLiteral(-value, `-${text}`))))
-                BadNumber(_, reason) => Err(self.failure(reason))
-                other => Err(self.failure(`unexpected pattern: -${describe(other)}`))
+                BadNumber(_, reason) => Err(self.failureBefore(reason))
+                other => Err(self.failureBefore(`unexpected pattern: -${describe(other)}`))
             }
         }
         StringLiteral(value) => {
@@ -1397,10 +1650,10 @@ function Parser.interpolation(mut self, source: string, line: int): Result[Node,
     mut tokens: Spanned[] = []
 
     for spanned in tokenize(source) {
-        tokens.push({ token: spanned.token, line: 0, column: 0 })
+        tokens.push({ token: spanned.token, line: 0, column: 0, start: 0, end: 0, endLine: 0, endColumn: 0 })
     }
 
-    mut parser = Parser.create(tokens)
+    mut parser = Parser.create(tokens, [])
     parser.nextId = self.nextId
     immut result = parser.expression(0)
     self.nextId = parser.nextId
@@ -1442,14 +1695,30 @@ export function parseFrom(source: string, firstId: int): Result[ParsedFile, stri
         }
     }
 
-    mut parser = Parser.create(tokens)
+    mut parser = Parser.create(tokens, source.chars())
     parser.nextId = firstId
     mut statements: Node[] = []
+    mut tests: Set[string] = Set.from([])
 
     while (true) {
         parser.skipSemicolons()
 
         if (parser.current() == End) { break }
+
+        if (parser.startsTest()) {
+            statements.push(parser.test(mut tests)?)
+            continue
+        }
+
+        if (parser.startsForeign()) {
+            immut line = parser.currentLine()
+            parser.starts.push(parser.position)
+            immut block = parser.foreignBlock()
+            parser.starts.pop()
+            immut node = block?
+            statements.push(parser.wrapping(Located(line, node), node))
+            continue
+        }
 
         if (parser.isKeyword('export')) {
             statements.push(parser.export()?)
@@ -1625,6 +1894,8 @@ export function annotated(node: Node, a: (Node) => string): string {
         Located(line, statement) => `(at ${line} ${annotated(statement, a)})`
         Export(declaration, opaque) => `(export ${if (opaque) { 'opaque ' } else { '' }}${annotated(declaration, a)})`
         ForC(declaration) => `(for-c ${annotated(declaration, a)})`
+        // The call of `assert` as it was written.
+        Asserted(_, call) => annotated(call, a)
         _ => `${plain(node, a)}${a(node)}`
     }
 }
@@ -1693,11 +1964,17 @@ function plain(node: Node, a: (Node) => string): string {
             }
             return `(function ${fullName} ${typeParametersText(typeParams)} ${paramsText(params)} ${optionalType(returns)} ${annotated(body, a)})`
         }
-        ExternDecl(name, params, returns) => return `(extern ${name} ${paramsText(params)} ${optionalType(returns)})`
+        ExternDecl(name, params, returns, symbol, blocking) => {
+            immut marks = if (symbol != name) { ` from ${symbol}` } else { '' }
+            immut kind = if (blocking) { 'extern-blocking' } else { 'extern' }
+            return `(${kind} ${name} ${paramsText(params)} ${optionalType(returns)}${marks})`
+        }
+        Foreign(library, handles, functions) => return `(foreign ${library} ${handles.length()} ${functions.length()})`
         TypeDecl(name, params, definition) => return `(type ${name} ${typeParametersText(params)} ${definitionText(definition)})`
         ImportModule(name, path) => return `(import ${name} ${path.debug()})`
         ImportNames(names, path) => return `(import (${names.join(' ')}) ${path.debug()})`
         Try(value) => return `(try ${annotated(value, a)})`
+        Asserted(_, call) => return plain(call, a)
         Export(declaration, opaque) => return `(export ${if (opaque) { 'opaque ' } else { '' }}${annotated(declaration, a)})`
         ForC(declaration) => return `(for-c ${annotated(declaration, a)})`
         Located(line, statement) => return `(at ${line} ${annotated(statement, a)})`

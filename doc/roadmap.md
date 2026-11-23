@@ -31,8 +31,14 @@ This document outlines the planned features and milestones for the Koji programm
 
 ## Long-term
 
--   [ ] Package manager
--   [ ] Built-in testing framework
+-   [x] Package manager: packages are repositories of git, versions are tags, chosen by MVS (`koji.mod`, `koji.sum`)
+-   [x] Built-in testing framework (`test` blocks, `assert`, `kojic test`)
+-   [x] Concurrency: lightweight tasks in groups, channels and shared values (`task`), on one thread
+-   [x] An HTTP server (`http.serve`), each connection in a task
+-   [ ] Tasks over several threads
+-   [x] A parser of the command line (`cli`), with the help made from the declarations
+-   [x] Foreign functions: `foreign` blocks with safe types and handles
+-   [ ] Generating machine code without a C compiler
 -   [ ] WebAssembly (WASM) compilation
 -   [ ] Editor support (syntax highlighting, LSP integration)
 -   [ ] Runtime optimizations

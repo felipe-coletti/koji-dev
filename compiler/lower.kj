@@ -1,11 +1,13 @@
 // Lowering, in the Koji compiler: from the checked syntax tree to the IR, with a message for what
 // `kojic build` does not support yet.
 
-import { Node, NodeKind, Pattern, TypeExpr, Param, TypeParam, Arm, Part, Entry, ObjectEntry } from 'parser.kj'
+import { Node, NodeKind, Pattern, TypeExpr, Param, TypeParam, Arm, Part, Entry, ObjectEntry, isTestName } from 'parser.kj'
 import { Type, TypeKind, TypeInfo, FieldType, VariantInfo, substitute, display } from 'types.kj'
-import { MethodRef, TryWrap, LoadedModule, Tables, Program, coreStringMethods, libraryModules, parentDir, resolvePath } from 'checker.kj'
-import { IrExtern, IrForC, Ty, Operand, Place, Step, Target, IrField, IrVariant, IrRecord, StdArg, Writeback, MapEntry, Instruction, Terminator, IrBlock, IrLocal, IrFunction, IrGlobal, IrProgram, isManaged, itemOf, tyText, tysText } from 'ir.kj'
+import { MethodRef, TryWrap, LoadedModule, Tables, Program, coreStringMethods, libraryModules, parentDir, resolvePath, foreignPrefix, foreignPath } from 'checker.kj'
+import { IrExtern, IrForC, IrTest, Ty, Operand, Place, Step, Target, IrField, IrVariant, IrRecord, StdArg, Writeback, MapEntry, Instruction, Terminator, IrBlock, IrLocal, IrFunction, IrGlobal, IrProgram, isManaged, itemOf, tyText, tysText } from 'ir.kj'
 import { decimalLiteral } from 'decimal.kj'
+import { foreignModule } from 'foreign.kj'
+import { isPackagePath, packageFile } from 'packages.kj'
 import { kojiModules } from 'stdlib.kj'
 
 // The functions of `math` for several types of numbers: a call is one of the function of
@@ -203,8 +205,15 @@ type Instance = {
 }
 
 type Lowerer = {
+    // `kojic test`: the tests of the main file are lowered, and its top-level function runs the one
+    // asked for; otherwise tests are left out.
+    testing: boolean
+    tests: IrTest[]
+    // The condition of the `assert` being lowered, as written (`Asserted`).
+    assertText: string
     // The C functions of the `extern` declarations.
     externs: IrExtern[]
+    libraries: string[]
     // The functions C calls by their names (`extern function name(...) { ... }`).
     forC: IrForC[]
     // The top-level `immut` ints whose value is known while compiling (`immut limit = 1 << 49`):
@@ -666,6 +675,11 @@ function importOf(node: Node): Option[Import] {
     return match (unlocated(node).kind) {
         ImportModule(name, path) => Some({ name: name, names: None, path: path })
         ImportNames(names, path) => Some({ name: '', names: Some(names), path: path })
+        // A foreign block imports the names of its module.
+        Foreign(library, handles, functions) => match (foreignModule(library, handles, functions)) {
+            Ok(module) => Some({ name: '', names: Some(module.names), path: foreignPath(module.source) })
+            Err(_) => None
+        }
         _ => None
     }
 }
@@ -699,7 +713,19 @@ function cTypeOf(written: Option[TypeExpr]): string {
         Some(Named('string')) => 'KojiString *'
         Some(Named('char')) => 'uint32_t'
         Some(Named('byte')) => 'uint8_t'
+        // A closure, which C only passes on (koji:task keeps the work of a task).
+        Some(FunctionOf(_, _)) => 'KojiClosure *'
         _ => 'int64_t'
+    }
+}
+
+// The C type of a parameter that C only reads: an address (as the functions of its library that
+// only read memory declare it, `memcmp`) or a closure.
+function constOf(written: string): string {
+    return match (written) {
+        'void *' => 'const void *'
+        'KojiClosure *' => 'const KojiClosure *'
+        _ => written
     }
 }
 
@@ -727,6 +753,11 @@ function Lowerer.externCall(mut self, mut builder: Builder, call: Node, name: st
     mut values: StdArg[] = []
 
     for i in range(args.length()) {
+        if (found.params[i] == 'const KojiClosure *') {
+            values.push(ValueArg(self.value(mut builder, args[i])?))
+            continue
+        }
+
         values.push(ValueArg(self.valueOf(mut builder, args[i], externTy(found.params[i]))?))
     }
 
@@ -757,6 +788,15 @@ function Lowerer.externNamed(self, name: string): Option[IrExtern] {
 // The key of an imported module: `std:json` for a module of the standard library written in Koji
 // (as the checker names it), the resolved path of a file otherwise.
 function modulePath(directory: string, path: string): string {
+    if (path.startsWith(foreignPrefix)) { return path }
+
+    if (isPackagePath(path)) {
+        return match (packageFile(path)) {
+            Ok(found) => found
+            Err(_) => path
+        }
+    }
+
     if (isKojiModule(path)) { return if (path.startsWith('koji:')) { `std:${path[5..]}` } else { `std:${path}` } }
 
     return resolvePath(directory, path)
@@ -814,7 +854,12 @@ function Lowerer.loadModule(mut self, path: string, isEntry: boolean): Result[in
         match (importOf(statement)) {
             Some(found) => {
                 // The standard library is in the runtime, but the modules written in Koji (std/).
-                if (not found.path.endsWith('.kj') and not isKojiModule(found.path)) {
+                match (unlocated(statement).kind) {
+                    Foreign(library, _, _) if (library != 'c' and not (library in self.libraries)) => self.libraries.push(library)
+                    _ => {}
+                }
+
+                if (not found.path.endsWith('.kj') and not isKojiModule(found.path) and not found.path.startsWith(foreignPrefix) and not isPackagePath(found.path)) {
                     imports.push(-1)
                     self.importTargets[nodeId(statement)] = -1
                     continue
@@ -845,7 +890,7 @@ function Lowerer.loadModule(mut self, path: string, isEntry: boolean): Result[in
         }
         mut module = -1
 
-        if (found.path.endsWith('.kj') or isKojiModule(found.path)) {
+        if (found.path.endsWith('.kj') or isKojiModule(found.path) or isPackagePath(found.path)) {
             module = self.loadModule(modulePath(directory, found.path), false)?
             modules.push(module)
         }
@@ -1004,6 +1049,11 @@ function Lowerer.declareFunctions(mut self): Result[void, string] {
 
         match (declaration.kind) {
             FunctionDecl(name, owner, typeParams, _, _, _) => {
+                // A test: only those of the main file, and only for `kojic test`.
+                immut isTest = owner is None and isTestName(name)
+
+                if (isTest and not (self.testing and self.module == 0)) { continue }
+
                 immut key = functionKey(self.module, owner, name)
 
                 if (owner is None) { self.modules[self.module].names[name] = FunctionItem(key) }
@@ -1021,6 +1071,8 @@ function Lowerer.declareFunctions(mut self): Result[void, string] {
                 self.functions.push(None)
                 self.signatures[key] = self.signature(declaration, self.functions.length() - 1)?
 
+                if (isTest) { self.tests.push({ name: name, function: self.functions.length() - 1 }) }
+
                 if (isForC(statement)) {
                     immut params = match (declaration.kind) {
                         FunctionDecl(_, _, _, written, _, _) => written
@@ -1033,7 +1085,7 @@ function Lowerer.declareFunctions(mut self): Result[void, string] {
                         immut written = cTypeOf(param.annotation)
                         // C keeps a string it gives to read: `const`, as the prelude declares it; an
                         // address is a `const void *`, as `extern` declarations make it.
-                        types.push(if (written == 'KojiString *' and not param.isTake) { 'const KojiString *' } else { if (written == 'void *') { 'const void *' } else { written } })
+                        types.push(if (written == 'KojiString *' and not param.isTake) { 'const KojiString *' } else { constOf(written) })
                         taken.push(param.isTake)
                     }
 
@@ -1044,7 +1096,7 @@ function Lowerer.declareFunctions(mut self): Result[void, string] {
                     self.forC.push({ name: name, function: self.functions.length() - 1, params: types, taken: taken, returns: returned })
                 }
             }
-            ExternDecl(name, params, returns) => {
+            ExternDecl(name, params, returns, symbol, blocking) => {
                 self.modules[self.module].names[name] = ExternItem(name)
                 mut types: string[] = []
 
@@ -1052,7 +1104,7 @@ function Lowerer.declareFunctions(mut self): Result[void, string] {
                     // An address is a `const void *` for C, as the functions of its library that
                     // only read memory declare it (`memcmp`): declared otherwise, gcc warns.
                     immut written = cTypeOf(param.annotation)
-                    types.push(if (written == 'void *') { 'const void *' } else { if (written == 'KojiString *') { 'const KojiString *' } else { written } })
+                    types.push(if (written == 'KojiString *') { 'const KojiString *' } else { constOf(written) })
                 }
 
                 immut returned = match (returns) {
@@ -1060,7 +1112,7 @@ function Lowerer.declareFunctions(mut self): Result[void, string] {
                     None => 'void'
                 }
 
-                if (self.externNamed(name) is None) { self.externs.push({ name: name, params: types, returns: returned }) }
+                if (self.externNamed(name) is None) { self.externs.push({ name: name, params: types, returns: returned, symbol: symbol, blocking: blocking }) }
             }
             _ => {}
         }
@@ -1417,6 +1469,24 @@ function Lowerer.lowerModuleBody(mut self): Result[void, string] {
     self.line = 0
     self.statements(mut builder, module.statements)?
 
+    // `kojic test`: the test asked for (its number from the executable's last argument), with the
+    // values of every module still there.
+    if (module.init == 0 and self.testing) {
+        immut selected = builder.local(IntTy, None)
+        builder.emit(StdCallIns(Some(selected), 'koji_test_index', []))
+
+        for i in range(self.tests.length()) {
+            immut run = builder.newBlock()
+            immut next = builder.newBlock()
+            immut chosen = self.arithmetic(mut builder, '==', LocalOp(selected), IntTy, IntOp(i), IntTy)?.value
+            builder.terminate(BranchT(chosen, run, next))
+            builder.switchTo(run)
+            builder.emit(CallIns(None, self.tests[i].function, [], [], 0))
+            builder.terminate(GotoT(next))
+            builder.switchTo(next)
+        }
+    }
+
     if (module.init == 0) {
         // At the end of the program, the values owned by each module are dropped (the main file
         // first, then the others, last loaded first).
@@ -1692,10 +1762,11 @@ function isExpression(node: Node): boolean {
         Break => false
         Continue => false
         FunctionDecl(_, _, _, _, _, _) => false
-        ExternDecl(_, _, _) => false
+        ExternDecl(_, _, _, _, _) => false
         TypeDecl(_, _, _) => false
         ImportModule(_, _) => false
         ImportNames(_, _) => false
+        Foreign(_, _, _) => false
         _ => true
     }
 }
@@ -1997,7 +2068,7 @@ function Lowerer.statement(mut self, mut builder: Builder, node: Node): Result[v
         Export(declaration, _) => return self.statement(mut builder, declaration)
         ForC(declaration) => return self.statement(mut builder, declaration)
         // Declared with the module's functions.
-        ExternDecl(_, _, _) => return Ok()
+        ExternDecl(_, _, _, _, _) => return Ok()
         FunctionDecl(name, owner, typeParams, params, _, body) => {
             if (self.atTopLevel(builder)) { return Ok() }
 
@@ -2030,6 +2101,7 @@ function Lowerer.statement(mut self, mut builder: Builder, node: Node): Result[v
         // Hoisted to the start of the block (`enterImports`).
         ImportModule(_, _) => return Ok()
         ImportNames(_, _) => return Ok()
+        Foreign(_, _, _) => return Ok()
         VarDecl(name, annotation, value, _) => {
             immut variableType = self.variableType(node, annotation, value)?
             immut operand = self.valueAs(mut builder, value, variableType)?
@@ -2596,11 +2668,12 @@ function Lowerer.assign(mut self, mut builder: Builder, node: Node, target: Node
     }
 }
 
-// A value that must be there (an expression of type `void` has none).
+// A value that must be there: an expression of type `void` (`Some(work())`, where the type
+// argument of a generic function or type is `void`) has the word 0.
 function Lowerer.required(self, value: Option[Operand]): Result[Operand, string] {
     return match (value) {
         Some(operand) => Ok(operand)
-        None => Err(self.unsupported('an expression without a value here'))
+        None => Ok(IntOp(0))
     }
 }
 
@@ -2900,6 +2973,12 @@ function Lowerer.expression(mut self, mut builder: Builder, node: Node): Result[
         Match(scrutinee, arms) => return self.lowerMatch(mut builder, node, scrutinee, arms)
         Lambda(params, _, body) => return Ok(Some(self.lambda(mut builder, node, params, body)?))
         Try(value) => return self.lowerTry(mut builder, node, value)
+        Asserted(text, call) => {
+            self.assertText = text
+            immut result = self.expression(mut builder, call)
+            self.assertText = ''
+            return result
+        }
         _ => {}
     }
 
@@ -3736,6 +3815,67 @@ function Lowerer.lowerCall(mut self, mut builder: Builder, node: Node, callee: N
     }
 }
 
+// The two sides of the comparison of an `assert`, evaluated once: shown when it fails.
+type Sides = {
+    left: Operand
+    leftType: Ty
+    right: Operand
+    rightType: Ty
+}
+
+// `assert(condition)` or `assert(condition, message)`: when the condition is false, a panic with
+// the condition as written (`assertText`), the message, and for a comparison the values of its two
+// sides (their `debug()`, computed only then).
+function Lowerer.lowerAssert(mut self, mut builder: Builder, args: Node[]): Result[Option[Operand], string] {
+    immut text = self.assertText
+    self.assertText = ''
+    immut line = self.line
+    mut sides: Option[Sides] = None
+    mut test: Operand = BoolOp(true)
+
+    match (unlocated(args[0]).kind) {
+        Binary(op, left, right) if (op in ['==', '!=', '<', '<=', '>', '>=']) => {
+            immut leftType = self.typeIn(builder, left)?
+            immut rightType = self.typeIn(builder, right)?
+            immut leftValue = self.valueOf(mut builder, left, leftType)?
+            immut rightValue = self.valueOf(mut builder, right, rightType)?
+            test = self.arithmetic(mut builder, op, leftValue, leftType, rightValue, rightType)?.value
+            sides = Some({ left: leftValue, leftType: leftType, right: rightValue, rightType: rightType })
+        }
+        _ => test = self.condition(mut builder, args[0])?
+    }
+
+    immut passed = builder.newBlock()
+    immut failed = builder.newBlock()
+    builder.terminate(BranchT(test, passed, failed))
+    builder.switchTo(failed)
+    self.line = line
+    mut details = self.string('')
+
+    match (sides) {
+        Some(found) => {
+            immut leftLabel = self.string('\n  left:  ')
+            immut leftText = self.reprOf(mut builder, found.left, found.leftType)
+            immut left = self.concat(mut builder, leftLabel, leftText)
+            immut rightLabel = self.string('\n  right: ')
+            immut rightText = self.reprOf(mut builder, found.right, found.rightType)
+            immut right = self.concat(mut builder, rightLabel, rightText)
+            details = self.concat(mut builder, left, right)
+        }
+        None => {}
+    }
+
+    mut message = self.string('')
+
+    if (args.length() > 1) { message = self.valueOf(mut builder, args[1], StrTy)? }
+
+    immut condition = self.string(text)
+    builder.emit(StdCallIns(None, 'koji_std_assert', [ValueArg(condition), ValueArg(message), ValueArg(details), LocationArg(line)]))
+    builder.terminate(UnreachableT)
+    builder.switchTo(passed)
+    return Ok(None)
+}
+
 // A move-only argument used only by the call, dropped after it.
 type Temporary = {
     node: Node
@@ -3875,6 +4015,7 @@ function Lowerer.call(mut self, mut builder: Builder, call: Node, name: string, 
     }
 
     match (name) {
+        'assert' => return self.lowerAssert(mut builder, args)
         printed if (printed == 'print' or printed == 'printError') => {
             mut line: Option[Operand] = None
 
@@ -4105,6 +4246,25 @@ function Lowerer.stdCall(mut self, mut builder: Builder, call: Node, module: str
         'koji:unsafe.setListLength' => {
             immut list = self.value(mut builder, args[0])?
             builder.emit(StdCallIns(None, 'koji_unsafe_set_list_length', [ValueArg(list), self.stdValue(mut builder, args, 1, IntTy)?]))
+            return Ok(None)
+        }
+        // A copy of an item of a list that several values share (std/task.kj), never borrowed:
+        // another task may change the item while this one waits.
+        'koji:unsafe.sharedGet' => {
+            immut item = itemOf(self.typeIn(builder, args[0])?)
+            immut list = self.value(mut builder, args[0])?
+            immut index = self.stdValue(mut builder, args, 1, IntTy)?
+            immut dest = builder.local(item, None)
+            builder.emit(StdCallIns(Some(dest), 'koji_list_shared_get', [ValueArg(list), index, LocationArg(line)]))
+            return Ok(Some(LocalOp(dest)))
+        }
+        // The item changed in place, for every value that shares the list.
+        'koji:unsafe.sharedSet' => {
+            immut item = itemOf(self.typeIn(builder, args[0])?)
+            immut list = self.value(mut builder, args[0])?
+            immut index = self.stdValue(mut builder, args, 1, IntTy)?
+            immut value = self.stdValue(mut builder, args, 2, item)?
+            builder.emit(StdCallIns(None, 'koji_list_shared_set', [ValueArg(list), index, value, LocationArg(line)]))
             return Ok(None)
         }
         'koji:unsafe.setStringSize' => {
@@ -4826,6 +4986,7 @@ function identifiers(node: Node, mut out: string[]) {
         }
         MutArg(inner) => identifiers(inner, mut out)
         Try(inner) => identifiers(inner, mut out)
+        Asserted(_, call) => identifiers(call, mut out)
         Export(inner, _) => identifiers(inner, mut out)
         ForC(inner) => identifiers(inner, mut out)
         Located(_, inner) => identifiers(inner, mut out)
@@ -4894,6 +5055,16 @@ function identifiersOf(nodes: Node[], mut out: string[]) {
 
 // Lowers a checked program: the main file and the modules it imports.
 export function lower(program: Program): Result[IrProgram, string] {
+    return lowerProgram(program, false)
+}
+
+// The program for `kojic test`: its top-level function runs the test whose number the last argument
+// of the executable gives (`koji_test_index`), after the top-level statements.
+export function lowerTests(program: Program): Result[IrProgram, string] {
+    return lowerProgram(program, true)
+}
+
+function lowerProgram(program: Program, testing: boolean): Result[IrProgram, string] {
     mut checked: Map[string, LoadedModule] = [:]
 
     for module in program.modules {
@@ -4902,10 +5073,11 @@ export function lower(program: Program): Result[IrProgram, string] {
 
     immut entry = program.modules[0]
     mut lowerer: Lowerer = {
+        testing: testing, tests: [], assertText: '',
         table: program.table, tables: program.tables, records: [], recordIds: [:], file: entry.display, line: 0,
         functions: [], signatures: [:], globals: [], strings: [], stringIds: [:], emptyEnvironment: None, wrappers: [:],
         genericFunctions: [:], instances: [:], pending: [], substitution: [], typeNames: [], recordTypes: [:],
-        externs: [], forC: [], constants: [:], dropFunctions: [:], modules: [], moduleIds: [:], module: 0, owningMatch: false, importTargets: [:], blockItems: [],
+        externs: [], libraries: [], forC: [], constants: [:], dropFunctions: [:], modules: [], moduleIds: [:], module: 0, owningMatch: false, importTargets: [:], blockItems: [],
         checked: checked
     }
     // The top-level statements of the main file are function 0.
@@ -4956,6 +5128,7 @@ export function lower(program: Program): Result[IrProgram, string] {
 
     return Ok({
         file: entry.display, functions: functions, main: 0, globals: lowerer.globals, strings: lowerer.strings,
-        records: lowerer.records, externs: lowerer.externs, forC: lowerer.forC, library: entry.path == 'std:library'
+        records: lowerer.records, externs: lowerer.externs, libraries: lowerer.libraries, forC: lowerer.forC, library: entry.path == 'std:library',
+        testing: testing, tests: lowerer.tests
     })
 }

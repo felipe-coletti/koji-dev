@@ -2,9 +2,12 @@
 // moves, drops...) by the node's id; `kojic dump types` prints the text of `dumpTypes`.
 
 import file
-import { Node, NodeKind, Pattern, TypeExpr, TypeDef, Param, TypeParam, Field, Arm, Part, Entry, ObjectEntry, ParsedFile, parseFrom, annotated } from 'parser.kj'
+import system
+import { Node, NodeKind, Pattern, TypeExpr, TypeDef, Param, TypeParam, Field, Arm, Part, Entry, ObjectEntry, ParsedFile, Span, parseFrom, annotated } from 'parser.kj'
 import { Type, TypeKind, TypeInfo, FieldType, VariantInfo, MethodSignature, NamedParts, unconstrained, equatable, orderable, constraintName, isNumeric, mixesFloatAndDecimal, containsUnknown, anyUnknown, fillUnknown, substitute, substituteAll, signatureParams, assignable, join, namedParts, display, displayAll, fieldsOf, substituteFields, variantsOf, findField } from 'types.kj'
 import { decimalLiteral } from 'decimal.kj'
+import { foreignModule } from 'foreign.kj'
+import { isPackagePath, packageFile, foreignAllowed, preparePackages } from 'packages.kj'
 import { kojiModules, stdSource } from 'stdlib.kj'
 
 // Names of the standard library modules (`import math`).
@@ -17,8 +20,8 @@ export immut coreStringMethods = ['trim', 'split', 'replace', 'startsWith', 'end
 // The internal modules (std/koji/): `koji:core`, compiled with the programs that use it, and those
 // of the library of the runtime written in Koji, compiled once (`kojic dump library`) and linked
 // into every program.
-immut internalModules = ['koji:aes', 'koji:bignum', 'koji:chacha', 'koji:closure', 'koji:core', 'koji:decimal', 'koji:ecc', 'koji:list', 'koji:map', 'koji:memory', 'koji:numbers', 'koji:output', 'koji:record', 'koji:roots', 'koji:rsa', 'koji:ryu', 'koji:sha', 'koji:start', 'koji:text', 'koji:tls', 'koji:unicode', 'koji:x25519', 'koji:x509']
-export immut libraryModules = ['koji:aes', 'koji:bignum', 'koji:chacha', 'koji:closure', 'koji:decimal', 'koji:ecc', 'koji:list', 'koji:map', 'koji:memory', 'koji:numbers', 'koji:output', 'koji:record', 'koji:roots', 'koji:rsa', 'koji:ryu', 'koji:sha', 'koji:start', 'koji:text', 'koji:tls', 'koji:unicode', 'koji:x25519', 'koji:x509']
+immut internalModules = ['koji:aes', 'koji:bignum', 'koji:chacha', 'koji:closure', 'koji:core', 'koji:decimal', 'koji:ecc', 'koji:list', 'koji:map', 'koji:memory', 'koji:numbers', 'koji:output', 'koji:record', 'koji:roots', 'koji:rsa', 'koji:ryu', 'koji:sha', 'koji:start', 'koji:task', 'koji:text', 'koji:tls', 'koji:unicode', 'koji:x25519', 'koji:x509']
+export immut libraryModules = ['koji:aes', 'koji:bignum', 'koji:chacha', 'koji:closure', 'koji:decimal', 'koji:ecc', 'koji:list', 'koji:map', 'koji:memory', 'koji:numbers', 'koji:output', 'koji:record', 'koji:roots', 'koji:rsa', 'koji:ryu', 'koji:sha', 'koji:start', 'koji:task', 'koji:text', 'koji:tls', 'koji:unicode', 'koji:x25519', 'koji:x509']
 
 type SymbolKind = {
     ValueSymbol
@@ -152,6 +155,9 @@ type ModuleState = {
     path: string
     dir: string
     line: int
+    // The node being checked (an error points at it), and the lines of the file (to show them).
+    span: Span
+    lines: string[]
     moved: Moves
     // The scope index where each loop being checked starts.
     loopScopes: int[]
@@ -162,7 +168,7 @@ type ModuleState = {
 function emptyState(): ModuleState {
     return {
         isEntry: false, scopes: [], functionScopes: [], returns: [], file: '', path: '', dir: '', line: 0,
-        moved: [:], loopScopes: [], borrowingMatch: false
+        span: noSpan(), lines: [], moved: [:], loopScopes: [], borrowingMatch: false
     }
 }
 
@@ -262,6 +268,12 @@ type Checker = {
     methods: Map[string, MethodInfo]
     // The argument types of the last built-in call checked.
     lastArgTypes: Type[]
+    // The errors found (the check goes on after one, statement by statement), and the declarations
+    // of the variables that failed, declared all the same (with the type written, or unknown).
+    errors: string[]
+    recovered: Set[int]
+    // The arguments of the built-in function being checked (its errors point at them).
+    builtinArgs: Node[]
     // The type arguments of the last generic call checked, until the call records them.
     typeArgs: Option[Type[]]
     tables: Tables
@@ -387,7 +399,7 @@ function Checker.create(): Checker {
     }
     return {
         table: table, builtins: builtins, modules: [], moduleByPath: [:], stdlib: [:], loading: [], loaded: [],
-        methods: [:], lastArgTypes: [], typeArgs: None, tables: emptyTables(), state: emptyState(), nextId: 0,
+        methods: [:], lastArgTypes: [], errors: [], recovered: Set.from([]), builtinArgs: [], typeArgs: None, tables: emptyTables(), state: emptyState(), nextId: 0,
         moveOnly: [:]
     }
 }
@@ -407,7 +419,7 @@ function Checker.builtinSumId(self, name: string): int {
 function Checker.prelude(self): Scope {
     mut scope = emptyScope()
 
-    for name in ['print', 'printError', 'input', 'range', 'int', 'float', 'decimal', 'string', 'char', 'byte', 'panic'] {
+    for name in ['print', 'printError', 'input', 'range', 'int', 'float', 'decimal', 'string', 'char', 'byte', 'panic', 'assert'] {
         scope.vars[name] = builtinSymbol(name)
     }
 
@@ -555,7 +567,7 @@ function isExported(node: Node): boolean {
 function declaredName(node: Node): Option[string] {
     return match (unlocated(node).kind) {
         FunctionDecl(name, None, _, _, _, _) => Some(name)
-        ExternDecl(name, _, _) => Some(name)
+        ExternDecl(name, _, _, _, _) => Some(name)
         VarDecl(name, _, _, _) => Some(name)
         TypeDecl(name, _, _) => Some(name)
         _ => None
@@ -569,10 +581,11 @@ function isStatement(node: Node): boolean {
         Assign(_, _, _) => true
         VarDecl(_, _, _, _) => true
         FunctionDecl(_, _, _, _, _, _) => true
-        ExternDecl(_, _, _) => true
+        ExternDecl(_, _, _, _, _) => true
         TypeDecl(_, _, _) => true
         ImportModule(_, _) => true
         ImportNames(_, _) => true
+        Foreign(_, _, _) => true
         _ => false
     }
 }
@@ -633,35 +646,229 @@ function ioMessage(error: file.FileError): string {
     }
 }
 
+// The source of a module of the standard library: the one the compiler carries, or, to work on
+// the standard library without building the compiler again, the file of the directory that the
+// environment variable KOJI_STD names (std/).
+function standardSource(path: string): Option[string] {
+    immut directory = match (system.env('KOJI_STD')) {
+        Some(found) => found
+        None => return stdSource(path)
+    }
+    immut name = if (path.startsWith('koji:')) { `koji/${path[5..]}` } else { path }
+
+    return match (readSource(`${directory}/${name}.kj`)) {
+        Ok(text) => Some(text)
+        Err(_) => stdSource(path)
+    }
+}
+
 function readSource(path: string): Result[string, file.FileError] {
     immut input = file.open(path, file.Read)?
     return input.read()
 }
 
 // Turns `line N: message` into `file:N: message`.
+// A message of the parser (`line 3:12: message`, or `line 3: message`) with the file instead.
 function prefixError(file: string, message: string): string {
-    if (message.startsWith('line ')) {
-        immut rest = message[5..]
+    immut place = parserPlace(message)
 
-        match (rest.indexOf(': ')) {
-            Some(colon) => {
-                immut line = rest[..colon]
+    if (place.line == 0) { return `${file}: ${message}` }
 
-                if (line.length() > 0 and line.isNumeric()) { return `${file}:${line}: ${rest[colon + 2..]}` }
-            }
-            None => {}
+    immut column = if (place.column > 0) { `:${place.column}` } else { '' }
+    return `${file}:${place.line}${column}: ${place.text}`
+}
+
+// Where a message of the parser is: its line and column (0 when it gives none), and its text.
+type ParserPlace = {
+    line: int
+    column: int
+    text: string
+}
+
+function parserPlace(message: string): ParserPlace {
+    immut none: ParserPlace = { line: 0, column: 0, text: message }
+
+    if (not message.startsWith('line ')) { return none }
+
+    immut rest = message[5..]
+    immut colon = match (rest.indexOf(': ')) {
+        Some(found) => found
+        None => return none
+    }
+    immut numbers = rest[..colon].split(':')
+    immut line = match (int(numbers[0])) {
+        Ok(found) => found
+        Err(_) => return none
+    }
+    mut column = 0
+
+    if (numbers.length() == 2) {
+        column = match (int(numbers[1])) {
+            Ok(found) => found
+            Err(_) => return none
         }
     }
 
-    return `${file}: ${message}`
+    return { line: line, column: column, text: rest[colon + 2..] }
+}
+
+// A syntax error of a file: the message, then the line marked where the parser stopped.
+function syntaxError(file: string, message: string, source: string): string {
+    immut place = parserPlace(message)
+    immut text = `syntax error: ${prefixError(file, message)}`
+
+    if (place.column == 0) { return text }
+
+    return text + excerpt(source.split('\n'), { line: place.line, column: place.column, endLine: place.line, endColumn: place.column + 1 })
 }
 
 // Scopes and errors
 
 // A type error at the current line.
+// A type error at the node being checked: `type error: main.kj:3:16: message`, then the line of
+// the file with the node marked.
 function Checker.failure(self, message: string): string {
+    immut span = self.state.span
+
+    if (span.line > 0) {
+        return `type error: ${self.state.file}:${span.line}:${span.column}: ${message}${excerpt(self.state.lines, span)}`
+    }
+
     immut location = if (self.state.line == 0) { self.state.file } else { `${self.state.file}:${self.state.line}` }
     return `type error: ${location}: ${message}`
+}
+
+// The message of a check stopped with its errors already kept: after an imported module with
+// errors (its names would all be errors too), or after `errorLimit` errors.
+immut stopChecking = '\0stop'
+immut errorLimit = 20
+
+// The sizes of the stacks of the state, before a statement: an error may leave a scope open.
+type SavedState = {
+    scopes: int
+    functionScopes: int
+    returns: int
+    loopScopes: int
+    line: int
+    span: Span
+    borrowingMatch: boolean
+}
+
+function Checker.savedState(self): SavedState {
+    return {
+        scopes: self.state.scopes.length(), functionScopes: self.state.functionScopes.length(), returns: self.state.returns.length(),
+        loopScopes: self.state.loopScopes.length(), line: self.state.line, span: self.state.span, borrowingMatch: self.state.borrowingMatch
+    }
+}
+
+function Checker.restoreState(mut self, saved: SavedState) {
+    while (self.state.scopes.length() > saved.scopes) {
+        self.state.scopes.pop()
+    }
+
+    while (self.state.functionScopes.length() > saved.functionScopes) {
+        self.state.functionScopes.pop()
+    }
+
+    while (self.state.returns.length() > saved.returns) {
+        self.state.returns.pop()
+    }
+
+    while (self.state.loopScopes.length() > saved.loopScopes) {
+        self.state.loopScopes.pop()
+    }
+
+    self.state.line = saved.line
+    self.state.span = saved.span
+    self.state.borrowingMatch = saved.borrowingMatch
+}
+
+// After an error in a statement: a variable it declares is declared all the same, with the type
+// written, or unknown (which no later use reports), so that its uses are not errors too.
+function Checker.recover(mut self, statement: Node) {
+    immut declaration = unlocated(statement)
+
+    match (declaration.kind) {
+        VarDecl(name, annotation, _, isImmut) => {
+            if (self.state.scopes[self.lastScope()].vars.has(name)) { return }
+
+            mut ty = UnknownType
+
+            match (annotation) {
+                Some(written) => {
+                    match (self.resolveType(written)) {
+                        Ok(found) => ty = found
+                        Err(_) => {}
+                    }
+                }
+                None => {}
+            }
+
+            mut symbol = valueSymbol(ty, isImmut)
+            symbol.isImut = isImmut
+            symbol.decl = Some(nodeId(declaration))
+            self.recovered.add(nodeId(declaration))
+            self.declare(name, symbol)
+        }
+        _ => {}
+    }
+}
+
+// The errors of a check, one after the other, and how many when there are several.
+function report(errors: string[], stopped: boolean): string {
+    mut text = errors.join('\n\n')
+
+    if (errors.length() > 1) { text += `\n\n${errors.length()} errors` }
+
+    if (stopped and errors.length() >= errorLimit) { text += ' (the first ones: the check stopped there)' }
+
+    return text
+}
+
+// A type error at a node (an argument, a value), not at the whole statement.
+function Checker.failureAt(self, node: Node, message: string): string {
+    if (node.span.line == 0) { return self.failure(message) }
+
+    return `type error: ${self.state.file}:${node.span.line}:${node.span.column}: ${message}${excerpt(self.state.lines, node.span)}`
+}
+
+// A type error at the value returned, when there is one.
+function Checker.returnFailure(self, value: Option[Node], message: string): string {
+    return match (value) {
+        Some(returned) => self.failureAt(returned, message)
+        None => self.failure(message)
+    }
+}
+
+// A type error at the argument `index` of the built-in function being checked.
+function Checker.argumentFailure(self, index: int, message: string): string {
+    if (index < self.builtinArgs.length()) { return self.failureAt(self.builtinArgs[index], message) }
+
+    return self.failure(message)
+}
+
+function noSpan(): Span {
+    return { line: 0, column: 0, endLine: 0, endColumn: 0 }
+}
+
+// The line of a span, with its characters marked below (to the end of the line when the span goes
+// on): `    3 |     immut x: int = 'text'` and `      |                    ^^^^^^`. The marks keep
+// the tabs of the line, so that they fall under its characters.
+export function excerpt(lines: string[], span: Span): string {
+    if (span.line < 1 or span.line > lines.length()) { return '' }
+
+    immut text = lines[span.line - 1].replace('\r', '')
+    immut chars = text.chars()
+    immut number = `${span.line}`
+    mut marks = ''
+
+    for i in range(span.column - 1) {
+        marks += if (i < chars.length() and chars[i] == '\t') { '\t' } else { ' ' }
+    }
+
+    immut end = if (span.endLine == span.line and span.endColumn > span.column) { span.endColumn } else { chars.length() + 1 }
+    immut count = if (end > span.column) { end - span.column } else { 1 }
+    return `\n    ${number} | ${text}\n    ${' ' * number.length()} | ${marks}${'^' * count}`
 }
 
 function Checker.show(self, ty: Type): string {
@@ -797,6 +1004,14 @@ function Checker.ensureInferred(mut self): Result[void, string] {
 
         if (symbol.kind != ValueSymbol or not containsUnknown(symbol.ty)) { continue }
 
+        // A variable whose declaration failed: its error is reported already.
+        match (symbol.decl) {
+            Some(decl) => {
+                if (self.recovered.has(decl)) { continue }
+            }
+            None => {}
+        }
+
         immut earlier = match (found) {
             Some(other) => symbol.line < foundLine or (symbol.line == foundLine and name < other)
             None => true
@@ -851,10 +1066,18 @@ function Checker.setLine(mut self, node: Node) {
 
 // Modules
 
+// The statements of a module checked, and what it exports.
+function Checker.moduleBody(mut self, statements: Node[], display: string): Result[ModuleInfo, string] {
+    self.checkStatements(statements, None)?
+    self.ensureInferred()?
+    immut moduleScope = self.state.scopes[1]
+    return self.moduleExports(statements, moduleScope, display)
+}
+
 function Checker.checkModule(mut self, path: string, display: string, source: string): Result[int, string] {
     immut parsed = match (parseFrom(source, self.nextId)) {
         Ok(parsed) => parsed
-        Err(message) => return Err(`syntax error: ${prefixError(display, message)}`)
+        Err(message) => return Err(syntaxError(display, message, source))
     }
 
     self.nextId = parsed.nextId
@@ -866,15 +1089,30 @@ function Checker.checkModule(mut self, path: string, display: string, source: st
     state.isEntry = self.loading.length() == 1
     state.scopes = [prelude, emptyScope()]
     state.file = display
+    state.lines = source.split('\n')
     state.path = path
     state.dir = parentDir(path)
     self.state = state
-    self.checkStatements(parsed.statements, None)?
-    self.ensureInferred()?
-    immut moduleScope = self.state.scopes[1]
-    immut module = self.moduleExports(parsed.statements, moduleScope, display)?
+    immut before = self.errors.length()
+    immut body = self.moduleBody(parsed.statements, display)
     self.state = saved
     self.loading.pop()
+    // An imported module with errors stops the check (its names would be errors too): its errors
+    // are kept with the others.
+    immut imported = self.loading.length() > 0
+    immut module = match (body) {
+        Ok(found) => found
+        Err(message) => {
+            if (not imported) { return Err(message) }
+
+            if (message != stopChecking) { self.errors.push(message) }
+
+            return Err(stopChecking)
+        }
+    }
+
+    if (imported and self.errors.length() > before) { return Err(stopChecking) }
+
     self.modules.push(module)
     immut id = self.modules.length() - 1
     self.moduleByPath[path] = id
@@ -1110,7 +1348,7 @@ function Checker.importedModule(mut self, path: string): Result[int, string] {
             None => {}
         }
 
-        immut source = match (stdSource(path)) {
+        immut source = match (standardSource(path)) {
             Some(text) => text
             None => return Err(self.failure(`cannot import '${path}'`))
         }
@@ -1122,7 +1360,15 @@ function Checker.importedModule(mut self, path: string): Result[int, string] {
         return Ok(id)
     }
 
-    immut resolved = resolvePath(self.state.dir, path)
+    // A module of a package (`github.com/bia/toml`): its file, in the cache or in the program.
+    mut resolved = resolvePath(self.state.dir, path)
+
+    if (isPackagePath(path)) {
+        resolved = match (packageFile(path)) {
+            Ok(found) => found
+            Err(message) => return Err(self.failure(message))
+        }
+    }
 
     match (self.moduleByPath.get(resolved)) {
         Some(id) => return Ok(id)
@@ -1139,6 +1385,30 @@ function Checker.importedModule(mut self, path: string): Result[int, string] {
     return self.checkModule(resolved, path, source)
 }
 
+// The modules of foreign blocks: their source after this (compiler/foreign.kj).
+export immut foreignPrefix = 'std:foreign:'
+
+export function foreignPath(source: string): string {
+    return `${foreignPrefix}${source}`
+}
+
+// `foreign 'library' { ... }`: its module, checked like one of the standard library, gives the
+// names it declares to the module of the block.
+function Checker.checkForeign(mut self, library: string, source: string, names: string[]): Result[void, string] {
+    match (foreignAllowed(self.state.path)) {
+        Ok(_) => {}
+        Err(message) => return Err(self.failure(message))
+    }
+
+    immut path = foreignPath(source)
+    immut moduleId = match (self.moduleByPath.get(path)) {
+        Some(id) => id
+        None => self.checkModule(path, `foreign '${library}'`, source)?
+    }
+
+    return self.importNames(moduleId, names)
+}
+
 function Checker.checkImport(mut self, names: Option[string[]], moduleName: string, path: string): Result[void, string] {
     immut moduleId = self.importedModule(path)?
     immut wanted = match (names) {
@@ -1146,6 +1416,10 @@ function Checker.checkImport(mut self, names: Option[string[]], moduleName: stri
         None => return self.declare(moduleName, valueSymbol(ModuleType(moduleId), true))
     }
 
+    return self.importNames(moduleId, wanted)
+}
+
+function Checker.importNames(mut self, moduleId: int, wanted: string[]): Result[void, string] {
     immut module = self.modules[moduleId]
 
     for name in wanted {
@@ -1339,6 +1613,59 @@ function Checker.functionSignature(mut self, name: string, params: Param[], retu
     return Ok(FunctionType(types, returned))
 }
 
+// The type of an anonymous function: a parameter written without its type has the one the
+// expected type gives it (`group.spawn((item) => ...)`, `immut f: (int) => int = (x) => x * 2`).
+function Checker.lambdaSignature(mut self, params: Param[], returns: Option[TypeExpr], expected: Option[Type]): Result[Type, string] {
+    immut given: Type[] = match (expected) {
+        Some(FunctionType(types, _)) if (types.length() == params.length()) => types
+        _ => []
+    }
+    mut types: Type[] = []
+
+    for i in range(params.length()) {
+        immut param = params[i]
+
+        match (param.annotation) {
+            Some(annotation) => types.push(self.resolveType(annotation)?)
+            None => {
+                if (given.length() == 0 or not isComplete(given[i])) {
+                    return Err(self.failure(`parameter '${param.name}' of 'anonymous function' needs a type annotation: its type is not known here`))
+                }
+
+                types.push(given[i])
+            }
+        }
+    }
+
+    immut returned = match (returns) {
+        Some(annotation) => self.resolveType(annotation)?
+        None => UnknownType
+    }
+
+    return Ok(FunctionType(types, returned))
+}
+
+// Whether a type is fully known: no unknown part and no type parameter of a signature.
+function isComplete(ty: Type): boolean {
+    return match (ty) {
+        UnknownType => false
+        ParamType(_) => false
+        ListType(item) => isComplete(item)
+        FunctionType(params, returns) => allComplete(params) and isComplete(returns)
+        NamedType(_, args) => allComplete(args)
+        VariantType(_, args, _) => allComplete(args)
+        _ => true
+    }
+}
+
+function allComplete(types: Type[]): boolean {
+    for ty in types {
+        if (not isComplete(ty)) { return false }
+    }
+
+    return true
+}
+
 function Checker.expectType(self, expected: Type, actual: Type, what: string): Result[void, string] {
     if (assignable(expected, actual)) { return Ok() }
 
@@ -1389,6 +1716,12 @@ function Checker.hoist(mut self, statements: Node[]): Result[void, string] {
         match (unlocated(statement).kind) {
             ImportModule(name, path) => self.checkImport(None, name, path)?
             ImportNames(names, path) => self.checkImport(Some(names), '', path)?
+            Foreign(library, handles, functions) => {
+                match (foreignModule(library, handles, functions)) {
+                    Ok(module) => self.checkForeign(library, module.source, module.names)?
+                    Err(message) => return Err(self.failure(message))
+                }
+            }
             _ => {}
         }
     }
@@ -1476,7 +1809,7 @@ function Checker.hoist(mut self, statements: Node[]): Result[void, string] {
 
                 self.declare(name, symbol)?
             }
-            ExternDecl(name, params, returns) => self.declareExtern(name, params, returns)?
+            ExternDecl(name, params, returns, _, _) => self.declareExtern(name, params, returns)?
             _ => {}
         }
     }
@@ -1495,7 +1828,7 @@ function Checker.declareExtern(mut self, name: string, params: Param[], returns:
         FunctionType(paramTypes, returned) => {
             for each in paramTypes {
                 // A string is read by the function (the caller keeps it).
-                if (not self.isCValue(each) and each != StringType and each != U128Type) { return Err(self.failure(`'${name}' is extern: its parameters must be int, CInt, float, decimal, boolean, char, byte, U128, string, Address or Location, found ${self.show(each)}`)) }
+                if (not self.isCValue(each) and each != StringType and each != U128Type and not isFunction(each)) { return Err(self.failure(`'${name}' is extern: its parameters must be int, CInt, float, decimal, boolean, char, byte, U128, string, Address, Location or a function, found ${self.show(each)}`)) }
             }
 
             // A string returned is a new reference, as the functions of the library give them.
@@ -1530,7 +1863,7 @@ function Checker.checkForC(mut self, declaration: Node): Result[void, string] {
     match (ty) {
         FunctionType(paramTypes, returned) => {
             for each in paramTypes {
-                if (not self.isCValue(each) and each != U128Type and each != StringType) { return Err(self.failure(`'${name}' is for C: its parameters must be int, CInt, float, decimal, boolean, U128, string, Address or Location, found ${self.show(each)}`)) }
+                if (not self.isCValue(each) and each != U128Type and each != StringType and not isFunction(each)) { return Err(self.failure(`'${name}' is for C: its parameters must be int, CInt, float, decimal, boolean, U128, string, Address, Location or a function, found ${self.show(each)}`)) }
             }
 
             // A string is a new reference for C, as the runtime gives them.
@@ -1559,6 +1892,14 @@ function Checker.isMemoryValue(self, ty: Type): boolean {
 
 // The values an `extern` function takes and gives: a decimal is the one of the runtime, a
 // `Location` a string of C.
+// A function is a closure for C, which it only passes on (to koji:task).
+function isFunction(ty: Type): boolean {
+    return match (ty) {
+        FunctionType(_, _) => true
+        _ => false
+    }
+}
+
 function Checker.isCValue(self, ty: Type): boolean {
     return match (ty) {
         IntType => true
@@ -1590,7 +1931,7 @@ function Checker.internalModule(mut self, path: string): Result[int, string] {
         None => {}
     }
 
-    immut source = match (stdSource(path)) {
+    immut source = match (standardSource(path)) {
         Some(text) => text
         None => return Err(self.failure(`cannot find '${path}'`))
     }
@@ -1618,7 +1959,14 @@ function Checker.addBuiltins(mut self, path: string, id: int) {
     }
 }
 
-// The first argument of `reserve`, `listItems` and `setListLength`: a list.
+function listItem(ty: Type): Type {
+    return match (ty) {
+        ListType(item) => item
+        _ => UnknownType
+    }
+}
+
+// The first argument of `reserve`, `listItems`, `setListLength`, `sharedGet` and `sharedSet`: a list.
 function Checker.expectList(self, name: string, ty: Type): Result[void, string] {
     return match (ty) {
         ListType(_) => Ok()
@@ -1635,7 +1983,7 @@ function Checker.unsafeModule(mut self): int {
 
     mut module: ModuleInfo = { display: 'koji:unsafe', members: [:], types: [:], private: Set.from([]) }
 
-    for member in ['allocate', 'free', 'read', 'write', 'panicAt', 'offset', 'distance', 'stringBytes', 'stringSize', 'newString', 'nullAddress', 'isNull', 'wide', 'lowWord', 'highWord', 'leadingZeros', 'wordProduct', 'wideToFloat', 'decimalLow', 'decimalHigh', 'decimalOf', 'blankString', 'stringReferences', 'stringCapacity', 'setStringSize', 'charOfCode', 'truncate', 'reserve', 'listItems', 'setListLength', 'locationAddress'] {
+    for member in ['allocate', 'free', 'read', 'write', 'panicAt', 'offset', 'distance', 'stringBytes', 'stringSize', 'newString', 'nullAddress', 'isNull', 'wide', 'lowWord', 'highWord', 'leadingZeros', 'wordProduct', 'wideToFloat', 'decimalLow', 'decimalHigh', 'decimalOf', 'blankString', 'stringReferences', 'stringCapacity', 'setStringSize', 'charOfCode', 'truncate', 'reserve', 'listItems', 'setListLength', 'locationAddress', 'sharedGet', 'sharedSet'] {
         module.members[member] = builtinSymbol(`unsafe.${member}`)
     }
 
@@ -2115,7 +2463,7 @@ function Checker.checkGenericCall(mut self, signature: Type, initial: Type[], co
         self.noteConversion(arg, target, actual)
 
         if (not assignable(target, actual)) {
-            return Err(self.failure(`${argumentOf(what, i)} must be ${self.show(target)}, found ${self.show(actual)}`))
+            return Err(self.failureAt(arg, `${argumentOf(what, i)} must be ${self.show(target)}, found ${self.show(actual)}`))
         }
 
         if (mode == 'take') { self.consume(arg, actual)? }
@@ -2348,6 +2696,7 @@ function isTemporary(node: Node): boolean {
         ObjectLiteral(_) => true
         ListLiteral(_) => true
         Try(value) => isTemporary(value)
+        Asserted(_, call) => isTemporary(call)
         _ => false
     }
 }
@@ -2403,7 +2752,25 @@ function Checker.checkStatements(mut self, statements: Node[], expected: Option[
     for i in range(statements.length()) {
         immut statement = statements[i]
         immut isLast = i + 1 == statements.length()
-        tail = self.checkStatement(statement, if (isLast) { expected } else { None })?
+        immut saved = self.savedState()
+        immut checked = self.checkStatement(statement, if (isLast) { expected } else { None })
+
+        // An error: kept, and the check goes on with the next statement.
+        match (checked) {
+            Ok(found) => tail = found
+            Err(message) => {
+                if (message == stopChecking) { return Err(stopChecking) }
+
+                self.errors.push(message)
+
+                if (self.errors.length() >= errorLimit) { return Err(stopChecking) }
+
+                self.restoreState(saved)
+                self.recover(statement)
+                tail = UnknownType
+                continue
+            }
+        }
 
         if (not isLast and tail != NeverType) {
             // The value of an expression statement is discarded.
@@ -2437,6 +2804,16 @@ function Checker.checkBlock(mut self, node: Node, expected: Option[Type], bindin
 }
 
 function Checker.checkStatement(mut self, node: Node, expected: Option[Type]): Result[Type, string] {
+    immut saved = self.state.span
+
+    if (node.span.line > 0) { self.state.span = node.span }
+
+    immut result = self.statementType(node, expected)
+    self.state.span = saved
+    return result
+}
+
+function Checker.statementType(mut self, node: Node, expected: Option[Type]): Result[Type, string] {
     match (node.kind) {
         Located(line, statement) => {
             self.state.line = line
@@ -2461,7 +2838,7 @@ function Checker.checkStatement(mut self, node: Node, expected: Option[Type]): R
             match (declared) {
                 Some(wanted) => {
                     if (not assignable(wanted, valueType)) {
-                        return Err(self.failure(`cannot assign a value of type ${self.show(valueType)} to '${name}' of type ${self.show(wanted)}`))
+                        return Err(self.failureAt(value, `cannot assign a value of type ${self.show(valueType)} to '${name}' of type ${self.show(wanted)}`))
                     }
 
                     variableType = wanted
@@ -2506,7 +2883,7 @@ function Checker.checkStatement(mut self, node: Node, expected: Option[Type]): R
             self.exitTypeParams(pushed)
             return Ok(VoidType)
         }
-        ExternDecl(_, _, _) => return Ok(VoidType)
+        ExternDecl(_, _, _, _, _) => return Ok(VoidType)
         FunctionDecl(name, None, typeParams, params, returns, body) => {
             mut signature = VoidType
 
@@ -2529,6 +2906,7 @@ function Checker.checkStatement(mut self, node: Node, expected: Option[Type]): R
         // Imports are processed when the block is hoisted.
         ImportModule(_, _) => return Ok(VoidType)
         ImportNames(_, _) => return Ok(VoidType)
+        Foreign(_, _, _) => return Ok(VoidType)
         While(condition, body) => {
             self.checkCondition(condition, 'while')?
             self.state.loopScopes.push(self.state.scopes.length())
@@ -2631,7 +3009,7 @@ function Checker.checkReturn(mut self, value: Option[Node]): Result[void, string
                     if (assignable(wanted, ty)) {
                         Ok()
                     } else {
-                        Err(self.failure(`returning ${self.show(ty)}, but the function returns ${self.show(wanted)}`))
+                        Err(self.returnFailure(value, `returning ${self.show(ty)}, but the function returns ${self.show(wanted)}`))
                     }
                 }
             }
@@ -2938,7 +3316,7 @@ function Checker.checkAssignedValue(mut self, targetType: Type, op: string, valu
     }
 
     if (not assignable(targetType, valueType)) {
-        return Err(self.failure(`cannot assign a value of type ${self.show(valueType)} to '${name}' of type ${self.show(targetType)}`))
+        return Err(self.failureAt(value, `cannot assign a value of type ${self.show(valueType)} to '${name}' of type ${self.show(targetType)}`))
     }
 
     return Ok(valueType)
@@ -3000,7 +3378,8 @@ function Checker.checkFunction(mut self, name: string, params: Param[], signatur
             }
         }
         _ => {
-            bodyType = self.checkValue(inner, valueExpected)?
+            // `() => print(x)`: an expression without a value is the body of a function without one.
+            bodyType = self.checkExpression(inner, valueExpected)?
             tail = Some(inner)
         }
     }
@@ -3087,7 +3466,13 @@ function Checker.checkValue(mut self, node: Node, expected: Option[Type]): Resul
 
 // Checks an expression and records its type for the compiler.
 function Checker.checkExpression(mut self, node: Node, expected: Option[Type]): Result[Type, string] {
-    immut ty = self.expressionType(node, expected)?
+    immut saved = self.state.span
+
+    if (node.span.line > 0) { self.state.span = node.span }
+
+    immut result = self.expressionType(node, expected)
+    self.state.span = saved
+    immut ty = result?
     self.tables.types[nodeId(node)] = ty
     return Ok(ty)
 }
@@ -3164,7 +3549,7 @@ function Checker.expressionType(mut self, node: Node, expected: Option[Type]): R
                 itemType = match (join(itemType, ty)) {
                     Some(joined) => joined
                     None => {
-                        return Err(self.failure(`list elements must have the same type: found ${self.show(itemType)} and ${self.show(ty)}`))
+                        return Err(self.failureAt(item, `list elements must have the same type: found ${self.show(itemType)} and ${self.show(ty)}`))
                     }
                 }
             }
@@ -3325,6 +3710,8 @@ function Checker.expressionType(mut self, node: Node, expected: Option[Type]): R
             immut targetType = self.checkValue(target, None)?
             immut indexType = self.checkValue(index, None)?
 
+            if (targetType == UnknownType) { return Ok(UnknownType) }
+
             match (targetType) {
                 ListType(item) => {
                     self.expectType(IntType, indexType, 'list index')?
@@ -3378,11 +3765,12 @@ function Checker.expressionType(mut self, node: Node, expected: Option[Type]): R
         }
         Match(scrutinee, arms) => return self.checkMatch(scrutinee, arms, expected)
         Lambda(params, returns, body) => {
-            immut signature = self.functionSignature('anonymous function', params, returns, false)?
+            immut signature = self.lambdaSignature(params, returns, expected)?
             return self.checkFunction('anonymous function', params, signature, body)
         }
         Block(_) => return self.checkBlock(node, expected, [])
         Try(value) => return self.checkTry(node, value)
+        Asserted(_, call) => return self.checkExpression(call, expected)
         _ => return self.checkStatement(node, expected)
     }
 }
@@ -3936,7 +4324,7 @@ function Checker.checkObject(mut self, entries: ObjectEntry[], expected: Option[
                                 immut target = substitute(fieldType, generic)
 
                                 if (not assignable(target, valueType)) {
-                                    return Err(self.failure(`field '${entry.key}' of ${typeName} must be ${self.show(target)}, found ${self.show(valueType)}`))
+                                    return Err(self.failureAt(entry.value, `field '${entry.key}' of ${typeName} must be ${self.show(target)}, found ${self.show(valueType)}`))
                                 }
                             }
                             None => return Err(self.failure(`${typeName} has no field '${entry.key}'`))
@@ -3982,6 +4370,9 @@ function Checker.checkObject(mut self, entries: ObjectEntry[], expected: Option[
 function Checker.checkMember(mut self, object: Node, name: string): Result[Type, string] {
     immut objectType = self.checkValue(object, None)?
     self.noteTemporary(object, objectType)
+
+    // A variable whose declaration failed: its error is reported already.
+    if (objectType == UnknownType) { return Ok(UnknownType) }
 
     match (objectType) {
         ModuleType(id) => {
@@ -4335,7 +4726,7 @@ function Checker.checkArgsMut(mut self, given: Type[], modes: string[], args: No
                 // The function may store any value of the parameter type in the variable, so the
                 // types must be the same.
                 if (not assignable(param, ty) or not assignable(ty, param)) {
-                    return Err(self.failure(`${argumentOf(callee, i)} is 'mut' and must be exactly ${self.show(param)}, found ${self.show(ty)}`))
+                    return Err(self.failureAt(args[i], `${argumentOf(callee, i)} is 'mut' and must be exactly ${self.show(param)}, found ${self.show(ty)}`))
                 }
 
                 types.push(ty)
@@ -4343,7 +4734,7 @@ function Checker.checkArgsMut(mut self, given: Type[], modes: string[], args: No
             }
             _ => {
                 if (isMut) {
-                    return Err(self.failure(`${argumentOf(callee, i)} is a 'mut' parameter: pass a variable with 'mut' ('f(mut x)')`))
+                    return Err(self.failureAt(args[i], `${argumentOf(callee, i)} is a 'mut' parameter: pass a variable with 'mut' ('f(mut x)')`))
                 }
             }
         }
@@ -4377,7 +4768,7 @@ function Checker.checkArgsMut(mut self, given: Type[], modes: string[], args: No
                 _ => {}
             }
 
-            return Err(self.failure(`${argumentOf(callee, i)} must be ${self.show(param)}, found ${self.show(ty)}${hint}`))
+            return Err(self.failureAt(args[i], `${argumentOf(callee, i)} must be ${self.show(param)}, found ${self.show(ty)}${hint}`))
         }
 
         types.push(ty)
@@ -4449,7 +4840,7 @@ function Checker.checkConstructor(mut self, id: int, variantName: string, args: 
         }
 
         if (not assignable(wanted, actual)) {
-            return Err(self.failure(`field '${fields[i].name}' of '${variantName}' must be ${self.show(wanted)}, found ${self.show(actual)}`))
+            return Err(self.failureAt(args[i], `field '${fields[i].name}' of '${variantName}' must be ${self.show(wanted)}, found ${self.show(actual)}`))
         }
     }
 
@@ -4747,14 +5138,14 @@ function Checker.arity(self, name: string, args: Type[], min: int, max: int): Re
 function Checker.expectArg(self, name: string, index: int, expected: Type, actual: Type): Result[void, string] {
     if (assignable(expected, actual)) { return Ok() }
 
-    return Err(self.failure(`argument ${index + 1} of '${name}' must be ${self.show(expected)}, found ${self.show(actual)}`))
+    return Err(self.argumentFailure(index, `argument ${index + 1} of '${name}' must be ${self.show(expected)}, found ${self.show(actual)}`))
 }
 
 // An `int`, a `float` or a `decimal`.
 function Checker.expectNumberArg(self, name: string, index: int, actual: Type): Result[void, string] {
     if (isNumeric(actual) or actual == UnknownType) { return Ok() }
 
-    return Err(self.failure(`argument ${index + 1} of '${name}' must be a number, found ${self.show(actual)}`))
+    return Err(self.argumentFailure(index, `argument ${index + 1} of '${name}' must be a number, found ${self.show(actual)}`))
 }
 
 // The arguments must be exactly `expected`.
@@ -4792,6 +5183,8 @@ function Checker.noteConversion(mut self, node: Node, wanted: Type, actual: Type
 // Checks a call of a built-in function and returns its result type.
 function Checker.checkBuiltinCall(mut self, name: string, args: Node[], expected: Option[Type]): Result[Type, string] {
     immut types = self.argTypes(args)?
+    // After the arguments, which may call built-in functions too.
+    self.builtinArgs = args
 
     // `float(1e400)`: a literal too large for a float.
     if (name == 'float' and args.length() == 1) {
@@ -4817,6 +5210,15 @@ function Checker.checkBuiltinCall(mut self, name: string, args: Node[], expected
         'panic' => {
             self.checkExactly(name, types, [s])?
             return Ok(NeverType)
+        }
+        // `assert(condition)` or `assert(condition, message)`.
+        'assert' => {
+            self.arity(name, types, 1, 2)?
+            self.expectArg(name, 0, BooleanType, types[0])?
+
+            if (types.length() > 1) { self.expectArg(name, 1, s, types[1])? }
+
+            return Ok(VoidType)
         }
         'input' => {
             self.arity(name, types, 0, 1)?
@@ -4975,6 +5377,22 @@ function Checker.checkBuiltinCall(mut self, name: string, args: Node[], expected
             self.expectArg(name, 1, IntType, types[1])?
             return Ok(VoidType)
         }
+        // `sharedGet(items, 0)`: a copy of an item of a list that several values share, and
+        // `sharedSet(items, 0, value)` changes it in place, for all of them (the cells of
+        // std/task.kj: the list is never changed otherwise).
+        'unsafe.sharedGet' => {
+            self.arity(name, types, 2, 2)?
+            self.expectList(name, types[0])?
+            self.expectArg(name, 1, IntType, types[1])?
+            return Ok(listItem(types[0]))
+        }
+        'unsafe.sharedSet' => {
+            self.arity(name, types, 3, 3)?
+            self.expectList(name, types[0])?
+            self.expectArg(name, 1, IntType, types[1])?
+            self.expectArg(name, 2, listItem(types[0]), types[2])?
+            return Ok(VoidType)
+        }
         // The text of a place (`main.kj:12`), as C has it.
         'unsafe.locationAddress' => {
             self.checkExactly(name, types, [named(b.location)])?
@@ -5066,6 +5484,12 @@ function Checker.conversion(mut self, name: string, types: Type[], target: Type)
 }
 
 function Checker.checkMethodCall(mut self, objectType: Type, name: string, args: Node[], expected: Option[Type]): Result[Type, string] {
+    // A variable whose declaration failed: its arguments are checked, the call is not.
+    if (objectType == UnknownType) {
+        self.argTypes(args)?
+        return Ok(UnknownType)
+    }
+
     match (objectType) {
         ModuleType(id) => {
             immut symbol = match (self.modules[id].members.get(name)) {
@@ -5602,8 +6026,53 @@ export function checkLibrary(): Result[Program, string] {
     }
 
     mut checker = Checker.create()
-    checker.checkModule('std:library', 'koji:library', lines.join('\n'))?
-    return Ok({ modules: checker.loaded, table: checker.table, tables: checker.tables })
+    immut result = checker.checkModule('std:library', 'koji:library', lines.join('\n'))
+    return checker.finished(result)
+}
+
+// The program checked, or the report of its errors.
+function Checker.finished(mut self, result: Result[int, string]): Result[Program, string] {
+    mut stopped = false
+
+    match (result) {
+        Ok(_) => {}
+        Err(message) => {
+            if (message == stopChecking) {
+                stopped = true
+            } else {
+                self.errors.push(message)
+            }
+        }
+    }
+
+    if (self.errors.length() > 0) { return Err(report(self.errors, stopped)) }
+
+    return Ok({ modules: self.loaded, table: self.table, tables: self.tables })
+}
+
+// What the checker found in a text (for `kojic lsp`, which checks what an editor holds, saved or
+// not): the program, whatever its errors (its tables hold the types of what was checked), and the
+// errors, each as `kojic check` shows it.
+export type Checked = {
+    program: Program
+    errors: string[]
+}
+
+export function checkText(path: string, source: string): Checked {
+    // The packages already downloaded (the language server downloads nothing).
+    preparePackages(path, false)
+    mut checker = Checker.create()
+    immut result = checker.checkModule(resolvePath('', path), path, source)
+    mut errors = checker.errors
+
+    match (result) {
+        Ok(_) => {}
+        Err(message) => {
+            if (message != stopChecking) { errors.push(message) }
+        }
+    }
+
+    return { program: { modules: checker.loaded, table: checker.table, tables: checker.tables }, errors: errors }
 }
 
 export function check(path: string): Result[Program, string] {
@@ -5612,9 +6081,10 @@ export function check(path: string): Result[Program, string] {
         Err(error) => return Err(`import error: cannot read '${path}': ${ioMessage(error)}`)
     }
 
+    preparePackages(path, true)?
     mut checker = Checker.create()
-    checker.checkModule(resolvePath('', path), path, source)?
-    return Ok({ modules: checker.loaded, table: checker.table, tables: checker.tables })
+    immut result = checker.checkModule(resolvePath('', path), path, source)
+    return checker.finished(result)
 }
 
 function methodsText(methods: Option[MethodRef][]): string {
@@ -5745,7 +6215,8 @@ function annotation(program: Program, node: Node): string {
 export function dumpTypes(path: string): string[] {
     immut program = match (check(path)) {
         Ok(program) => program
-        Err(message) => return [`error: ${message}`]
+        // The first line: the line of the file shown after it is for people.
+        Err(message) => return [`error: ${message.split('\n')[0]}`]
     }
 
     mut lines: string[] = []

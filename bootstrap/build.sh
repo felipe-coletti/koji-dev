@@ -17,7 +17,15 @@ mkdir -p build
 
 echo "building the runtime"
 gzip -dc bootstrap/libkoji.c.gz > build/libkoji.c
-"$cc" -O2 -c -o build/libkoji.o build/libkoji.c
+# The tasks of the library switch between stacks (std/koji/task.kj), which the shadow stack of
+# x86-64 (CET) forbids: without its mark on the library, no program asks the system for one.
+flags=-O2
+case "$(uname -m)" in
+x86_64 | amd64)
+    if "$cc" -fcf-protection=none -E -x c /dev/null > /dev/null 2>&1; then flags="$flags -fcf-protection=none"; fi
+    ;;
+esac
+"$cc" $flags -c -o build/libkoji.o build/libkoji.c
 rm -f build/libkoji_runtime.a
 ar rcs build/libkoji_runtime.a build/libkoji.o
 export KOJI_RUNTIME="$PWD/build/libkoji_runtime.a"
@@ -25,7 +33,7 @@ export KOJI_RUNTIME="$PWD/build/libkoji_runtime.a"
 # Stage 1, the seed: built without optimizations, which is faster, since it only builds stage 2.
 echo "building stage 1 from the seed"
 gzip -dc bootstrap/kojic.c.gz > build/stage1.c
-"$cc" -O0 -o build/stage1 build/stage1.c "$KOJI_RUNTIME" -lm
+"$cc" -O0 -o build/stage1 build/stage1.c "$KOJI_RUNTIME" -lm -lpthread
 
 # Stage 2, the compiler of compiler/.
 echo "building kojic from compiler/"

@@ -71,6 +71,16 @@ fn assert_same(name: &str, source: &str, expected: &str) {
     assert!(compiled.success, "the program failed: {}", compiled.error);
 }
 
+/// Like `assert_same`, without valgrind.
+fn assert_same_native(name: &str, source: &str, expected: &str) {
+    let path = source_file(name, source);
+    let executable = path.with_extension("");
+    build(&path, &executable);
+    let run = Command::new(&executable).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&run.stdout), expected);
+    assert!(run.status.success(), "the program failed: {}", String::from_utf8_lossy(&run.stderr));
+}
+
 /// Like `assert_same`, for a program that panics with `message` (after the location).
 fn assert_same_panic(name: &str, source: &str, message: &str) {
     let path = source_file(name, source);
@@ -2160,4 +2170,814 @@ fn errors_are_reported_before_compiling() {
     let built = koji::finish(koji::kojic().arg("build").arg(&path).arg("-o").arg(path.with_extension("")), "");
     assert_eq!(built.code, Some(1));
     assert!(built.stderr.starts_with("type error: "), "{}", built.stderr);
+}
+
+#[test]
+fn assert_shows_the_condition_and_the_two_sides() {
+    assert_same("assert_passes", "immut values = [3, 4]\nassert(values.length() == 2)\nassert(values[0] < values[1], 'in order')\nprint('ok')\n", "ok\n");
+    let path = source_file("assert_fails", "immut names = ['ana', 'bia']\nassert(names[0] + '!' == names[1], 'the same')\n");
+    let failed = koji::finish(koji::kojic().current_dir(path.parent().unwrap()).arg("run").arg(path.file_name().unwrap()), "");
+    assert_eq!(failed.code, Some(1));
+    assert_eq!(failed.stderr, "panic: assert_fails.kj:2: assertion failed: names[0] + '!' == names[1] (the same)\n  left:  'ana!'\n  right: 'bia'\n");
+    assert_same_panic("assert_condition", "immut n = 3\nassert(n > 2 and n % 2 == 0)\n", "assert_condition.kj:2: assertion failed: n > 2 and n % 2 == 0");
+}
+
+/// `kojic test`: the tests of each file in a process of their own, the output of a failing one,
+/// files without tests left out, and the exit code 1 when a test fails.
+#[test]
+fn kojic_test_runs_each_test_alone() {
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("kojic-test");
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(directory.join("sub")).unwrap();
+    std::fs::write(
+        directory.join("math.kj"),
+        "mut calls = 0\n\nfunction gcd(a: int, b: int): int {\n    calls += 1\n    return if (b == 0) { a } else { gcd(b, a % b) }\n}\n\n\
+         test 'gcd' {\n    assert(gcd(12, 18) == 6)\n}\n\n\
+         test 'each test starts again' {\n    assert(calls == 0)\n}\n\n\
+         test 'a wrong result' {\n    print('computing')\n    assert(gcd(4, 6) == 3, 'on purpose')\n}\n\n\
+         test 'a panic' {\n    immut items = [1]\n    print(items[2])\n}\n",
+    )
+    .unwrap();
+    std::fs::write(directory.join("sub/plain.kj"), "print('no tests')\n").unwrap();
+    std::fs::write(directory.join("sub/top.kj"), "print('top level')\n\ntest 'it\\'s fine' {\n    assert(true)\n}\n").unwrap();
+    let finished = koji::finish(koji::kojic().current_dir(&directory).arg("test"), "");
+    assert_eq!(finished.code, Some(1), "{}", finished.stderr);
+    let (report, time) = finished.stdout.trim_end().rsplit_once(" (").unwrap();
+    assert!(time.ends_with(" s)"), "{}", finished.stdout);
+    assert_eq!(
+        report,
+        "ok    ./math.kj: gcd\n\
+         ok    ./math.kj: each test starts again\n\
+         FAIL  ./math.kj: a wrong result\n    panic: ./math.kj:18: assertion failed: gcd(4, 6) == 3 (on purpose)\n      left:  2\n      right: 3\n    output:\n        computing\n\
+         FAIL  ./math.kj: a panic\n    panic: ./math.kj:23: index 2 out of range (length 1)\n\
+         ok    ./sub/top.kj: it's fine\n\n\
+         3 passed, 2 failed"
+    );
+    // A file without tests, and a program run by `kojic run`, which leaves its tests out.
+    let none = koji::finish(koji::kojic().current_dir(&directory).arg("test").arg("sub/plain.kj"), "");
+    assert_eq!((none.code, none.stdout.starts_with("\nno tests found")), (Some(0), true), "{}", none.stdout);
+    let run = koji::finish(koji::kojic().current_dir(&directory).arg("run").arg("sub/top.kj"), "");
+    assert_eq!(run.stdout, "top level\n");
+}
+
+/// A compile error gives the column, then the line with the part at fault marked (the tabs of the
+/// line kept, so that the marks fall under it).
+#[test]
+fn errors_show_the_column_and_the_line() {
+    let check = |name: &str, source: &str| {
+        let path = source_file(name, source);
+        koji::finish(koji::kojic().current_dir(path.parent().unwrap()).arg("check").arg(path.file_name().unwrap()), "").stderr
+    };
+    assert_eq!(
+        check("column_type", "function greet(name: string): string {\n    return name\n}\n\nprint(greet(42))\n"),
+        "type error: column_type.kj:5:13: argument 1 of 'greet' must be string, found int\n    5 | print(greet(42))\n      |             ^^\n"
+    );
+    assert_eq!(
+        check("column_tabs", "function f() {\n\tif (true) {\n\t\timmut s: string = 4\n\t}\n}\n"),
+        "type error: column_tabs.kj:3:21: cannot assign a value of type int to 's' of type string\n    3 | \t\timmut s: string = 4\n      | \t\t                  ^\n"
+    );
+    assert_eq!(
+        check("column_syntax", "immut x = (1 +\nprint(x)\n"),
+        "syntax error: column_syntax.kj:3:1: expected ')', found the end of the file\n    3 | \n      | ^\n"
+    );
+}
+
+/// The check goes on after an error, statement by statement: every error is reported, and a variable
+/// whose declaration failed is declared all the same (with its written type, or unknown), so that
+/// its uses are not errors too.
+#[test]
+fn several_errors_are_reported() {
+    let path = source_file(
+        "several_errors",
+        "immut a: int = 'one'\nimmut b = a + 1\nimmut c = missing * 2\nprint(c.upper(), b)\n\nfunction f(): string {\n    return 3\n}\n",
+    );
+    let checked = koji::finish(koji::kojic().current_dir(path.parent().unwrap()).arg("check").arg(path.file_name().unwrap()), "");
+    assert_eq!(checked.code, Some(1));
+    assert_eq!(
+        checked.stderr,
+        "type error: several_errors.kj:1:16: cannot assign a value of type string to 'a' of type int\n    1 | immut a: int = 'one'\n      |                ^^^^^\n\n\
+         type error: several_errors.kj:3:11: undefined variable 'missing'\n    3 | immut c = missing * 2\n      |           ^^^^^^^\n\n\
+         type error: several_errors.kj:7:12: returning int, but the function returns string\n    7 |     return 3\n      |            ^\n\n\
+         3 errors\n"
+    );
+}
+
+/// `kojic lsp`: the language server answers on the standard output with the errors of a file, the
+/// type under the cursor and the declaration of a name.
+#[test]
+fn the_language_server() {
+    use std::io::{BufRead, BufReader, Read, Write as _};
+    use std::process::Stdio;
+
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("lsp");
+    std::fs::create_dir_all(&directory).unwrap();
+    let file = directory.join("main.kj");
+    let uri = format!("file://{}", file.display());
+    let mut server = koji::kojic().arg("lsp").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+    let mut input = server.stdin.take().unwrap();
+    let mut output = BufReader::new(server.stdout.take().unwrap());
+    let mut send = |message: String| {
+        write!(input, "Content-Length: {}\r\n\r\n{}", message.len(), message).unwrap();
+        input.flush().unwrap();
+    };
+    let mut receive = || {
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            output.read_line(&mut line).unwrap();
+            let line = line.trim();
+            if line.is_empty() {
+                break;
+            }
+            if let Some(value) = line.strip_prefix("Content-Length:") {
+                length = value.trim().parse().unwrap();
+            }
+        }
+        let mut body = vec![0; length];
+        output.read_exact(&mut body).unwrap();
+        String::from_utf8(body).unwrap()
+    };
+    send(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#.to_string());
+    assert!(receive().contains(r#""hoverProvider":true"#));
+    let text = "function twice(n: int): int {\n    return n * 2\n}\n\nimmut count = twice(3)\nimmut wrong: string = count\n";
+    send(format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","text":{}}}}}}}"#,
+        uri,
+        format!("{:?}", text)
+    ));
+    assert_eq!(
+        receive(),
+        format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{{"uri":"{}","diagnostics":[{{"range":{{"start":{{"line":5,"character":22}},"end":{{"line":5,"character":27}}}},"severity":1,"source":"kojic","message":"type error: cannot assign a value of type int to 'wrong' of type string"}}]}}}}"#,
+            uri
+        )
+    );
+    let request = |id: i32, method: &str, line: i32, character: i32| {
+        format!(
+            r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/{}","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
+            id, method, uri, line, character
+        )
+    };
+    // The type of `count` in its declaration, and where `twice` and `n` are declared.
+    send(request(2, "hover", 4, 7));
+    assert!(receive().contains(r#""value":"```koji\ncount: int\n```""#));
+    send(request(3, "definition", 4, 15));
+    assert!(receive().contains(r#""range":{"start":{"line":0,"character":0}"#));
+    send(request(4, "definition", 1, 11));
+    assert!(receive().contains(r#""range":{"start":{"line":0,"character":0}"#));
+    send(r#"{"jsonrpc":"2.0","id":5,"method":"shutdown"}"#.to_string());
+    assert_eq!(receive(), r#"{"jsonrpc":"2.0","id":5,"result":null}"#);
+    send(r#"{"jsonrpc":"2.0","method":"exit"}"#.to_string());
+    assert_eq!(server.wait().unwrap().code(), Some(0));
+}
+
+#[test]
+fn tasks_take_turns_in_groups() {
+    assert_same(
+        "tasks",
+        r#"import task
+import time
+
+immut start = time.monotonic()
+immut results = task.group((tasks) => {
+    immut slow = tasks.spawn(() => {
+        time.sleep(0.4)
+        return 'slow'
+    })
+    immut fast = tasks.spawn(() => {
+        time.sleep(0.2)
+        print('fast first')
+        return 'fast'
+    })
+    return [slow.wait(), fast.wait()]
+})
+print(results)
+print(time.monotonic() - start < 0.55)
+print(task.all([() => 1, () => 2, () => 3]))
+
+// Tasks without a result, which start more tasks of the group.
+immut nothing = task.group((tasks) => {
+    tasks.spawn(() => {
+        tasks.spawn(() => print('inner'))
+        print('outer')
+    })
+    return 'done'
+})
+print(nothing)
+
+// Many tasks, each on a stack of its own, deep enough to need it.
+function depth(n: int): int {
+    if (n == 0) { return 0 }
+    return depth(n - 1) + 1
+}
+immut sum = task.group((tasks) => {
+    mut started: task.Task[int][] = []
+    for i in range(2000) {
+        started.push(tasks.spawn(() => depth(500) + i))
+    }
+    mut total = 0
+    for each in started {
+        total += each.wait()
+    }
+    return total
+})
+print(sum)
+"#,
+        "fast first\n['slow', 'fast']\ntrue\n[1, 2, 3]\nouter\ninner\ndone\n2999000\n",
+    );
+}
+
+#[test]
+fn tasks_share_through_channels_and_shared_values() {
+    assert_same(
+        "task_sharing",
+        r#"import task
+import time
+
+immut counter = task.shared(0)
+task.group((tasks) => {
+    for i in range(100) {
+        tasks.spawn(() => {
+            time.sleep(0.001)
+            counter.update((n) => n + 1)
+        })
+    }
+})
+print(counter.get())
+
+immut names = task.shared(['a'])
+names.set(names.get() + ['b'])
+print(names.get())
+
+immut jobs: task.Channel[int] = task.channel(3)
+immut total = task.group((tasks) => {
+    tasks.spawn(() => {
+        for i in range(100) {
+            jobs.send(i)
+        }
+        jobs.close()
+    })
+    immut summer = tasks.spawn(() => {
+        mut sum = 0
+        while (true) {
+            match (jobs.receive()) {
+                Some(n) => sum += n
+                None => break
+            }
+        }
+        return sum
+    })
+    return summer.wait()
+})
+print(total)
+
+// With no capacity, a send waits for its value to be received.
+immut meeting: task.Channel[string] = task.channel(0)
+task.group((tasks) => {
+    tasks.spawn(() => {
+        meeting.send('hello')
+        print('received')
+    })
+    tasks.spawn(() => {
+        print('receiving')
+        print(meeting.receive())
+    })
+})
+"#,
+        "100\n['a', 'b']\n4950\nreceiving\nSome('hello')\nreceived\n",
+    );
+}
+
+#[test]
+fn tasks_that_wait_for_each_other_are_a_deadlock() {
+    assert_same_panic(
+        "task_deadlock",
+        "import task\nimmut empty: task.Channel[int] = task.channel(1)\ntask.group((tasks) => {\n    tasks.spawn(() => empty.receive())\n})\n",
+        "none can go on: a deadlock",
+    );
+    assert_same_panic(
+        "task_update_inside_update",
+        "import task\nimmut n = task.shared(1)\nn.update((value) => {\n    n.set(2)\n    return value\n})\n",
+        "'set' of a shared value inside the function of its own 'update'",
+    );
+}
+
+#[test]
+fn requests_in_tasks_are_sent_at_the_same_time() {
+    use std::io::{Read, Write};
+    // A server that answers each request after 0.3 seconds, several at once.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            std::thread::spawn(move || {
+                let mut request = [0u8; 1024];
+                let size = stream.read(&mut request).unwrap();
+                let path = String::from_utf8_lossy(&request[..size]).split(' ').nth(1).unwrap_or("").to_string();
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                let body = format!("path {}", path);
+                let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+            });
+        }
+    });
+    let source = format!(
+        r#"import http
+import task
+import time
+
+immut start = time.monotonic()
+immut bodies = task.all([
+    () => http.get('http://127.0.0.1:{port}/a'),
+    () => http.get('http://127.0.0.1:{port}/b'),
+    () => http.get('http://127.0.0.1:{port}/c'),
+    () => http.get('http://127.0.0.1:{port}/d'),
+])
+for each in bodies {{
+    match (each) {{
+        Ok(response) => print(response.body)
+        Err(error) => print(error)
+    }}
+}}
+print(time.monotonic() - start < 0.9)
+"#
+    );
+    assert_same("task_requests", &source, "path /a\npath /b\npath /c\npath /d\ntrue\n");
+}
+
+#[test]
+fn anonymous_functions_take_the_expected_parameter_types() {
+    assert_same(
+        "lambda_inference",
+        "immut half: (int) => int = (x) => x / 2\nfunction twice(f: (int) => int, x: int): int {\n    return f(f(x))\n}\nprint(half(9))\nprint(twice((x) => x + 1, 5))\n",
+        "4\n7\n",
+    );
+}
+
+#[test]
+fn a_server_answers_requests_in_tasks() {
+    use std::io::{Read, Write};
+    // A free port, given to the server.
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let path = source_file(
+        "server",
+        r#"import http
+import system
+import time
+
+immut port = match (int(system.args()[0])) {
+    Ok(n) => n
+    Err(_) => 0
+}
+immut failed = http.serve(port, (request) => {
+    if (request.path == '/slow') {
+        time.sleep(0.3)
+        return http.text(200, 'slow')
+    }
+    if (request.path == '/echo') {
+        return http.json(201, `{"method": "${request.method}", "body": "${request.body}", "q": "${request.query.get('q')}", "host": "${request.headers.get('host')}"}`)
+    }
+    if (request.path == '/cpu') {
+        mut total = 0
+        for i in range(3000000000) {
+            total += i % 7
+        }
+        return http.text(200, `${total}`)
+    }
+    if (request.path == '/close') {
+        immut response: http.Response = { status: 200, body: 'bye', headers: ['connection': 'close', 'x-custom': 'one\r\ntwo'] }
+        return response
+    }
+    return http.text(404, `no ${request.path}`)
+})
+print(failed)
+"#,
+    );
+    let executable = path.with_extension("");
+    build(&path, &executable);
+    let mut server = Command::new(&executable).arg(port.to_string()).spawn().unwrap();
+    let exchange = move |request: &[u8]| -> String {
+        let mut stream = loop {
+            match std::net::TcpStream::connect(("127.0.0.1", port)) {
+                Ok(stream) => break stream,
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            }
+        };
+        stream.write_all(request).unwrap();
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let mut answer = Vec::new();
+        let _ = stream.read_to_end(&mut answer);
+        String::from_utf8(answer).unwrap()
+    };
+    let echo = exchange(b"POST /echo?q=a%20b+c HTTP/1.1\r\nHost: here\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello");
+    assert!(echo.starts_with("HTTP/1.1 201 Created\r\n"), "{}", echo);
+    assert!(echo.contains("content-type: application/json\r\n"), "{}", echo);
+    assert!(echo.ends_with(r#"{"method": "POST", "body": "hello", "q": "Some('a b c')", "host": "Some('here')"}"#), "{}", echo);
+    // Two requests on one connection, the second sent before the first is answered; the second
+    // asks to close it.
+    let two = exchange(b"GET /a HTTP/1.1\r\n\r\nGET /b HTTP/1.1\r\nConnection: close\r\n\r\n");
+    assert_eq!(two.matches("HTTP/1.1 404 Not Found").count(), 2, "{}", two);
+    assert!(two.ends_with("no /b"), "{}", two);
+    let chunked = exchange(b"POST /echo HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n");
+    assert!(chunked.contains(r#""body": "hello world""#), "{}", chunked);
+    // What is not HTTP, a length and chunks at once (how requests are smuggled), another version.
+    assert!(exchange(b"GARBAGE\r\n\r\n").starts_with("HTTP/1.1 400 Bad Request\r\n"));
+    assert!(exchange(b"GET / HTTP/1.1\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\n").starts_with("HTTP/1.1 400 "));
+    assert!(exchange(b"GET / HTTP/2.0\r\n\r\n").starts_with("HTTP/1.1 505 "));
+    // A header of the handler cannot add another one; the handler closes the connection.
+    let closed = exchange(b"GET /close HTTP/1.1\r\n\r\n");
+    assert!(closed.contains("x-custom: one  two\r\n") && closed.contains("connection: close\r\n"), "{}", closed);
+    assert!(exchange(b"HEAD /x HTTP/1.1\r\nConnection: close\r\n\r\n").ends_with("content-length: 5\r\nconnection: close\r\n\r\n"));
+    // Ten slow requests at once take the time of one.
+    let start = std::time::Instant::now();
+    let slow: Vec<_> = (0..10).map(|_| std::thread::spawn(move || exchange(b"GET /slow HTTP/1.1\r\nConnection: close\r\n\r\n"))).collect();
+    for each in slow {
+        assert!(each.join().unwrap().ends_with("\r\n\r\nslow"));
+    }
+    assert!(start.elapsed() < std::time::Duration::from_millis(1500), "{:?}", start.elapsed());
+    // A handler that computes for long does not hold the others up.
+    let busy = std::thread::spawn(move || exchange(b"GET /cpu HTTP/1.1\r\nConnection: close\r\n\r\n"));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let start = std::time::Instant::now();
+    assert!(exchange(b"GET /quick HTTP/1.1\r\nConnection: close\r\n\r\n").ends_with("no /quick"));
+    assert!(start.elapsed() < std::time::Duration::from_millis(500), "{:?}", start.elapsed());
+    drop(busy);
+    // A second server cannot listen on the same port.
+    let second = Command::new(&executable).arg(port.to_string()).output().unwrap();
+    assert!(String::from_utf8_lossy(&second.stdout).starts_with(&format!("Err(CannotListen({}, ", port)));
+    server.kill().unwrap();
+    let _ = server.wait();
+}
+
+#[test]
+fn tasks_that_compute_let_the_others_run() {
+    // It measures time: without valgrind, which runs one thread at a time.
+    assert_same_native(
+        "task_preemption",
+        r#"import task
+import time
+
+function fib(n: int): int {
+    if (n < 2) { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+
+// Two tasks that compute for half a second without waiting (time.monotonic does not wait), and one
+// that sleeps: it wakes on time all the same.
+immut start = time.monotonic()
+immut late = task.group((tasks) => {
+    tasks.spawn(() => {
+        mut total = 0
+        while (time.monotonic() - start < 0.5) {
+            total += 1
+        }
+        return total
+    })
+    tasks.spawn(() => {
+        mut total = 0
+        while (time.monotonic() - start < 0.5) {
+            total += fib(15)
+        }
+        return total
+    })
+    immut sleeper = tasks.spawn(() => {
+        mut worst: decimal = 0
+        for i in range(5) {
+            immut before = time.monotonic()
+            time.sleep(0.02)
+            immut delay = time.monotonic() - before - 0.02
+            if (delay > worst) { worst = delay }
+        }
+        return worst
+    })
+    return sleeper.wait()
+})
+print(late < 0.1)
+"#,
+        "true\n",
+    );
+}
+
+#[test]
+fn calls_that_block_let_the_other_tasks_run() {
+    assert_same(
+        "task_blocking",
+        r#"import file
+import system
+import task
+import time
+
+immut start = time.monotonic()
+immut ticks = task.shared(0)
+immut results = task.group((tasks) => {
+    tasks.spawn(() => {
+        for i in range(20) {
+            time.sleep(0.01)
+            ticks.update((n) => n + 1)
+        }
+    })
+    immut sleeper = tasks.spawn(() => match (system.capture('sleep', ['0.3'])) {
+        Ok(output) => output.status
+        Err(_) => -1
+    })
+    immut echo = tasks.spawn(() => match (system.run('sh', ['-c', 'sleep 0.2'])) {
+        Ok(status) => status
+        Err(_) => -1
+    })
+    immut listed = tasks.spawn(() => match (file.list('.')) {
+        Ok(names) => names.length() > 0
+        Err(_) => false
+    })
+    return `${sleeper.wait()} ${echo.wait()} ${listed.wait()} ${ticks.get() >= 10}`
+})
+print(results)
+print(time.monotonic() - start < 0.6)
+"#,
+        "0 0 true true\ntrue\n",
+    );
+}
+
+#[test]
+fn printing_to_a_full_pipe_lets_the_other_tasks_run() {
+    let path = source_file(
+        "task_print",
+        r#"import task
+import time
+
+function repeated(text: string, count: int): string {
+    mut out = ''
+    for i in range(count) {
+        out += text
+    }
+    return out
+}
+
+immut late = task.group((tasks) => {
+    tasks.spawn(() => {
+        for i in range(2000) {
+            print(`line ${i} ${repeated('x', 90)}`)
+        }
+    })
+    tasks.spawn(() => {
+        for i in range(3) {
+            print(repeated('a', 10000))
+        }
+    })
+    immut sleeper = tasks.spawn(() => {
+        mut worst: decimal = 0
+        for i in range(20) {
+            immut before = time.monotonic()
+            time.sleep(0.02)
+            immut delay = time.monotonic() - before - 0.02
+            if (delay > worst) { worst = delay }
+        }
+        return worst
+    })
+    return sleeper.wait()
+})
+printError(`${late < 0.1}`)
+"#,
+    );
+    let executable = path.with_extension("");
+    build(&path, &executable);
+    // The pipe is read only after a second: the tasks that print wait for it, and the one that
+    // sleeps wakes on time.
+    let run = Command::new("sh").arg("-c").arg(format!("'{}' | (sleep 1; cat)", executable.display())).output().unwrap();
+    let output = String::from_utf8(run.stdout).unwrap();
+    assert_eq!(String::from_utf8_lossy(&run.stderr), "true\n");
+    let lines: Vec<&str> = output.lines().collect();
+    assert_eq!(lines.len(), 2003);
+    assert_eq!(lines.iter().filter(|line| line.starts_with("line ") && line.len() == 6 + line[5..].find(' ').unwrap() + 90).count(), 2000);
+    assert_eq!(lines.iter().filter(|line| line.len() == 10000 && line.bytes().all(|b| b == b'a')).count(), 3);
+}
+
+#[test]
+fn foreign_functions_of_the_libraries_of_the_system() {
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("compiler");
+    let written = directory.join("foreign.txt");
+    let source = format!(
+        r#"import task
+import time
+
+foreign 'c' {{
+    type Stream = handle(fclose)
+
+    function strlen(text: string): CSize
+    function getenv(name: string): Option[string]
+    function abs(value: CInt): CInt
+    function strtol(text: string, end: int, base: CInt): CLong
+    function fopen(path: string, mode: string): Option[Stream]
+    function fputs(text: string, stream: Stream): CInt
+    function getentropy(mut buffer: byte[], size: CSize): CInt
+    function size(text: string): CSize from 'strlen'
+    blocking function usleep(microseconds: CInt): CInt
+}}
+
+foreign 'm' {{
+    function cbrt(value: float): float
+}}
+
+print(strlen('héllo'))
+print(size('abc'))
+print(getenv('KOJI_FOREIGN_TEST'))
+print(getenv('KOJI_NOT_SET_ANYWHERE'))
+print(abs(-42))
+print(strtol('ff', 0, 16))
+print(cbrt(float(64)) > float(3.99))
+mut bytes: byte[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+print(getentropy(mut bytes, 16))
+print(bytes != [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+
+// The stream is closed (its text written) when it is dropped.
+match (fopen('{}', 'w')) {{
+    Some(stream) => fputs('written by Koji\n', stream)
+    None => -1
+}}
+
+// Blocking functions wait on a thread that helps, one at a time, while the other tasks go on.
+immut ticks = task.shared(0)
+immut start = time.monotonic()
+task.group((tasks) => {{
+    tasks.spawn(() => {{
+        for i in range(10) {{
+            time.sleep(0.01)
+            ticks.update((n) => n + 1)
+        }}
+    }})
+    tasks.spawn(() => usleep(100000))
+    tasks.spawn(() => usleep(100000))
+}})
+print(ticks.get())
+print(time.monotonic() - start >= 0.2)
+print(abs(3000000000))
+"#,
+        written.display()
+    );
+    let path = source_file("foreign", &source);
+    let executable = path.with_extension("");
+    build(&path, &executable);
+    let run = Command::new(&executable).env("KOJI_FOREIGN_TEST", "yes").output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "6\n3\nSome('yes')\nNone\n42\n255\ntrue\n0\ntrue\n10\ntrue\n");
+    assert!(String::from_utf8_lossy(&run.stderr).ends_with(":54: argument 1 ('value') of 'abs' must be from -2147483648 to 2147483647, found 3000000000\n"), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&written).unwrap(), "written by Koji\n");
+    // What a foreign function cannot take.
+    let wrong = koji::finish(koji::kojic().arg("check").arg(source_file("foreign_wrong", "foreign 'c' {\n    function qsort(items: int[], count: CSize)\n}\n")), "");
+    assert!(wrong.stderr.contains("foreign_wrong.kj:1: parameter 'items' of the foreign function 'qsort' cannot be int[]"), "{}", wrong.stderr);
+}
+
+/// Runs `git` in `directory` (a test of packages makes its repositories).
+fn git(directory: &Path, args: &[&str]) {
+    let run = Command::new("git").args(["-c", "user.name=koji", "-c", "user.email=koji@localhost", "-c", "init.defaultBranch=main"]).args(args).current_dir(directory).output().unwrap();
+    assert!(run.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&run.stderr));
+}
+
+/// A repository of a module, with a commit and a tag for each version: (tag, files).
+fn repository(root: &Path, path: &str, versions: &[(&str, &[(&str, &str)])]) {
+    let directory = root.join(path.trim_end_matches("/v2"));
+    std::fs::create_dir_all(&directory).unwrap();
+    if !directory.join(".git").exists() {
+        git(&directory, &["init", "-q"]);
+    }
+    for (tag, files) in versions {
+        for (name, text) in *files {
+            std::fs::write(directory.join(name), text).unwrap();
+        }
+        git(&directory, &["add", "-A"]);
+        git(&directory, &["commit", "-qm", tag]);
+        git(&directory, &["tag", tag]);
+    }
+}
+
+#[test]
+fn packages_from_repositories_of_git_at_the_versions_mvs_chooses() {
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join("packages");
+    let _ = std::fs::remove_dir_all(&root);
+    let repositories = root.join("repositories");
+    repository(
+        &repositories,
+        "github.com/bia/greet",
+        &[
+            ("v1.0.0", &[("koji.mod", "module github.com/bia/greet\n"), ("greet.kj", "export function hello(name: string): string {\n    return `hello, ${name}`\n}\n")]),
+            (
+                "v1.1.0",
+                &[
+                    ("greet.kj", "import { upper } from 'text.kj'\n\nexport function hello(name: string): string {\n    return `hello, ${upper(name)}`\n}\n"),
+                    ("text.kj", "export function upper(name: string): string {\n    return name.upper()\n}\n"),
+                ],
+            ),
+        ],
+    );
+    repository(&repositories, "github.com/bia/greet/v2", &[("v2.0.0", &[("koji.mod", "module github.com/bia/greet/v2\n"), ("greet.kj", "export function hello(name: string): string {\n    return `HELLO ${name}`\n}\n")])]);
+    repository(
+        &repositories,
+        "github.com/caio/helper",
+        &[("v1.0.0", &[("koji.mod", "module github.com/caio/helper\n\nrequire github.com/bia/greet v1.1.0\n"), ("helper.kj", "import { hello } from 'github.com/bia/greet'\n\nexport function twice(name: string): string {\n    return `${hello(name)} / ${hello(name)}`\n}\n")])],
+    );
+    repository(&repositories, "github.com/dan/native", &[("v1.0.0", &[("koji.mod", "module github.com/dan/native\n"), ("native.kj", "foreign 'c' {\n    function abs(value: CInt): CInt\n}\n\nexport function positive(value: int): int {\n    return abs(value)\n}\n")])]);
+    let app = root.join("app");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(
+        app.join("main.kj"),
+        "import { hello } from 'github.com/bia/greet'\nimport greet2 from 'github.com/bia/greet/v2'\nimport { twice } from 'github.com/caio/helper'\nimport { upper } from 'github.com/bia/greet/text'\n\nprint(hello('ana'))\nprint(greet2.hello('ana'))\nprint(twice('bia'))\nprint(upper('x'))\n",
+    )
+    .unwrap();
+    let kojic = |args: &[&str]| {
+        let mut command = koji::kojic();
+        command.args(args).current_dir(&app).env("KOJI_GIT_URL", format!("file://{}/", repositories.display())).env("KOJI_CACHE", root.join("cache"));
+        koji::finish(&mut command, "")
+    };
+    // Without a koji.mod, a package cannot be imported.
+    assert!(kojic(&["check", "main.kj"]).stderr.contains("this program has no koji.mod: make one with 'kojic init <path of the module>'"));
+    assert_eq!(kojic(&["init", "github.com/ana/app"]).stdout, "made koji.mod for the module github.com/ana/app\n");
+    assert_eq!(kojic(&["add", "github.com/bia/greet@v1.0.0"]).stdout, "added github.com/bia/greet v1.0.0\n");
+    assert_eq!(kojic(&["add", "github.com/bia/greet/v2"]).stdout, "added github.com/bia/greet/v2 v2.0.0\n");
+    assert_eq!(kojic(&["add", "github.com/caio/helper"]).stdout, "added github.com/caio/helper v1.0.0\n");
+    // The program asks for greet v1.0.0, helper for v1.1.0: the program builds with v1.1.0.
+    let run = kojic(&["run", "main.kj"]);
+    assert_eq!(run.stdout, "hello, ANA\nHELLO ana\nhello, BIA / hello, BIA\nX\n", "{}", run.stderr);
+    let sums = std::fs::read_to_string(app.join("koji.sum")).unwrap();
+    assert_eq!(sums.lines().count(), 4, "{}", sums);
+    assert!(sums.contains("github.com/bia/greet v1.1.0 sha256:"));
+    // A copy changed in the cache is refused.
+    let copy = root.join("cache/packages/github.com/bia/greet@v1.1.0/greet.kj");
+    std::fs::write(&copy, std::fs::read_to_string(&copy).unwrap() + "// changed\n").unwrap();
+    assert!(kojic(&["run", "main.kj"]).stderr.contains("the files of github.com/bia/greet v1.1.0 are not those of koji.sum"));
+    std::fs::remove_dir_all(root.join("cache/packages/github.com/bia/greet@v1.1.0")).unwrap();
+    assert_eq!(kojic(&["run", "main.kj"]).stdout, "hello, ANA\nHELLO ana\nhello, BIA / hello, BIA\nX\n");
+    // A module with foreign functions needs leave.
+    kojic(&["add", "github.com/dan/native"]);
+    std::fs::write(app.join("native.kj"), "import { positive } from 'github.com/dan/native'\nprint(positive(-5))\n").unwrap();
+    assert!(kojic(&["run", "native.kj"]).stderr.contains("if you trust it, allow it in koji.mod with 'allow foreign github.com/dan/native'"));
+    let mod_file = std::fs::read_to_string(app.join("koji.mod")).unwrap();
+    std::fs::write(app.join("koji.mod"), mod_file + "allow foreign github.com/dan/native\n").unwrap();
+    assert_eq!(kojic(&["run", "native.kj"]).stdout, "5\n");
+    // A module that koji.mod does not require, and a version of another major version.
+    std::fs::write(app.join("missing.kj"), "import x from 'github.com/zed/none'\n").unwrap();
+    assert!(kojic(&["check", "missing.kj"]).stderr.contains("'github.com/zed/none' is not a module that koji.mod requires: add it with 'kojic add github.com/zed/none'"));
+    assert!(kojic(&["add", "github.com/bia/greet@v2.0.0"]).stderr.contains("v2.0.0 is a major version of its own: its path ends with '/v2'"));
+    // A new version, then `update`.
+    repository(&repositories, "github.com/caio/helper", &[("v1.0.1", &[("helper.kj", "export function twice(name: string): string {\n    return 'v1.0.1'\n}\n")])]);
+    let updated = kojic(&["update"]).stdout;
+    assert!(updated.contains("github.com/bia/greet v1.0.0 -> v1.1.0") && updated.contains("github.com/caio/helper v1.0.0 -> v1.0.1"), "{}", updated);
+    assert!(kojic(&["run", "main.kj"]).stdout.ends_with("v1.0.1\nX\n"));
+}
+
+#[test]
+fn digests_of_texts() {
+    assert_same(
+        "hashes",
+        "import hash\nprint(hash.sha256('abc'))\nprint(hash.sha256(''))\nprint(hash.sha512('abc').length())\n",
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n128\n",
+    );
+}
+
+#[test]
+fn the_arguments_of_a_command_line() {
+    assert_same(
+        "cli",
+        r#"import cli
+
+immut command = cli.command('greet', 'Greets someone.')
+    .flag('-l, --loud', 'Shout the greeting')
+    .number('-t, --times <n>', 'How many times', 1)
+    .option('-g, --greeting <text>', 'The greeting', 'hello')
+    .argument('<name>', 'Who to greet')
+    .argument('[others...]', 'More people')
+    .version('1.0.0')
+
+function show(args: string[]) {
+    match (cli.parseArgs(command, args)) {
+        Ok(parsed) => print(`${parsed.value('greeting')} ${parsed.value('name')} x${parsed.number('times')} loud=${parsed.flag('loud')} ${parsed.list('others')}`)
+        Err(Invalid(message)) => print(message.split('\n')[0])
+        Err(other) => print(other.display().split('\n')[0])
+    }
+}
+
+show(['ana'])
+show(['-lt2', 'ana', 'bia', 'caio'])
+show(['--times=3', '--greeting', 'oi', 'ana'])
+show(['--', '-ana'])
+show(['--lod', 'ana'])
+show([])
+show(['-t', 'x', 'ana'])
+show(['ana', '--times'])
+show(['--version'])
+show(['--help'])
+
+immut todo = cli.command('todo', 'A list.')
+    .subcommand(cli.command('add', 'Adds an item.').option('-p, --priority <level>', 'Its priority', 'normal').argument('<text...>', 'What to do'))
+    .subcommand(cli.command('list', 'Shows the items.').flag('-a, --all', 'Also those done'))
+
+match (cli.parseArgs(todo, ['add', 'buy', 'milk', '-p', 'high'])) {
+    Ok(parsed) => print(`${parsed.command()}: ${parsed.list('text')} ${parsed.value('priority')}`)
+    Err(error) => print(error)
+}
+
+match (cli.parseArgs(todo, ['lst'])) {
+    Ok(_) => print('?')
+    Err(error) => print(error.display().split('\n')[0])
+}
+"#,
+        "hello ana x1 loud=false []\nhello ana x2 loud=true ['bia', 'caio']\noi ana x3 loud=false []\nhello -ana x1 loud=false []\ngreet: unknown option '--lod' (did you mean '--loud'?)\ngreet: missing <name>\ngreet: '--times' needs an integer, found 'x'\ngreet: '--times' needs a value (<n>)\ngreet 1.0.0\nGreets someone.\nadd: ['buy', 'milk'] high\ntodo: unknown command 'lst' (did you mean 'list'?)\n",
+    );
 }

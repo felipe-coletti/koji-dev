@@ -54,8 +54,16 @@ function cType(ty: Ty): string {
         MapTy(_, _) => 'KojiMap *'
         SetTy(_) => 'KojiMap *'
         FunctionTy(_, _) => 'KojiClosure *'
-        VoidTy => 'void'
+        // A value of a type argument `void` (the result of a task without one): nothing, as a word.
+        VoidTy => 'int64_t'
     }
+}
+
+// The C type a function returns: `void` for none.
+function returnType(ty: Ty): string {
+    if (ty == VoidTy) { return 'void' }
+
+    return cType(ty)
 }
 
 // The runtime's name for the values of a managed type (`string` in `koji_string_retain`).
@@ -213,7 +221,51 @@ export function generate(program: IrProgram): string[] {
     return generator.out
 }
 
+// A function of a library that blocks: the job that calls it (runtime/prelude.h), made by a thread
+// that helps while other tasks are alive, and the function the program calls, which waits for it.
+function Generator.blockingExtern(mut self, found: IrExtern) {
+    mut unpacked: string[] = []
+    mut params: string[] = []
+    mut packed: string[] = []
+
+    for i in range(found.params.length()) {
+        immut c = found.params[i]
+        params.push(`${c} p${i}`)
+        unpacked.push(fromWord(c, `job->arguments[${i}]`))
+        packed.push(toWord(c, `p${i}`))
+    }
+
+    immut call = `${found.name}_raw(${unpacked.join(', ')})`
+    immut run = if (found.returns == 'void') { `${call};` } else { `job->result = ${toWord(found.returns, call)};` }
+    self.line(`static void koji_run_${found.name}(KojiJob *job) { ${run} }`)
+    immut list = if (params.length() == 0) { 'void' } else { params.join(', ') }
+    immut arguments = if (packed.length() == 0) { '0' } else { packed.join(', ') }
+    immut wait = 'koji_task_blocking(&job)'
+    immut back = if (found.returns == 'void') { `${wait};` } else { `return ${fromWord(found.returns, wait)};` }
+    self.line(`static inline ${found.returns} ${found.name}(${list}) { KojiJob job = { koji_run_${found.name}, { ${arguments} }, 0, 0, 0, 0 }; ${back} }`)
+}
+
+// A value of C as the word of a job, and back.
+function toWord(c: string, value: string): string {
+    if (c == 'double') { return `koji_double_bits(${value})` }
+
+    if (c.endsWith('*')) { return `(int64_t)(intptr_t)(${value})` }
+
+    return `(int64_t)(${value})`
+}
+
+function fromWord(c: string, word: string): string {
+    if (c == 'double') { return `koji_bits_double(${word})` }
+
+    if (c.endsWith('*')) { return `(${c})(intptr_t)(${word})` }
+
+    return `(${c})(${word})`
+}
+
 function Generator.generateProgram(mut self) {
+    // What the prelude has only once, in the library (the switch between the stacks of tasks).
+    if (self.program.library) { self.line('#define KOJI_LIBRARY 1') }
+
     for text in preludeLines {
         self.line(text)
     }
@@ -235,8 +287,19 @@ function Generator.generateProgram(mut self) {
 
     for found in self.program.externs {
         immut params = if (found.params.length() == 0) { 'void' } else { found.params.join(', ') }
-        immut symbol = if (found.name in inode64) { ` KOJI_INODE64(${found.name})` } else { '' }
         immut returned = if (found.returns == 'never') { '_Noreturn void' } else { found.returns }
+
+        // Another name in the library (a foreign block): the symbol, under a name of its own.
+        if (found.symbol != found.name or found.blocking) {
+            immut raw = if (found.blocking) { `${found.name}_raw` } else { found.name }
+            self.line(`${returned} ${raw}(${params}) __asm__(KOJI_SYMBOL(${found.symbol}));`)
+
+            if (found.blocking) { self.blockingExtern(found) }
+
+            continue
+        }
+
+        immut symbol = if (found.name in inode64) { ` KOJI_INODE64(${found.name})` } else { '' }
         self.line(`${returned} ${found.name}(${params})${symbol};`)
     }
 
@@ -319,6 +382,9 @@ function Generator.generateProgram(mut self) {
         self.line('void koji_library_init(void) {')
     } else {
         self.line('int main(int argc, char **argv) {')
+
+        if (self.program.testing) { self.line('    koji_test_selected = koji_test_argument(&argc, argv);') }
+
         self.line('    koji_init(argc, (const char *const *)argv);')
     }
 
@@ -334,6 +400,8 @@ function fromC(written: string, value: string): string {
     if (written == 'void *' or written == 'const void *' or written == 'const char *') { return `(int64_t)(intptr_t)${value}` }
 
     if (written == 'const KojiString *') { return `(KojiString *)${value}` }
+
+    if (written == 'const KojiClosure *') { return `(KojiClosure *)${value}` }
 
     return value
 }
@@ -480,7 +548,8 @@ function signature(id: int, routine: IrFunction, inlined: boolean): string {
 
     immut list = if (params.length() == 0) { 'void' } else { params.join(', ') }
     immut inline = if (inlined) { 'KOJI_INLINE' } else { 'static' }
-    return `${inline} ${cType(routine.returns)} ${functionName(id)}(${list}) /* ${routine.name} */`
+    // In a comment: the name of a test may hold `*/`.
+    return `${inline} ${returnType(routine.returns)} ${functionName(id)}(${list}) /* ${routine.name.replace('*/', '* /')} */`
 }
 
 // The functions of a few instructions that call no other ones but such functions (`Lexer.at`,
@@ -616,6 +685,11 @@ function Generator.emitFunction(mut self, id: int, routine: IrFunction) {
     self.releases = self.localReleases(routine)
     self.live = lastUses(routine)
 
+    // A function that calls others may be called again and again (recursion): where it starts, the
+    // task that runs it lets the others run when it has run long enough (`KOJI_PREEMPT`, the
+    // prelude), as at the end of each turn of a loop (see `terminator`).
+    if (self.preemptible() and not self.smalls[id] and makesCalls(routine)) { self.line('    KOJI_PREEMPT();') }
+
     for block in range(routine.blocks.length()) {
         self.line(`b${block}:;`)
         self.block = block
@@ -630,6 +704,28 @@ function Generator.emitFunction(mut self, id: int, routine: IrFunction) {
     }
 
     self.line('}')
+}
+
+// Whether a task may be preempted in the code generated: in a program, but neither in the library
+// (where the scheduler of tasks is) nor in the module `task`, whose groups, channels and shared
+// values change their cells in steps that no other task may come between.
+function Generator.preemptible(self): boolean {
+    return not self.program.library and self.file != 'task'
+}
+
+// Whether a function calls functions of the program (or closures).
+function makesCalls(routine: IrFunction): boolean {
+    for block in routine.blocks {
+        for instruction in block.instructions {
+            match (instruction) {
+                CallIns(_, _, _, _, _) => return true
+                CallClosureIns(_, _, _, _) => return true
+                _ => {}
+            }
+        }
+    }
+
+    return false
 }
 
 function operand(value: Operand): string {
@@ -961,6 +1057,19 @@ function Generator.setLocal(mut self, routine: IrFunction, dest: int, expression
 }
 
 // `dest = expression`, or the expression as a statement without a destination.
+// The C of an argument of a function of the standard library.
+function Generator.stdArg(self, arg: StdArg): string {
+    return match (arg) {
+        ValueArg(value) => operand(value)
+        ModeArg(mode) => string(mode)
+        RecordArg(record) => `&koji_record_${record}`
+        ElementArg(ty) => elementType(ty)
+        LocationArg(line) => self.location(line)
+        PlaceArg(value) => `(const char *)(intptr_t)${operand(value)}`
+        NullArg => 'NULL'
+    }
+}
+
 function Generator.result(mut self, routine: IrFunction, dest: Option[int], expression: string) {
     match (dest) {
         Some(local) => self.setLocal(routine, local, expression)
@@ -1046,7 +1155,7 @@ function Generator.instruction(mut self, routine: IrFunction, instruction: Instr
                     match (self.movable(routine, left)) {
                         Some(local) if (left != right and dest != local and right == LocalOp(self.charLocal)) => {
                             self.charLocal = -1
-                            self.setLocal(routine, dest, `koji_string_append_char(l${local}, ${self.charValue})`)
+                            self.setLocal(routine, dest, `koji_string_push_char(l${local}, ${self.charValue})`)
                             self.line(`    l${local} = NULL;`)
                             return
                         }
@@ -1183,7 +1292,7 @@ function Generator.instruction(mut self, routine: IrFunction, instruction: Instr
         }
         ListGetIns(dest, list, index, line) => {
             immut ty = routine.locals[dest].ty
-            immut item = `*(${cType(ty)} const *)koji_list_get(${operand(list)}, ${operand(index)}, ${self.location(line)})`
+            immut item = `*(${cType(ty)} const *)koji_list_at(${operand(list)}, ${operand(index)}, ${words(ty)}, ${self.location(line)})`
 
             // Borrowed: the list keeps the item alive (borrow.kj).
             if (self.current[dest]) {
@@ -1361,19 +1470,30 @@ function Generator.instruction(mut self, routine: IrFunction, instruction: Instr
             }
             self.line(`    { ${cType(itemType)} item; KojiRecord *option; if (${remove}) { option = koji_record_new(&koji_record_${option}, ${positions.some}); koji_record_init(option, 0, &item);${releaseItem} } else { option = koji_record_new(&koji_record_${option}, ${positions.none}); } koji_record_set_variable(&l${dest}, option); }`)
         }
+        StdCallIns(Some(dest), name, args) if (name == 'koji_list_shared_get') => {
+            immut ty = routine.locals[dest].ty
+            immut item = `*(${cType(ty)} const *)koji_list_at(${self.stdArg(args[0])}, ${self.stdArg(args[1])}, ${words(ty)}, ${self.stdArg(args[2])})`
+            self.set(`l${dest}`, ty, share(ty, item))
+        }
+        // In place, even when the list is shared: that is what the cells of std/task.kj are.
+        StdCallIns(None, name, args) if (name == 'koji_list_shared_set') => {
+            immut value = match (args[2]) {
+                ValueArg(found) => found
+                _ => IntOp(0)
+            }
+            immut ty = self.operandType(routine, value)
+            immut c = cType(ty)
+            immut freeing = match (release(ty)) {
+                Some(name) => ` ${name}(old);`
+                None => ''
+            }
+            self.line(`    { ${c} fresh = ${share(ty, operand(value))}; ${c} *slot = (${c} *)koji_list_at(${self.stdArg(args[0])}, ${self.stdArg(args[1])}, ${words(ty)}, ${self.stdArg(args[3])}); ${c} old = *slot; *slot = fresh;${freeing} (void)old; }`)
+        }
         StdCallIns(dest, name, args) => {
             mut values: string[] = []
 
             for arg in args {
-                values.push(match (arg) {
-                    ValueArg(value) => operand(value)
-                    ModeArg(mode) => string(mode)
-                    RecordArg(record) => `&koji_record_${record}`
-                    ElementArg(ty) => elementType(ty)
-                    LocationArg(line) => self.location(line)
-                    PlaceArg(value) => `(const char *)(intptr_t)${operand(value)}`
-                    NullArg => 'NULL'
-                })
+                values.push(self.stdArg(arg))
             }
 
             // A C function of an `extern` declaration: an `Address` is a `void *` for it.
@@ -1441,7 +1561,7 @@ function Generator.instruction(mut self, routine: IrFunction, instruction: Instr
                 values.push(operand(arg))
             }
 
-            self.result(routine, dest, `((${cType(returns)} (*)(${types.join(', ')}))koji_closure_code(${callee}))(${values.join(', ')})`)
+            self.result(routine, dest, `((${returnType(returns)} (*)(${types.join(', ')}))koji_closure_code(${callee}))(${values.join(', ')})`)
         }
         ListSortByIns(list, comparison, line) => {
             mut before = 'int'
@@ -1529,6 +1649,15 @@ function Generator.instruction(mut self, routine: IrFunction, instruction: Instr
             self.line(`    if (${operand(step)} == 0) koji_panic(${self.location(line)}, "range() step cannot be 0");`)
         }
         RangeNextIns(hasValue, value, next, end, step, done) => {
+            // A step of 1 (`range(n)`, `range(a, b)`): `next + 1` cannot overflow when `next < end`,
+            // so the loop needs no flag of its end: a plain C loop, which the C compiler unrolls and
+            // vectorizes.
+            if (step == IntOp(1)) {
+                self.line(`    l${hasValue} = l${next} < ${operand(end)};`)
+                self.line(`    if (l${hasValue}) { l${value} = l${next}; l${next} += 1; }`)
+                return
+            }
+
             self.line(`    l${hasValue} = koji_range_next(&l${next}, ${operand(end)}, ${operand(step)}, &l${done}, &l${value});`)
         }
     }
@@ -1708,8 +1837,17 @@ function Generator.releaseLocals(mut self, routine: IrFunction) {
 
 function Generator.terminator(mut self, routine: IrFunction, terminator: Terminator) {
     match (terminator) {
-        GotoT(block) => self.line(`    goto b${block};`)
-        BranchT(condition, thenBlock, elseBlock) => self.line(`    if (${operand(condition)}) goto b${thenBlock}; else goto b${elseBlock};`)
+        GotoT(block) => {
+            // A jump back is the end of a turn of a loop (every loop has one).
+            if (block <= self.block and self.preemptible()) { self.line('    KOJI_PREEMPT();') }
+
+            self.line(`    goto b${block};`)
+        }
+        BranchT(condition, thenBlock, elseBlock) => {
+            if ((thenBlock <= self.block or elseBlock <= self.block) and self.preemptible()) { self.line('    KOJI_PREEMPT();') }
+
+            self.line(`    if (${operand(condition)}) goto b${thenBlock}; else goto b${elseBlock};`)
+        }
         ReturnT(value) => {
             // The `mut` parameters give their final values back: they move out, unless the value
             // returned is one of them.
@@ -1727,7 +1865,10 @@ function Generator.terminator(mut self, routine: IrFunction, terminator: Termina
                 }
             }
 
-            match (value) {
+            // A function without a result returns nothing, even a value of `void`.
+            immut result = if (routine.returns == VoidTy) { None } else { value }
+
+            match (result) {
                 // The result is computed before the locals are released: it may be one of them.
                 Some(returned) => {
                     // A local returned moves out of the function, which ends.
