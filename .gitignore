@@ -6,4 +6,3 @@
 *.dll
 build/
 node_modules/
-dist/

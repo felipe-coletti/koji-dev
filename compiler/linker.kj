@@ -240,9 +240,8 @@ export function sharedName(bytes: byte[]): string {
 
 // The executable of the objects, linked with the shared libraries `libraries` (their names for the
 // dynamic loader, `libc.so.6`) that define the symbols `provided`, or why this linker cannot make
-// it (a symbol no object nor library defines among them). `unchecked`: the libraries were not all
-// read (those of another processor), and a symbol no object defines is taken to be in them.
-export function linkExecutable(objects: byte[][], libraries: string[], provided: Set[string], unchecked: boolean): Result[byte[], string] {
+// it (a symbol no object nor library defines among them).
+export function linkExecutable(objects: byte[][], libraries: string[], provided: Set[string]): Result[byte[], string] {
     mut inputs: InputObject[] = []
 
     for object in objects {
@@ -303,7 +302,7 @@ export function linkExecutable(objects: byte[][], libraries: string[], provided:
             if (symbol.section != 0 or symbol.info >> 4 == 0 or defined.has(symbol.name) or externalIndex.has(symbol.name)) { continue }
 
             // A weak symbol may stay undefined; another must be in a library.
-            if (not unchecked and not provided.has(symbol.name) and symbol.info >> 4 != 2) { return Err(`undefined symbol '${symbol.name}'`) }
+            if (not provided.has(symbol.name) and symbol.info >> 4 != 2) { return Err(`undefined symbol '${symbol.name}'`) }
 
             externalIndex[symbol.name] = externals.length()
             externals.push(symbol.name)

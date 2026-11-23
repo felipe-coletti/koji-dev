@@ -1,3 +1,0 @@
-# No conversion of line breaks on any system: the files are byte for byte those of the repository
-# (LF), as the tests read their cases and snapshots, some with carriage returns of their own.
-* -text

@@ -557,7 +557,7 @@ test 'packages_from_repositories_of_git_at_the_versions_mvs_chooses' {
 test 'koji_links_executables_itself' {
     if (not onLinuxX64) { return }
 
-    immut source = 'import file\nimport task\nimport time\n\nmut results: int[] = []\n\ntask.group((group) => {\n    for i in range(3) {\n        group.spawn(() => {\n            time.sleep(0.1 * (3 - i))\n            results.push(i)\n        })\n    }\n\n    group.spawn(() => {\n        print(file.exists(\'/\'))\n    })\n})\n\nprint(results)\nprint(`${7 / 2} ${\'héllo\'.upper()}`)\n'
+    immut source = 'import file\nimport task\nimport time\n\nmut results: int[] = []\n\ntask.group((group) => {\n    for i in range(3) {\n        group.spawn(() => {\n            time.sleep(0.01 * (3 - i))\n            results.push(i)\n        })\n    }\n\n    group.spawn(() => {\n        print(file.exists(\'/\'))\n    })\n})\n\nprint(results)\nprint(`${7 / 2} ${\'héllo\'.upper()}`)\n'
     immut ran = runBuilt(built('own_linker', source, ['KOJI_LINKER': 'koji']), true)
     assert(ran.stdout == 'true\n[2, 1, 0]\n3 HÉLLO\n', ran.stdout)
     assert(ran.status == 0, ran.stderr)

@@ -26,14 +26,7 @@ The goal is to provide a language that any developer can quickly learn and use c
 
 ## Getting Started
 
-Download the package of your platform from the [releases](https://github.com/koji-language/koji/releases) (Linux and macOS on x86-64 and arm64, Windows on x86-64), or build Koji from this repository: it needs nothing but `gzip` (PowerShell on Windows).
-
-```sh
-bootstrap/build.sh           # bootstrap\build.cmd on Windows
-build/kojic run examples/hello.kj
-```
-
-The [Getting Started](doc/getting-started.md) guide walks through your first program and every command; [CHANGELOG.md](CHANGELOG.md) says what each version brings.
+The [Getting Started](doc/getting-started.md) guide walks through your first program and every command.
 
 ---
 

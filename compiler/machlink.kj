@@ -459,9 +459,7 @@ export function linkMach(objects: byte[][]): Result[byte[], string] {
         sectionHeader('__data', '__DATA', base + dataAt, sizes['data'], dataAt, 4, 0),
         sectionHeader('__bss', '__DATA', base + bssAt, sizes['bss'], 0, 4, 1)
     ])
-    // In memory after the zeros of __DATA (which the file does not hold): at its place in the file,
-    // it would overlap them, and macOS would not load the program.
-    segment(mut commands, '__LINKEDIT', base + dataEnd, align(linkeditEnd - linkedit, page), linkedit, linkeditEnd - linkedit, 1, 1, [])
+    segment(mut commands, '__LINKEDIT', base + linkedit, align(linkeditEnd - linkedit, page), linkedit, linkeditEnd - linkedit, 1, 1, [])
     count += 4
     // LC_DYLD_INFO_ONLY: rebase, bind; no weak, lazy or exported symbols.
     putInt32(mut commands, 0x80000022)
