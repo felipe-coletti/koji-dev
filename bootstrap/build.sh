@@ -10,8 +10,8 @@
 #                                 from the compiler built by itself (the fixed point)
 #
 # kojic finds the runtime library next to itself (or where KOJI_RUNTIME says). The seeds are
-# written again only when the compiler of compiler/ needs a newer one to build (see
-# doc/compiler-plan.md, "The seed").
+# written again only when the compiler of compiler/ needs a newer one to build (see "The compiler
+# is written in Koji, from a seed of its own executables" in doc/design.md).
 set -eu
 
 cd "$(dirname "$0")/.."
