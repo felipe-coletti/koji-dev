@@ -110,15 +110,17 @@ extern function koji_string_compare(a: string, b: string): CInt {
 }
 
 extern function koji_string_from_int(value: int): string {
-    // The magnitude, `int.min` too, and the number of its digits.
-    immut nothing: U128 = 0
-    immut magnitude = if (value < 0) { nothing - wide(value, -1) } else { wide(value, 0) }
+    // On the value made negative (`int.min` has no positive): its digits, at most 19.
+    immut negative = if (value < 0) { value } else { -value }
     mut count = 1
-    mut limit: U128 = 10
+    mut limit = -10
 
-    while (count < 20 and magnitude >= limit) {
+    while (negative <= limit) {
         count += 1
-        limit = limit * 10
+
+        if (count == 19) { break }
+
+        limit *= 10
     }
 
     immut sign = if (value < 0) { 1 } else { 0 }
@@ -127,13 +129,13 @@ extern function koji_string_from_int(value: int): string {
 
     if (value < 0) { write(bytes, 0, byte(45)) }
 
-    // The digits, from the last one.
-    mut rest = magnitude
+    // The digits, from the last one (a remainder of a negative value is negative or zero).
+    mut rest = negative
     mut at = count + sign - 1
 
     while (at >= sign) {
         immut quotient = rest / 10
-        write(bytes, at, byte(48 + lowWord(rest - quotient * 10)))
+        write(bytes, at, byte(48 + quotient * 10 - rest))
         rest = quotient
         at -= 1
     }
@@ -249,37 +251,41 @@ function containsText(haystack: string, needle: string): boolean {
 extern function koji_string_hash(text: string): int {
     immut bytes = stringBytes(text)
     immut size = stringSize(text)
-    mut hash: U128 = 0
+    mut hash = 0
     mut at = 0
 
     while (at + 8 <= size) {
         immut chunk: int = read(bytes, at)
-        hash = mixed(hash, wide(chunk, 0))
+        hash = mixedWord(hash, chunk)
         at += 8
     }
 
     if (at < size) {
         // The last bytes, little-endian, with zeros after them.
-        mut chunk: U128 = 0
+        mut chunk = 0
         mut i = size - 1
 
         while (i >= at) {
             immut b: byte = read(bytes, i)
-            chunk = (chunk << 8) | wide(int(b), 0)
+            chunk = chunk << 8 | int(b)
             i -= 1
         }
 
-        hash = mixed(hash, chunk)
+        hash = mixedWord(hash, chunk)
     }
 
-    return lowWord(mixed(hash, wide(size, 0)))
+    return mixedWord(hash, size)
 }
 
 // (rotate_left(hash, 5) ^ word) * K, in 64 bits.
 export function mixed(hash: U128, chunk: U128): U128 {
-    immut mask = wide(-1, 0)
-    immut rotated = ((hash << 5) | (hash >> 59)) & mask
-    return wordProduct(rotated ^ chunk, wide(0x517CC1B727220A95, 0)) & mask
+    return wide(mixedWord(lowWord(hash), lowWord(chunk)), 0)
+}
+
+// The same on the words themselves (the shifts of an int keep 64 bits; the product wraps around).
+function mixedWord(hash: int, chunk: int): int {
+    immut rotated = hash << 5 | (hash >> 59) & 0x1F
+    return lowWord(wordProduct(wide(rotated ^ chunk, 0), wide(0x517CC1B727220A95, 0)))
 }
 
 // The code of a character: U+FFFD for a code that is none (above U+10FFFF, or a surrogate).

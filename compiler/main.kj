@@ -11,6 +11,9 @@ import { dumpTypes, check, checkLibrary, Program } from 'checker.kj'
 import { lower, lowerTests } from 'lower.kj'
 import { IrProgram, programText } from 'ir.kj'
 import { generate } from 'cgen.kj'
+import { generateNative } from 'native.kj'
+import { inlineSmall } from 'inline.kj'
+import { preludeLines } from 'prelude.kj'
 import { serve } from 'lsp.kj'
 import { initModule, addModule, updateModules } from 'packages.kj'
 
@@ -26,12 +29,16 @@ immut usage = [
     '        -o <output>                   the executable (default: the file name without .kj)',
     '        --emit c                      write the generated C instead',
     '        --emit ir                     write the intermediate representation instead',
+    '        --c                           generate C and compile it with the C compiler (the default',
+    '                                      where the native backend is not yet: not Linux on x86-64)',
     '    kojic dump tokens <file.kj>       show the tokens of a file (for comparing compilers)',
     '    kojic dump ast <file.kj>          show the syntax tree of a file',
     '    kojic dump types <file.kj>        show what the checker finds (types, moves...)',
     '    kojic dump ir <file.kj>           show the intermediate representation',
+    '    kojic dump inlined <file.kj>      the same, as the native backend gets it (inlined)',
     '    kojic dump c <file.kj>            show the generated C',
     '    kojic dump library                show the C of the library of the runtime written in Koji',
+    '    kojic dump inlined library        its IR, as the native backend gets it',
     '    kojic init <module>               make a koji.mod for the module (github.com/ana/agenda)',
     '    kojic add <module>[@version]      require a module, at its latest version or the one given',
     '    kojic update [module]             require the latest versions of the modules (or of one)',
@@ -97,6 +104,15 @@ function dumpStage(stage: string, name: string) {
 
             return
         }
+        // The IR the native backend generates code from: small functions inlined (inline.kj).
+        'inlined' => {
+            match (lowered(name)) {
+                Ok(program) => print(programText(inlineSmall(program)).join('\n'))
+                Err(message) => print(`error: ${message.split('\n')[0]}`)
+            }
+
+            return
+        }
         'c' => {
             match (lowered(name)) {
                 Ok(program) => print(generate(program).join('\n'))
@@ -156,6 +172,17 @@ function buildOptions(args: string[]): Build {
         if (arg == '-o' and i < args.length()) {
             output = Some(args[i])
             i += 1
+            continue
+        }
+
+        // The native backend (compiler/native.kj, the default where it is) or the C backend.
+        if (arg == '--native') {
+            emit = 'native'
+            continue
+        }
+
+        if (arg == '--c') {
+            emit = 'executable-c'
             continue
         }
 
@@ -291,6 +318,88 @@ function compileC(source: string, output: string, libraries: string[]): Result[v
     }
 }
 
+// The executable of the machine code of the native backend: its object file, linked with the runtime
+// by the linker of the system (the C compiler only links: there is no C).
+function linkNative(program: IrProgram, output: string): Result[void, string] {
+    immut object = match (generateNative(program)) {
+        Ok(bytes) => bytes
+        Err(message) => return Err(`compile error: ${message}`)
+    }
+    immut runtime = match (runtimeLibrary()) {
+        Some(runtime) => runtime
+        None => return Err('compile error: the runtime library (libkoji_runtime.a) is not next to kojic: set KOJI_RUNTIME to its path')
+    }
+    immut objectPath = temporary('.o')
+
+    match (writeBytes(objectPath, object)) {
+        Ok(_) => {}
+        Err(message) => return Err(message)
+    }
+
+    immut linker = variable('KOJI_CC', 'cc')
+    mut args = ['-o', output, objectPath, runtime]
+
+    for library in program.libraries {
+        args.push(`-l${library}`)
+    }
+
+    for library in systemLibraries() {
+        args.push(library)
+    }
+
+    immut result = system.capture(linker, args)
+    file.remove(objectPath)
+
+    return match (result) {
+        Ok(run) => if (run.status == 0) { Ok() } else { Err(`compile error: the linker '${linker}' failed:\n${run.stderr.trim()}`) }
+        Err(_) => Err(`compile error: cannot run the linker '${linker}' (set KOJI_CC to choose another one)`)
+    }
+}
+
+function buildLibrary(output: string): Result[void, string] {
+    immut checked = checkLibrary(true)?
+    immut lowered = lower(checked)?
+    immut object = match (generateNative(lowered)) {
+        Ok(bytes) => bytes
+        Err(message) => return Err(`compile error: ${message}`)
+    }
+    immut objectPath = temporary('.o')
+    writeBytes(objectPath, object)?
+    // A new archive (`ar` adds to an existing one).
+    if (file.exists(output)) { file.remove(output) }
+
+    immut archived = system.capture('ar', ['rcs', output, objectPath])
+    file.remove(objectPath)
+
+    return match (archived) {
+        Ok(run) => if (run.status == 0) { Ok() } else { Err(`compile error: ar failed:\n${run.stderr.trim()}`) }
+        Err(_) => Err('compile error: cannot run ar')
+    }
+}
+
+function writeBytes(name: string, bytes: byte[]): Result[void, string] {
+    return match (writeBytesTo(name, bytes)) {
+        Ok(_) => Ok()
+        Err(error) => Err(`compile error: cannot write '${name}': ${ioMessage(error)}`)
+    }
+}
+
+function writeBytesTo(name: string, bytes: byte[]): Result[void, file.FileError] {
+    immut out = file.open(name, file.Write)?
+    return out.writeBytes(bytes)
+}
+
+// Whether the native backend generates the code of this platform (an ELF of x86-64, for Linux): the
+// default there, the C backend elsewhere.
+function nativeHere(): boolean {
+    return system.os == system.Linux and system.architecture == system.X64
+}
+
+// The executable of a program, by the backend of the platform.
+function executable(program: IrProgram, output: string): Result[void, string] {
+    return if (nativeHere()) { linkNative(program, output) } else { compileC(text(generate(program)), output, program.libraries) }
+}
+
 // `kojic build`: the executable, the C or the IR of a program.
 function build(args: string[]) {
     immut options = buildOptions(args)
@@ -304,7 +413,9 @@ function build(args: string[]) {
     immut result = match (options.emit) {
         'ir' => writeFile(options.output, text(programText(program)))
         'c' => writeFile(options.output, text(generate(program)))
-        _ => compileC(text(generate(program)), options.output, program.libraries)
+        'native' => linkNative(program, options.output)
+        'executable-c' => compileC(text(generate(program)), options.output, program.libraries)
+        _ => executable(program, options.output)
     }
 
     match (result) {
@@ -326,9 +437,9 @@ function runProgram(args: string[]) {
             system.exit(1)
         }
     }
-    immut executable = temporary('')
+    immut built = temporary('')
 
-    match (compileC(text(generate(program)), executable, program.libraries)) {
+    match (executable(program, built)) {
         Ok(_) => {}
         Err(message) => {
             printError(message)
@@ -336,14 +447,14 @@ function runProgram(args: string[]) {
         }
     }
 
-    immut code = match (system.run(executable, args[1..])) {
+    immut code = match (system.run(built, args[1..])) {
         Ok(code) => code
         Err(error) => {
             printError(`cannot run the program: ${error}`)
             1
         }
     }
-    file.remove(executable)
+    file.remove(built)
     // A program stopped by a signal has no exit code.
     system.exit(if (code < 0) { 1 } else { code })
 }
@@ -489,9 +600,9 @@ function testCommand(args: string[]) {
                 continue
             }
         }
-        immut executable = temporary('')
+        immut built = temporary('')
 
-        match (compileC(text(generate(lowered)), executable, lowered.libraries)) {
+        match (executable(lowered, built)) {
             Ok(_) => {}
             Err(message) => {
                 print(`FAIL  ${name}\n${indented(message)}`)
@@ -503,7 +614,7 @@ function testCommand(args: string[]) {
         for i in range(lowered.tests.length()) {
             immut title = `${name}: ${testDisplay(lowered.tests[i].name)}`
 
-            match (system.capture(executable, [string(i)])) {
+            match (system.capture(built, [string(i)])) {
                 Ok(run) => {
                     if (run.status == 0) {
                         print(`ok    ${title}`)
@@ -527,7 +638,7 @@ function testCommand(args: string[]) {
             }
         }
 
-        file.remove(executable)
+        file.remove(built)
     }
 
     immut seconds = time.monotonic() - started
@@ -572,10 +683,38 @@ if (command == 'build') {
     system.exit(0)
 }
 
+// `kojic library -o libkoji_runtime.a`: the runtime library, built natively (see "The library of the
+// runtime built by the compiler" in doc/design.md): the machine code of std/koji/ (but `koji:core`),
+// with `koji:prelude` and the code the backend writes for the runtime, alone in an archive.
+if (command == 'library' and args.length() == 3 and args[1] == '-o') {
+    match (buildLibrary(args[2])) {
+        Ok(_) => {}
+        Err(message) => {
+            printError(message)
+            system.exit(1)
+        }
+    }
+
+    system.exit(0)
+}
+
+// The IR of std/koji/ as the native backend gets it (`kojic library`).
+if (command == 'dump' and args.length() == 3 and args[1] == 'inlined' and args[2] == 'library') {
+    match (checkLibrary(true)) {
+        Ok(program) => match (lower(program)) {
+            Ok(lowered) => print(programText(inlineSmall(lowered)).join('\n'))
+            Err(message) => printError(message)
+        }
+        Err(message) => printError(message)
+    }
+
+    system.exit(0)
+}
+
 // The C of std/koji/ (but `koji:core`), which bootstrap/build.sh and build.rs compile into the
 // runtime library.
 if (command == 'dump' and args.length() == 2 and args[1] == 'library') {
-    match (checkLibrary()) {
+    match (checkLibrary(false)) {
         Ok(program) => {
             match (lower(program)) {
                 Ok(lowered) => print(generate(lowered).join('\n'))
@@ -594,7 +733,7 @@ if (command == 'dump' and args.length() == 2 and args[1] == 'library') {
     system.exit(0)
 }
 
-if (command == 'dump' and args.length() == 3 and args[1] in ['tokens', 'ast', 'types', 'ir', 'c']) {
+if (command == 'dump' and args.length() == 3 and args[1] in ['tokens', 'ast', 'types', 'ir', 'inlined', 'c']) {
     dumpStage(args[1], args[2])
     system.exit(0)
 }

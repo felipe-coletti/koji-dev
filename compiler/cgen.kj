@@ -4,8 +4,10 @@
 import { IrExtern, Ty, Operand, Place, Step, Target, IrField, IrRecord, StdArg, Instruction, Terminator, IrFunction, IrProgram, isManaged, itemOf, stringDebug, floatDebug } from 'ir.kj'
 import { preludeLines } from 'prelude.kj'
 import { borrowedParams, borrowedLocals, constantGlobals } from 'borrow.kj'
-import { lastUses } from 'liveness.kj'
+import { lastUses, targetReads } from 'liveness.kj'
+import { Folded, foldFor, platformCondition, platformCount, platformGlobals, readsSystem, reachableFunctions } from 'target.kj'
 import { StackRecords, stackRecords } from 'escape.kj'
+import { globalsSeen } from 'globals.kj'
 
 type Generator = {
     program: IrProgram
@@ -37,6 +39,8 @@ type Generator = {
     // `string(c)` not written, since the next instruction appends `c` instead (or -1), and `c`.
     charLocal: int
     charValue: string
+    // For each function, the globals it may see (globals.kj).
+    seen: Set[int][]
 }
 
 function cType(ty: Ty): string {
@@ -216,7 +220,7 @@ immut inode64 = ['opendir', 'readdir', 'closedir', 'rewinddir', 'telldir', 'seek
 
 // The C source of `program`, line by line.
 export function generate(program: IrProgram): string[] {
-    mut generator: Generator = { program: program, out: [], file: '', escapedFile: '', borrowed: borrowedParams(program), constants: constantGlobals(program), smalls: smallFunctions(program), current: [], live: [], block: 0, position: 0, stacks: stackRecords(program), stack: [:], releases: [], charLocal: -1, charValue: '' }
+    mut generator: Generator = { program: program, out: [], file: '', escapedFile: '', borrowed: borrowedParams(program), constants: constantGlobals(program), smalls: smallFunctions(program), current: [], live: [], block: 0, position: 0, stacks: stackRecords(program), stack: [:], releases: [], charLocal: -1, charValue: '', seen: globalsSeen(program) }
     generator.generateProgram()
     return generator.out
 }
@@ -315,8 +319,28 @@ function Generator.generateProgram(mut self) {
     self.line('')
     immut functions = self.program.functions
 
+    // The functions some system may call (target.kj), each under a condition of the preprocessor
+    // for those systems.
+    mut reachable: boolean[][] = []
+
+    for platform in range(platformCount) {
+        reachable.push(reachableFunctions(self.program, platform))
+    }
+
+    mut systemsOf: int[][] = []
+
     for id in range(functions.length()) {
-        self.line(`${signature(id, functions[id], self.smalls[id])};`)
+        mut systems: int[] = []
+
+        for platform in range(platformCount) {
+            if (reachable[platform][id]) { systems.push(platform) }
+        }
+
+        systemsOf.push(systems)
+    }
+
+    for id in range(functions.length()) {
+        self.guarded(systemsOf[id], `${signature(id, functions[id], self.smalls[id])};`)
     }
 
     // How the runtime shows a value of an opaque type: with its `display` method, or by its name.
@@ -335,8 +359,16 @@ function Generator.generateProgram(mut self) {
     }
 
     for id in range(functions.length()) {
+        if (systemsOf[id].length() == 0) { continue }
+
         self.line('')
+        immut guard = systemsOf[id].length() < platformCount
+
+        if (guard) { self.line(`#if ${platformCondition(systemsOf[id])}`) }
+
         self.emitFunction(id, functions[id])
+
+        if (guard) { self.line('#endif') }
     }
 
     // The functions C calls by their names: they give their values to those of Koji.
@@ -557,7 +589,7 @@ function signature(id: int, routine: IrFunction, inlined: boolean): string {
 // in the large functions of a program. A function's size counts the instructions of the small
 // ones it calls, so inlining stays bounded. Until nothing changes, so a recursive function is
 // never one of them.
-function smallFunctions(program: IrProgram): boolean[] {
+export function smallFunctions(program: IrProgram): boolean[] {
     mut sizes: int[] = []
 
     for routine in program.functions {
@@ -690,7 +722,32 @@ function Generator.emitFunction(mut self, id: int, routine: IrFunction) {
     // prelude), as at the end of each turn of a loop (see `terminator`).
     if (self.preemptible() and not self.smalls[id] and makesCalls(routine)) { self.line('    KOJI_PREEMPT();') }
 
+    // Code for one system (target.kj): each block under a condition of the preprocessor for the
+    // systems that reach it, and a branch on `system.os` chosen by the preprocessor.
+    immut globals = platformGlobals(self.program)
+    immut dependent = readsSystem(routine, globals)
+    mut folds: Folded[] = []
+
+    if (dependent) {
+        for platform in range(platformCount) {
+            folds.push(foldFor(routine, globals, platform))
+        }
+    }
+
     for block in range(routine.blocks.length()) {
+        mut systems: int[] = []
+
+        for platform in range(platformCount) {
+            if (not dependent or folds[platform].reached[block]) { systems.push(platform) }
+        }
+
+        // Reached on no system.
+        if (systems.length() == 0) { continue }
+
+        immut guarded = systems.length() < platformCount
+
+        if (guarded) { self.line(`#if ${platformCondition(systems)}`) }
+
         self.line(`b${block}:;`)
         self.block = block
 
@@ -700,10 +757,60 @@ function Generator.emitFunction(mut self, id: int, routine: IrFunction) {
             self.dropDead(routine)
         }
 
-        self.terminator(routine, routine.blocks[block].terminator)
+        if (dependent and folds[systems[0]].goes[block] >= 0) {
+            self.systemBranch(block, systems, folds)
+        } else {
+            self.terminator(routine, routine.blocks[block].terminator)
+        }
+
+        if (guarded) { self.line('#endif') }
     }
 
     self.line('}')
+}
+
+// A line for some systems: under their condition, none for no system.
+function Generator.guarded(mut self, systems: int[], text: string) {
+    if (systems.length() == 0) { return }
+
+    if (systems.length() == platformCount) {
+        self.line(text)
+        return
+    }
+
+    self.line(`#if ${platformCondition(systems)}`)
+    self.line(text)
+    self.line('#endif')
+}
+
+// A branch that the system decides: a jump for each, chosen by the preprocessor.
+function Generator.systemBranch(mut self, block: int, systems: int[], folds: Folded[]) {
+    mut targets: int[] = []
+
+    for system in systems {
+        if (not (folds[system].goes[block] in targets)) { targets.push(folds[system].goes[block]) }
+    }
+
+    for target in targets {
+        if (target <= block and self.preemptible()) {
+            self.line('    KOJI_PREEMPT();')
+            break
+        }
+    }
+
+    for i in range(targets.length()) {
+        mut chosen: int[] = []
+
+        for system in systems {
+            if (folds[system].goes[block] == targets[i]) { chosen.push(system) }
+        }
+
+        immut keyword = if (i == 0) { '#if' } else { '#elif' }
+        self.line(`${keyword} ${platformCondition(chosen)}`)
+        self.line(`    goto b${targets[i]};`)
+    }
+
+    self.line('#endif')
 }
 
 // Whether a task may be preempted in the code generated: in a program, but neither in the library
@@ -1235,6 +1342,22 @@ function Generator.instruction(mut self, routine: IrFunction, instruction: Instr
                     mut given = false
 
                     match (args[param]) {
+                        // A global that the function does not see: it gives its value the same way.
+                        GlobalOp(global) => {
+                            immut sameRoot = writeback.target.root == GlobalPlace(global) and writeback.target.path.length() == 0
+                            mut alone = not self.seen[callee].has(global)
+
+                            for i in range(args.length()) {
+                                if (i != param and args[i] == GlobalOp(global)) { alone = false }
+                            }
+
+                            if (sameRoot and alone) {
+                                self.line(`    ${cType(ty)} given${param} = koji_g${global};`)
+                                self.line(`    koji_g${global} = NULL;`)
+                                values[param] = `given${param}`
+                                given = true
+                            }
+                        }
                         LocalOp(local) => {
                             immut sameRoot = writeback.target.root == LocalPlace(local) and writeback.target.path.length() == 0
                             mut alone = true
@@ -1251,6 +1374,32 @@ function Generator.instruction(mut self, routine: IrFunction, instruction: Instr
                             }
                         }
                         _ => {}
+                    }
+
+                    // `f(mut self.code)`: the argument is the field, read for the last time. The field
+                    // gives its reference for the call (it is empty meanwhile, and gets the value
+                    // back after), so that the function changes the list in place instead of a copy.
+                    // Only for a local variable that no other argument reads.
+                    if (not given) {
+                        match (self.fromTarget(routine, args, param, writeback.target, callee)) {
+                            Some(temporary) => {
+                                self.line(`    ${cType(ty)} *taken${param} = (${cType(ty)} *)${self.path(writeback.target, line)};`)
+                                self.line(`    ${cType(ty)} given${param} = *taken${param};`)
+                                self.line(`    *taken${param} = NULL;`)
+
+                                // A temporary that holds a reference of its own gives it back now.
+                                if (not self.current[temporary]) {
+                                    match (release(ty)) {
+                                        Some(name) => self.line(`    ${name}(l${temporary}); l${temporary} = NULL;`)
+                                        None => {}
+                                    }
+                                }
+
+                                values[param] = `given${param}`
+                                given = true
+                            }
+                            None => {}
+                        }
                     }
 
                     if (not given) { values[param] = share(ty, values[param]) }
@@ -1663,28 +1812,41 @@ function Generator.instruction(mut self, routine: IrFunction, instruction: Instr
     }
 }
 
+// The temporary of a `mut` argument that is a part of a local variable (`mut self.code`), read for
+// the last time by the call, when no other argument reads the variable: the call can take the
+// reference of the part itself.
+function Generator.fromTarget(self, routine: IrFunction, args: Operand[], param: int, target: Target, callee: int): Option[int] {
+    immut temporary = match (args[param]) {
+        LocalOp(local) => local
+        _ => return None
+    }
+    // The root: a local, or a global the function does not see.
+    immut root = match (target.root) {
+        LocalPlace(local) => LocalOp(local)
+        GlobalPlace(global) => if (self.seen[callee].has(global)) { return None } else { GlobalOp(global) }
+    }
+
+    if (target.path.length() == 0 or root == LocalOp(temporary)) { return None }
+
+    if (not (temporary in self.live[self.block][self.position])) { return None }
+
+    for i in range(args.length()) {
+        if (i != param and (args[i] == root or args[i] == LocalOp(temporary))) { return None }
+
+        // An index or a key of the path that is another argument stays as it is.
+        match (args[i]) {
+            LocalOp(other) if (i != param and targetReads(target, other)) => return None
+            _ => {}
+        }
+    }
+
+    return Some(temporary)
+}
+
 // Releases the values the function owns (before it returns).
 // The local of `value` when this instruction reads it for the last time and owns it (not a
 // borrowed or a `mut` parameter, of a managed type): its reference can move.
 // The target is reached through the local (its root, or a key or index of its path).
-function targetReads(target: Target, local: int): boolean {
-    match (target.root) {
-        LocalPlace(id) => if (id == local) { return true }
-        GlobalPlace(_) => {}
-    }
-
-    for part in target.path {
-        immut step = match (part) {
-            IndexStep(index) => index
-            KeyStep(key) => key
-            FieldStep(_) => continue
-        }
-
-        if (step == LocalOp(local)) { return true }
-    }
-
-    return false
-}
 
 // Releases the values the current instruction read for the last time, instead of at the end of
 // the function: a list or a map no one else sees can then change in place (`self.ids[key] = id`

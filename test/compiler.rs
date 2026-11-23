@@ -32,9 +32,16 @@ fn has_valgrind() -> bool {
     *FOUND.get_or_init(|| Command::new("valgrind").arg("--version").output().is_ok_and(|o| o.status.success()))
 }
 
-/// Builds `path` to `executable` with the compiler written in Koji.
+/// Builds `path` to `executable` with the compiler written in Koji: by its default backend (native on
+/// Linux and x86-64), or the C backend with KOJI_TEST_C set (the tests then check it).
 fn build(path: &Path, executable: &Path) {
-    let built = koji::finish(koji::kojic().arg("build").arg(path).arg("-o").arg(executable), "");
+    let mut command = koji::kojic();
+    command.arg("build");
+    // The native backend is the default; KOJI_TEST_C runs the tests with the C backend.
+    if std::env::var("KOJI_TEST_C").is_ok() {
+        command.arg("--c");
+    }
+    let built = koji::finish(command.arg(path).arg("-o").arg(executable), "");
     assert_eq!(built.code, Some(0), "{} does not compile: {}", path.display(), built.stderr);
 }
 
@@ -2752,6 +2759,56 @@ printError(`${late < 0.1}`)
 }
 
 #[test]
+fn the_native_library_runs_programs() {
+    // The runtime library built natively (`kojic library`, see "The library of the runtime built by
+    // the compiler" in doc/design.md): programs of both backends linked with it do what they do with
+    // the library built from C.
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("compiler");
+    std::fs::create_dir_all(&directory).unwrap();
+    let library = directory.join("libkoji_native.a");
+    let built = koji::finish(koji::kojic().arg("library").arg("-o").arg(&library), "");
+    assert_eq!(built.code, Some(0), "kojic library: {}", built.stderr);
+    let source = "import task\nimport time\n\ntype Shape = {\n    Circle(radius: decimal)\n    Square(side: decimal)\n}\n\nfunction area(shape: Shape): decimal {\n    return match (shape) {\n        Circle(radius) => 3.14 * radius * radius\n        Square(side) => side * side\n    }\n}\n\nmut counts: Map[string, int] = [:]\n\nfor word in 'a b a c b a'.split(' ') {\n    counts[word] = match (counts.get(word)) {\n        Some(count) => count + 1\n        None => 1\n    }\n}\n\nprint(counts)\nprint(area(Circle(1.5)) + area(Square(2.0)))\nprint('Héllo'.upper().chars())\nmut results: int[] = []\n\ntask.group((group) => {\n    for i in range(3) {\n        group.spawn(() => {\n            time.sleep(0.01 * (3 - i))\n            results.push(i)\n        })\n    }\n})\n\nprint(results.length())\nprint(`${1 / 3} ${7 % 3} ${'x'.length()}`)\n";
+    let path = source_file("native_library", source);
+    let expected = compile_and_run(&path);
+    assert!(expected.success, "{}", expected.error);
+    for native in [false, true] {
+        let executable = path.with_extension(if native { "native-library-native" } else { "native-library-c" });
+        let mut command = koji::kojic();
+        command.env("KOJI_RUNTIME", &library).arg("build");
+        command.arg(if native { "--native" } else { "--c" });
+        let built = koji::finish(command.arg(&path).arg("-o").arg(&executable), "");
+        assert_eq!(built.code, Some(0), "{}", built.stderr);
+        let run = if has_valgrind() {
+            Command::new("valgrind").env("KOJI_POOL", "0").args(["-q", "--error-exitcode=99"]).arg(&executable).output().unwrap()
+        } else {
+            Command::new(&executable).output().unwrap()
+        };
+        assert_eq!(String::from_utf8_lossy(&run.stdout), expected.output, "native backend: {}", native);
+        assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));
+    }
+}
+
+#[test]
+fn code_for_one_system() {
+    // A condition on `system.os` is decided when the program is compiled: the branch of another
+    // system is not compiled, so a function of C it calls need not exist here (kqueue is not on
+    // Linux), nor the function of Koji that only it calls.
+    let source = "import system\n\nforeign 'c' {\n    function kqueue(): CInt\n    function epoll_create1(flags: CInt): CInt\n}\n\nfunction poller(): int {\n    return match (system.os) {\n        Linux => epoll_create1(0)\n        MacOS => kqueue()\n        _ => -1\n    }\n}\n\nmatch (system.os) {\n    Linux => print('linux')\n    MacOS => print('macos')\n    Other(name) => print(name)\n    _ => print('another')\n}\n\nif (system.os != system.Windows) { print(poller() >= 0) }\n\nprint(match (system.architecture) {\n    X64 => 'x64'\n    Arm64 => 'arm64'\n    OtherArchitecture(name) => name\n})\n";
+    let system = if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        return;
+    };
+    let architecture = if cfg!(target_arch = "x86_64") { "x64" } else if cfg!(target_arch = "aarch64") { "arm64" } else { return };
+    let expected = format!("{}\ntrue\n{}\n", system, architecture);
+    let expected = expected.as_str();
+    assert_same("one_system", source, expected);
+}
+
+#[test]
 fn foreign_functions_of_the_libraries_of_the_system() {
     let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("compiler");
     let written = directory.join("foreign.txt");
@@ -2980,4 +3037,137 @@ match (cli.parseArgs(todo, ['lst'])) {
 "#,
         "hello ana x1 loud=false []\nhello ana x2 loud=true ['bia', 'caio']\noi ana x3 loud=false []\nhello -ana x1 loud=false []\ngreet: unknown option '--lod' (did you mean '--loud'?)\ngreet: missing <name>\ngreet: '--times' needs an integer, found 'x'\ngreet: '--times' needs a value (<n>)\ngreet 1.0.0\nGreets someone.\nadd: ['buy', 'milk'] high\ntodo: unknown command 'lst' (did you mean 'list'?)\n",
     );
+}
+
+#[test]
+fn the_native_backend_agrees_with_the_c_backend() {
+    // Programs in what the native backend supports yet: the same output, the same panics.
+    let programs = [
+        (
+            "native_numbers",
+            "function fib(n: int): int {\n    if (n < 2) { return n }\n    return fib(n - 1) + fib(n - 2)\n}\n\nimmut limit = 20\nmut total = 0\n\nfor i in range(limit) {\n    total += fib(i)\n}\n\nfor i in range(10, 0, -3) {\n    total = total * 2 - i\n}\n\nprint(total)\nprint(-7 % 3)\nprint(7 / -2)\nprint((6 & 3) | 8)\nprint(10 / 3 > 2 and true)\nprint('x' == 'y' or not false)\n",
+        ),
+        (
+            "native_strings",
+            "function describe(n: int): string {\n    mut text = ''\n    for i in range(n) {\n        text = text + `${i},`\n    }\n    if (text == '0,1,2,') { return 'three' }\n    return text\n}\n\nmut names = 'a'\nnames = names + 'b'\nprint(describe(3))\nprint(describe(5))\nprint(names < 'ac')\nprint(`${names}: ${names.length()}`)\n",
+        ),
+        ("native_overflow", "function grow(n: int): int {\n    return n * 3037000500\n}\n\nprint(grow(1))\nprint(grow(3037000500))\n"),
+        ("native_division", "function divide(a: int, b: int): int {\n    return a / b\n}\n\nprint(divide(9, 2))\nprint(divide(9, 0))\n"),
+    ];
+    for (name, source) in programs {
+        let path = source_file(name, source);
+        let c = path.with_extension("c-backend");
+        let built = koji::finish(koji::kojic().arg("build").arg("--c").arg(&path).arg("-o").arg(&c), "");
+        assert_eq!(built.code, Some(0), "{}: {}", name, built.stderr);
+        let native = path.with_extension("native");
+        let built = koji::finish(koji::kojic().arg("build").arg("--native").arg(&path).arg("-o").arg(&native), "");
+        assert_eq!(built.code, Some(0), "{}: {}", name, built.stderr);
+        let expected = Command::new(&c).output().unwrap();
+        let found = if has_valgrind() {
+            Command::new("valgrind").env("KOJI_POOL", "0").args(["-q", "--error-exitcode=99"]).arg(&native).output().unwrap()
+        } else {
+            Command::new(&native).output().unwrap()
+        };
+        assert_eq!(String::from_utf8_lossy(&found.stdout), String::from_utf8_lossy(&expected.stdout), "{}", name);
+        assert_eq!(String::from_utf8_lossy(&found.stderr), String::from_utf8_lossy(&expected.stderr), "{}", name);
+        assert_eq!(found.status.code(), expected.status.code(), "{}", name);
+    }
+    // The compiler itself, in machine code: it generates the same C as the compiler built by C.
+    let native = Path::new(env!("CARGO_TARGET_TMPDIR")).join("compiler").join("kojic-native");
+    let built = koji::finish(koji::kojic().arg("build").arg("--native").arg("compiler/main.kj").arg("-o").arg(&native), "");
+    assert_eq!(built.code, Some(0), "{}", built.stderr);
+    let program = source_file("native_compiled", "type Shape = {\n    Circle(radius: float)\n    Dot\n}\n\nimmut shapes: Shape[] = [Circle(float(2)), Dot]\nprint(shapes)\n");
+    let expected = koji::finish(koji::kojic().arg("dump").arg("c").arg(&program), "");
+    let mut by_native = Command::new(&native);
+    by_native.env("KOJI_RUNTIME", koji::RUNTIME).arg("dump").arg("c").arg(&program);
+    let found = koji::finish(&mut by_native, "");
+    assert_eq!(found.code, Some(0), "{}", found.stderr);
+    assert!(found.stdout == expected.stdout, "the compiler in machine code generates other C");
+}
+
+#[test]
+fn mut_parts_change_in_place() {
+    // A `mut` argument that is a field (`mut self.code`) or a global gives its reference for the
+    // call, so the function changes it in place: 200,000 pushes take milliseconds, not the minute
+    // that copying the list at each call took. A function that sees the global (itself, through
+    // another function or a closure) gets a copy, and the program stays right.
+    assert_same(
+        "mut_parts",
+        r#"type Box = {
+    code: int[]
+    n: int
+}
+
+function put(mut out: int[], v: int) {
+    out.push(v)
+}
+
+function Box.add(mut self, v: int) {
+    put(mut self.code, v)
+    self.n += 1
+}
+
+mut box: Box = { code: [], n: 0 }
+for i in range(200000) {
+    box.add(i)
+}
+print(box.n, box.code.length(), box.code[199999])
+
+function inside() {
+    mut local: Box = { code: [], n: 0 }
+    for i in range(200000) {
+        local.add(i)
+    }
+    print(local.code.length())
+}
+inside()
+
+// Functions that read the global they are given.
+mut seen: int[] = [1, 2]
+
+function peek(mut items: int[]) {
+    items.push(seen.length())
+}
+
+function peekLater(mut items: int[]) {
+    items.push(count())
+}
+
+function count(): int {
+    return seen.length()
+}
+
+peek(mut seen)
+peekLater(mut seen)
+print(seen)
+
+immut lengths = [() => seen.length()]
+function viaClosure(mut items: int[]) {
+    items.push(lengths[0]())
+}
+viaClosure(mut seen)
+print(seen)
+"#,
+        "200000 200000 199999\n200000\n[1, 2, 2, 3]\n[1, 2, 2, 3, 4]\n",
+    );
+}
+
+#[test]
+fn items_set_and_pushed_in_place() {
+    // The native backend sets and pushes items of a word in place when the list is its own (and
+    // calls the runtime otherwise): an index that is a temporary, a list shared with another
+    // variable (copied first), a `mut` parameter, a list in a field, and lists that grow.
+    let source = "type Box = {\n    items: int[]\n}\n\nfunction mark(mut held: boolean[], which: int[]) {\n    for local in which {\n        held[local] = true\n    }\n\n    for local in which {\n        held[local + 1] = false\n    }\n}\n\nmut held = [false, false, false, false, false, false]\nimmut other = held\nmark(mut held, [1, 3])\nprint(held)\nprint(other)\nmut box: Box = { items: [] }\n\nfor i in range(10) {\n    box.items.push(i * i)\n}\n\nimmut kept = box.items\nbox.items[2] = -1\nbox.items.push(100)\nprint(box.items)\nprint(kept)\nmut chars: char[] = []\n\nfor c in 'héllo'.chars() {\n    chars.push(c)\n}\n\nchars[0] = 'H'\nprint(chars)\nmut flags: boolean[] = []\nflags.push(true)\nimmut copy = flags\nflags.push(false)\nflags[0] = false\nprint(flags)\nprint(copy)\n";
+    let expected = "[false, true, false, true, false, false]\n[false, false, false, false, false, false]\n[0, 1, -1, 9, 16, 25, 36, 49, 64, 81, 100]\n[0, 1, 4, 9, 16, 25, 36, 49, 64, 81]\n['H', 'é', 'l', 'l', 'o']\n[false, false]\n[true]\n";
+    assert_same("items_in_place", source, expected);
+}
+
+#[test]
+fn divisions_by_constants() {
+    // The native backend divides by some constants with a product by a magic number, and by powers
+    // of two with shifts: the quotients round toward zero and the remainders take the sign of the
+    // dividend, on the extremes too.
+    let source = "immut values = [0, 1, -1, 7, -7, 99, -99, 1000001, -1000001, 9223372036854775807, -9223372036854775807 - 1, 123456789012345, -98765432109876]\nfor v in values {\n    immut a = v / 10\n    immut b = v % 10\n    immut c = v / 100\n    immut d = v % 100\n    immut e = v / 16\n    immut f = v % 16\n    immut g = v / 7\n    immut h = v % 7\n    immut k = v / 1000000000\n    immut m = v % 2\n    print(`${v}: ${a} ${b} ${c} ${d} ${e} ${f} ${g} ${h} ${k} ${m}`)\n}\n";
+    let expected = "0: 0 0 0 0 0 0 0 0 0 0\n1: 0 1 0 1 0 1 0 1 0 1\n-1: 0 -1 0 -1 0 -1 0 -1 0 -1\n7: 0 7 0 7 0 7 1 0 0 1\n-7: 0 -7 0 -7 0 -7 -1 0 0 -1\n99: 9 9 0 99 6 3 14 1 0 1\n-99: -9 -9 0 -99 -6 -3 -14 -1 0 -1\n1000001: 100000 1 10000 1 62500 1 142857 2 0 1\n-1000001: -100000 -1 -10000 -1 -62500 -1 -142857 -2 0 -1\n9223372036854775807: 922337203685477580 7 92233720368547758 7 576460752303423487 15 1317624576693539401 0 9223372036 1\n-9223372036854775808: -922337203685477580 -8 -92233720368547758 -8 -576460752303423488 0 -1317624576693539401 -1 -9223372036 0\n123456789012345: 12345678901234 5 1234567890123 45 7716049313271 9 17636684144620 5 123456 1\n-98765432109876: -9876543210987 -6 -987654321098 -76 -6172839506867 -4 -14109347444268 0 -98765 0\n";
+    assert_same("divisions_by_constants", source, expected);
 }

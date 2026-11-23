@@ -20,8 +20,8 @@ export immut coreStringMethods = ['trim', 'split', 'replace', 'startsWith', 'end
 // The internal modules (std/koji/): `koji:core`, compiled with the programs that use it, and those
 // of the library of the runtime written in Koji, compiled once (`kojic dump library`) and linked
 // into every program.
-immut internalModules = ['koji:aes', 'koji:bignum', 'koji:chacha', 'koji:closure', 'koji:core', 'koji:decimal', 'koji:ecc', 'koji:list', 'koji:map', 'koji:memory', 'koji:numbers', 'koji:output', 'koji:record', 'koji:roots', 'koji:rsa', 'koji:ryu', 'koji:sha', 'koji:start', 'koji:task', 'koji:text', 'koji:tls', 'koji:unicode', 'koji:x25519', 'koji:x509']
-export immut libraryModules = ['koji:aes', 'koji:bignum', 'koji:chacha', 'koji:closure', 'koji:decimal', 'koji:ecc', 'koji:list', 'koji:map', 'koji:memory', 'koji:numbers', 'koji:output', 'koji:record', 'koji:roots', 'koji:rsa', 'koji:ryu', 'koji:sha', 'koji:start', 'koji:task', 'koji:text', 'koji:tls', 'koji:unicode', 'koji:x25519', 'koji:x509']
+immut internalModules = ['koji:aes', 'koji:bignum', 'koji:chacha', 'koji:closure', 'koji:core', 'koji:decimal', 'koji:ecc', 'koji:list', 'koji:map', 'koji:memory', 'koji:net', 'koji:numbers', 'koji:output', 'koji:prelude', 'koji:record', 'koji:roots', 'koji:rsa', 'koji:ryu', 'koji:sha', 'koji:start', 'koji:task', 'koji:text', 'koji:tls', 'koji:unicode', 'koji:x25519', 'koji:x509']
+export immut libraryModules = ['koji:aes', 'koji:bignum', 'koji:chacha', 'koji:closure', 'koji:decimal', 'koji:ecc', 'koji:list', 'koji:map', 'koji:memory', 'koji:net', 'koji:numbers', 'koji:output', 'koji:prelude', 'koji:record', 'koji:roots', 'koji:rsa', 'koji:ryu', 'koji:sha', 'koji:start', 'koji:task', 'koji:text', 'koji:tls', 'koji:unicode', 'koji:x25519', 'koji:x509']
 
 type SymbolKind = {
     ValueSymbol
@@ -1983,7 +1983,7 @@ function Checker.unsafeModule(mut self): int {
 
     mut module: ModuleInfo = { display: 'koji:unsafe', members: [:], types: [:], private: Set.from([]) }
 
-    for member in ['allocate', 'free', 'read', 'write', 'panicAt', 'offset', 'distance', 'stringBytes', 'stringSize', 'newString', 'nullAddress', 'isNull', 'wide', 'lowWord', 'highWord', 'leadingZeros', 'wordProduct', 'wideToFloat', 'decimalLow', 'decimalHigh', 'decimalOf', 'blankString', 'stringReferences', 'stringCapacity', 'setStringSize', 'charOfCode', 'truncate', 'reserve', 'listItems', 'setListLength', 'locationAddress', 'sharedGet', 'sharedSet'] {
+    for member in ['allocate', 'free', 'read', 'write', 'panicAt', 'offset', 'distance', 'stringBytes', 'stringSize', 'newString', 'nullAddress', 'isNull', 'wide', 'lowWord', 'highWord', 'leadingZeros', 'wordProduct', 'wideToFloat', 'decimalLow', 'decimalHigh', 'decimalOf', 'blankString', 'stringReferences', 'stringCapacity', 'setStringSize', 'charOfCode', 'truncate', 'reserve', 'listItems', 'setListLength', 'locationAddress', 'sharedGet', 'sharedSet', 'switchStacks', 'taskEntry', 'floatControl', 'valgrind', 'aesRound', 'aesLastRound', 'carrylessProduct', 'reverseBytes', 'aesAvailable'] {
         module.members[member] = builtinSymbol(`unsafe.${member}`)
     }
 
@@ -1996,6 +1996,9 @@ function Checker.unsafeModule(mut self): int {
     module.types['CInt'] = KnownType(IntType)
     // The `size_t` of C (unsigned, 64 bits), in `extern` declarations: an `int` in Koji.
     module.types['CSize'] = KnownType(IntType)
+    // The last parameter of an `extern` declaration of a variadic function of C (`fcntl`): there,
+    // the arguments of C's `...` start (one, an `int` in Koji, a word for C).
+    module.types['CVariadic'] = KnownType(IntType)
     self.modules.push(module)
     immut id = self.modules.length() - 1
     self.stdlib['koji:unsafe'] = id
@@ -5350,6 +5353,44 @@ function Checker.checkBuiltinCall(mut self, name: string, args: Node[], expected
             self.checkExactly(name, types, [IntType, IntType])?
             return Ok(DecimalType)
         }
+        // Instructions of the processor (see "Instructions of the processor" in doc/design.md): the
+        // switch between the stacks of two tasks (koji:task), where a new task starts, the control
+        // words of floating point (which a new task takes), a request to valgrind.
+        'unsafe.switchStacks' => {
+            self.checkExactly(name, types, [named(b.address), named(b.address)])?
+            return Ok(VoidType)
+        }
+        'unsafe.taskEntry' => {
+            self.checkExactly(name, types, [])?
+            return Ok(named(b.address))
+        }
+        'unsafe.floatControl' => {
+            self.checkExactly(name, types, [])?
+            return Ok(IntType)
+        }
+        'unsafe.valgrind' => {
+            self.checkExactly(name, types, [IntType, IntType, IntType, IntType])?
+            return Ok(IntType)
+        }
+        // A round of AES (aesenc: ShiftRows, SubBytes, MixColumns, then the round key), its last round
+        // (aesenclast, without MixColumns), the product without carries of two words (pclmulqdq), the
+        // bytes of a word in the other order (bswap), and whether the processor has them.
+        other if (other == 'unsafe.aesRound' or other == 'unsafe.aesLastRound') => {
+            self.checkExactly(name, types, [U128Type, U128Type])?
+            return Ok(U128Type)
+        }
+        'unsafe.carrylessProduct' => {
+            self.checkExactly(name, types, [IntType, IntType])?
+            return Ok(U128Type)
+        }
+        'unsafe.reverseBytes' => {
+            self.checkExactly(name, types, [IntType])?
+            return Ok(IntType)
+        }
+        'unsafe.aesAvailable' => {
+            self.checkExactly(name, types, [])?
+            return Ok(BooleanType)
+        }
         // The address 0, which C calls NULL.
         'unsafe.nullAddress' => {
             self.checkExactly(name, types, [])?
@@ -6018,10 +6059,14 @@ function Checker.missingPattern(self, types: Type[], rows: Pattern[][]): Option[
 
 // Checks the file at `path` and every module it imports.
 // The library of the runtime written in Koji: its modules, imported by a module of its own.
-export function checkLibrary(): Result[Program, string] {
+// The library of the runtime: for the native backend (`kojic library`), with `koji:prelude`, the part
+// of runtime/prelude.h that the C backend keeps in C (`kojic dump library` leaves it out).
+export function checkLibrary(native: boolean): Result[Program, string] {
     mut lines: string[] = []
 
     for i in range(libraryModules.length()) {
+        if (libraryModules[i] == 'koji:prelude' and not native) { continue }
+
         lines.push(`import library${i} from '${libraryModules[i]}'`)
     }
 
