@@ -33,8 +33,9 @@ export type MCallee = {
     MFunction(id: int)
     // A function of another object (the runtime library, C), by its name.
     MExternal(name: string)
-    // One of C that takes as many arguments as it is given (al tells how many in vector registers).
-    MVariadic(name: string)
+    // One of C that takes as many arguments as it is given after its `fixed` ones (on x86-64, al
+    // tells how many are in vector registers; on arm64 for macOS, those after go on the stack).
+    MVariadic(name: string, fixed: int)
     // The code at the address in a register.
     MIndirect(value: MValue)
 }
@@ -79,8 +80,9 @@ export type MInstruction = {
     // request at the address given, `otherwise` its answer when not under valgrind).
     MMachine(dests: int[], op: string, args: MValue[])
     // The arguments of the next call (their positions) that start a value of two words: by the
-    // convention, one that does not fit whole in the registers goes on the stack whole.
-    MPairs(starts: int[])
+    // convention, one that does not fit whole in the registers goes on the stack whole; those of
+    // `aligned` (U128) start at an even register on arm64.
+    MPairs(starts: int[], aligned: int[])
     // A reference more to the value at the address (none for 0): its first word counts them.
     MRetain(value: MValue)
     // A reference less, the last one freeing the value (koji_<kind>_free; a record by its type),
@@ -121,8 +123,13 @@ export type MFunctionCode = {
     panics: MPanic[]
     // The classes of the results (floats or words), for the return.
     results: boolean[]
-    // The parameters (their positions in `params`) that start a value of two words.
+    // The parameters (their positions in `params`) that start a value of two words, and those of
+    // them aligned on 16 bytes (see `MPairs`).
     pairs: int[]
+    aligned: int[]
+    // The blocks rarely run (panics, slow paths): their calls save the registers alive across them
+    // themselves, so that the allocator does not count them (see `allocate`).
+    cold: boolean[]
 }
 
 // The text of a function of the machine IR (`kojic dump mir`).
@@ -201,7 +208,7 @@ function instructionText(instruction: MInstruction, code: MFunctionCode): string
             immut target = match (callee) {
                 MFunction(id) => `f${id}`
                 MExternal(name) => name
-                MVariadic(name) => `${name}...`
+                MVariadic(name, fixed) => `${name}(${fixed}...)`
                 MIndirect(value) => `*${valueText(value, code)}`
             }
             immut prefix = if (written.length() > 0) { `${written.join(', ')} = ` } else { '' }
@@ -224,7 +231,7 @@ function instructionText(instruction: MInstruction, code: MFunctionCode): string
 
             `${written.join(', ')} = wide ${op} ${read.join(', ')}`
         }
-        MPairs(starts) => `pairs ${starts}`
+        MPairs(starts, aligned) => `pairs ${starts} ${aligned}`
         MMachine(dests, op, args) => {
             mut written: string[] = []
 
@@ -273,4 +280,37 @@ function terminatorText(terminator: MTerminator, code: MFunctionCode): string {
             `switch ${valueText(value, code)}, [${names.join(', ')}], b${otherwise}`
         }
     }
+}
+
+// What an emitter (x64.kj, a64.kj) gives for a function: its bytes, with the relocations, the calls of
+// other functions of the program and the texts that the object holds (native.kj puts them in it).
+
+// A relocation of the code: at an offset, to a symbol or a section, of a kind of ELF.
+export type EmittedRelocation = {
+    at: int
+    symbol: string
+    kind: int
+    addend: int
+}
+
+// A call of a function of the program (its number), or a reference to a text of the constants:
+// where, and the kind of the relocation (0 on x86-64: a displacement of 32 bits from its end, which
+// native.kj patches).
+export type EmittedUse = {
+    at: int
+    target: int
+    kind: int
+}
+
+export type EmittedText = {
+    at: int
+    text: string
+    kind: int
+}
+
+export type Emitted = {
+    code: byte[]
+    relocations: EmittedRelocation[]
+    calls: EmittedUse[]
+    texts: EmittedText[]
 }

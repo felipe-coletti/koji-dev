@@ -3259,3 +3259,91 @@ fn the_machine_ir_counts_references() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "ab0ab1ab2ab3\ny\ntrue\nstart,one,ab0ab1ab2ab3\nlessequalgreater\n2.5true1\nqqw\ntrue\n6 12\nabcdabcd\nqqp\nabcdabcd!abcdabcd!\ngh\n3\n0x1.8p2\n");
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
 }
+
+#[test]
+fn koji_generates_arm64() {
+    // The emitter of arm64 (compiler/a64.kj, KOJI_TARGET=arm64): a program of ints, floats, strings,
+    // records, lists, maps, closures, tasks and a panic, linked by Koji's linker with the native
+    // library for arm64, run under qemu: the same output as on x86-64. Only where qemu-aarch64 and
+    // the C library of arm64 (/usr/aarch64-linux-gnu, with qemu's -L) are.
+    let qemu = Command::new("qemu-aarch64").arg("--version").output().is_ok_and(|o| o.status.success());
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) || !qemu || !Path::new("/usr/aarch64-linux-gnu/lib/libc.so.6").exists() {
+        return;
+    }
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("arm64");
+    std::fs::create_dir_all(&directory).unwrap();
+    // The native library for arm64, built by kojic itself.
+    let runtime = directory.join("libkoji.a");
+    let library = koji::finish(koji::kojic().env("KOJI_TARGET", "arm64").arg("library").arg("-o").arg(&runtime), "");
+    assert_eq!(library.code, Some(0), "{}", library.stderr);
+    let source = "type Shape = {\n    Circle(radius: float)\n    Rect(w: int, h: int, name: string)\n}\nfunction area(s: Shape): string {\n    return match (s) {\n        Circle(r) => string(r * r)\n        Rect(w, h, name) => `${name}:${w * h}`\n    }\n}\nfunction fib(n: int): int {\n    if (n < 2) { return n }\n    return fib(n - 1) + fib(n - 2)\n}\nfunction adder(n: int): (int) => int {\n    return (x) => x + n\n}\nmut counts: Map[string, int] = [:]\nfor word in ['a', 'b', 'a'] {\n    match (counts.get(word)) {\n        Some(n) => counts[word] = n + 1\n        None => counts[word] = 1\n    }\n}\nmut text = ''\nfor i in range(5) {\n    text += string(i)\n}\nimmut shapes = [Circle(float(1.5)), Rect(2, 3, 'r')]\nfor s in shapes {\n    print(area(s))\n}\nprint(`${fib(20)} ${counts} ${text} ${adder(3)(4)} ${1.25 + 2.5}`)\nimport task\nmut order: int[] = []\ntask.group((group) => {\n    for i in range(3) {\n        group.spawn(() => order.push(i))\n    }\n})\nprint(order.length())\nprint([3, 1, 2][5])\n";
+    let path = source_file("arm64", source);
+    let executable = directory.join("arm64");
+    let built = koji::finish(koji::kojic().env("KOJI_TARGET", "arm64").env("KOJI_LINKER", "koji").env("KOJI_RUNTIME", &runtime).arg("build").arg(&path).arg("--native").arg("-o").arg(&executable), "");
+    assert_eq!(built.code, Some(0), "{}", built.stderr);
+    let run = Command::new("qemu-aarch64").args(["-L", "/usr/aarch64-linux-gnu"]).arg(&executable).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "0x1.2p1\nr:6\n6765 ['a': 2, 'b': 1] 01234 7 3.75\n3\n");
+    assert!(String::from_utf8_lossy(&run.stderr).contains("index 5 out of range (length 3)"), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(run.status.code(), Some(1));
+}
+
+#[test]
+fn koji_generates_macos_objects() {
+    // Objects of Mach-O for macOS on arm64 and on x86-64 (compiler/macho.kj, KOJI_TARGET=macos-arm64
+    // and macos-x64): the native library (an archive of BSD) and a program, linked by lld's linker
+    // for Mach-O with a libSystem of the symbols they need, none of Linux. Nothing here runs a
+    // program of macOS: the test checks that the linker of macOS takes them. Only where ld64.lld and
+    // llvm-nm are.
+    let linker = ["ld64.lld", "/usr/lib/llvm-18/bin/ld64.lld"].into_iter().find(|tool| Command::new(tool).arg("--version").output().is_ok_and(|o| o.status.success()));
+    let nm = Command::new("llvm-nm").arg("--version").output().is_ok_and(|o| o.status.success());
+    let Some(linker) = linker else { return };
+    if !nm || !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        return;
+    }
+    macos_objects(linker, "macos-arm64", "arm64", 0x0C);
+    macos_objects(linker, "macos-x64", "x86_64", 0x07);
+}
+
+fn macos_objects(linker: &str, target: &str, arch: &str, cpu: u8) {
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join(target);
+    std::fs::create_dir_all(directory.join("sdk/usr/lib")).unwrap();
+    let library = directory.join("libkoji.a");
+    let built = koji::finish(koji::kojic().env("KOJI_TARGET", target).arg("library").arg("-o").arg(&library), "");
+    assert_eq!(built.code, Some(0), "{}", built.stderr);
+    let source = "import task\nimport file\nfunction fib(n: int): int {\n    if (n < 2) { return n }\n    return fib(n - 1) + fib(n - 2)\n}\ntask.group((group) => {\n    group.spawn(() => print(file.exists('/')))\n})\nprint(`${fib(20)} ${1.5 + 2.25}`)\n";
+    let path = source_file(target, source);
+    let object = directory.join("macos.o");
+    let built = koji::finish(koji::kojic().env("KOJI_TARGET", target).arg("build").arg(&path).arg("--emit").arg("object").arg("-o").arg(&object), "");
+    assert_eq!(built.code, Some(0), "{}", built.stderr);
+    let bytes = std::fs::read(&object).unwrap();
+    assert_eq!(&bytes[..8], &[0xCF, 0xFA, 0xED, 0xFE, cpu, 0x00, 0x00, 0x01], "not an object of Mach-O for {}", arch);
+    // The symbols they need from libSystem.
+    let symbols = |args: &[&str]| -> std::collections::BTreeSet<String> {
+        let out = Command::new("llvm-nm").args(args).arg(&object).arg(&library).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).lines().filter(|line| !line.ends_with(':') && !line.is_empty()).map(|line| line.split_whitespace().last().unwrap().to_string()).collect()
+    };
+    let defined = symbols(&["-g", "--defined-only"]);
+    let needed: Vec<String> = symbols(&["-u"]).into_iter().filter(|name| !defined.contains(name)).collect();
+    for linux in ["_getauxval", "___errno_location", "_epoll_create1", "_environ"] {
+        assert!(!needed.iter().any(|name| name == linux), "{} is of Linux", linux);
+    }
+    let quoted: Vec<String> = needed.iter().chain(["dyld_stub_binder".to_string()].iter()).map(|name| format!("'{}'", name)).collect();
+    std::fs::write(directory.join("sdk/usr/lib/libSystem.tbd"), format!("--- !tapi-tbd\ntbd-version: 4\ntargets: [ {arch}-macos ]\ninstall-name: '/usr/lib/libSystem.B.dylib'\ncurrent-version: 1319\nexports:\n  - targets: [ {arch}-macos ]\n    symbols: [ {} ]\n...\n", quoted.join(", "))).unwrap();
+    let executable = directory.join("macos");
+    let linked = Command::new(linker).args(["-arch", arch, "-platform_version", "macos", "11.0", "11.0", "-syslibroot"]).arg(directory.join("sdk")).arg("-lSystem").arg("-o").arg(&executable).arg(&object).arg(&library).output().unwrap();
+    assert!(linked.status.success(), "{}", String::from_utf8_lossy(&linked.stderr));
+    assert_eq!(&std::fs::read(&executable).unwrap()[..4], &[0xCF, 0xFA, 0xED, 0xFE]);
+    // Koji's linker of Mach-O (compiler/machlink.kj): an executable that llvm-objdump reads, with its
+    // entry, its binding to libSystem and its signature.
+    let own = directory.join("macos-own");
+    let built = koji::finish(koji::kojic().env("KOJI_TARGET", target).env("KOJI_LINKER", "koji").env("KOJI_RUNTIME", &library).arg("build").arg(&path).arg("--native").arg("-o").arg(&own), "");
+    assert_eq!(built.code, Some(0), "{}", built.stderr);
+    let commands = Command::new("llvm-objdump").args(["--macho", "-p"]).arg(&own).output().unwrap();
+    assert!(commands.status.success(), "{}", String::from_utf8_lossy(&commands.stderr));
+    let text = String::from_utf8_lossy(&commands.stdout);
+    for command in ["LC_MAIN", "LC_DYLD_INFO_ONLY", "LC_LOAD_DYLINKER", "LC_CODE_SIGNATURE", "/usr/lib/libSystem.B.dylib"] {
+        assert!(text.contains(command), "no {} in the executable", command);
+    }
+    let binds = Command::new("llvm-objdump").args(["--macho", "--bind"]).arg(&own).output().unwrap();
+    assert!(String::from_utf8_lossy(&binds.stdout).contains("libSystem        _kevent"));
+}

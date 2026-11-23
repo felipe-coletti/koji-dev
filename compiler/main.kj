@@ -12,7 +12,9 @@ import { lower, lowerTests } from 'lower.kj'
 import { IrProgram, programText } from 'ir.kj'
 import { generate } from 'cgen.kj'
 import { generateNative } from 'native.kj'
-import { inlineSmall } from 'inline.kj'
+import { inlineSmall, targetPlatform } from 'inline.kj'
+import { machArchive } from 'macho.kj'
+import { machArchiveObjects, linkMach } from 'machlink.kj'
 import { archive, archiveObjects, linkExecutable, sharedSymbols } from 'linker.kj'
 import { preludeLines } from 'prelude.kj'
 import { serve } from 'lsp.kj'
@@ -30,6 +32,7 @@ immut usage = [
     '        -o <output>                   the executable (default: the file name without .kj)',
     '        --emit c                      write the generated C instead',
     '        --emit ir                     write the intermediate representation instead',
+    '        --emit object                 write the object file of the native backend instead',
     '        --c                           generate C and compile it with the C compiler (the default',
     '                                      where the native backend is not yet: not Linux on x86-64)',
     '    kojic dump tokens <file.kj>       show the tokens of a file (for comparing compilers)',
@@ -159,7 +162,7 @@ type Build = {
     emit: string
 }
 
-// The options of `kojic build <file.kj> [-o <output>] [--emit c|ir]`.
+// The options of `kojic build <file.kj> [-o <output>] [--emit c|ir|object]`.
 function buildOptions(args: string[]): Build {
     mut source: Option[string] = None
     mut output: Option[string] = None
@@ -188,13 +191,13 @@ function buildOptions(args: string[]): Build {
         }
 
         if (arg == '--emit') {
-            if (i < args.length() and (args[i] == 'c' or args[i] == 'ir')) {
+            if (i < args.length() and (args[i] == 'c' or args[i] == 'ir' or args[i] == 'object')) {
                 emit = args[i]
                 i += 1
                 continue
             }
 
-            printError(`--emit takes 'c' or 'ir'\n\n${usage}`)
+            printError(`--emit takes 'c', 'ir' or 'object'\n\n${usage}`)
 
             system.exit(2)
         }
@@ -331,11 +334,28 @@ function linkNative(program: IrProgram, output: string): Result[void, string] {
         None => return Err('compile error: the runtime library (libkoji_runtime.a) is not next to kojic: set KOJI_RUNTIME to its path')
     }
 
-    // Koji's linker (linker.kj), for a program without libraries of foreign blocks; the system's
+    // Koji's linker (linker.kj), for a program without libraries of foreign blocks but the C ones; the system's
     // when it cannot link the objects (KOJI_LINKER=koji to see why), or with KOJI_LINKER=system.
     immut chosen = variable('KOJI_LINKER', '')
 
-    if (program.libraries.length() == 0 and chosen != 'system') {
+    // The libraries it links always (the C library, its mathematics and its threads) may be named.
+    mut others = false
+
+    for library in program.libraries {
+        if (not (library in ['c', 'm', 'pthread'])) { others = true }
+    }
+
+    // For macOS, its linker of Mach-O (machlink.kj).
+    if (not others and chosen != 'system' and targetPlatform() / 3 == 1) {
+        match (linkMachOwn(object, runtime, output)) {
+            Ok(_) => return Ok()
+            Err(message) => {
+                if (chosen == 'koji') { return Err(`compile error: ${message}`) }
+            }
+        }
+    }
+
+    if (not others and chosen != 'system' and targetPlatform() / 3 != 1) {
         match (linkOwn(object, runtime, output)) {
             Ok(_) => return Ok()
             Err(message) => {
@@ -374,6 +394,29 @@ function linkNative(program: IrProgram, output: string): Result[void, string] {
 // The executable of the object of a program and of the runtime library, by Koji's linker, with the
 // libraries of C of the system: the C library and its mathematics (and its threads, on systems
 // where they are a library of their own).
+// A program for macOS by Koji's linker of Mach-O: the object and those of the archive of the runtime.
+function linkMachOwn(object: byte[], runtime: string, output: string): Result[void, string] {
+    immut library = match (file.open(runtime, file.Read)) {
+        Ok(opened) => match (opened.readBytes()) {
+            Ok(bytes) => bytes
+            Err(error) => return Err(`cannot read '${runtime}': ${ioMessage(error)}`)
+        }
+        Err(error) => return Err(`cannot read '${runtime}': ${ioMessage(error)}`)
+    }
+    mut objects = [object]
+
+    for member in machArchiveObjects(library)? {
+        objects.push(member)
+    }
+
+    immut executable = linkMach(objects)?
+    writeBytes(output, executable)?
+    return match (file.setPermissions(output, 0x1ED)) {
+        Ok(_) => Ok()
+        Err(error) => Err(`cannot make '${output}' executable: ${ioMessage(error)}`)
+    }
+}
+
 function linkOwn(object: byte[], runtime: string, output: string): Result[void, string] {
     immut library = match (file.open(runtime, file.Read)) {
         Ok(opened) => match (opened.readBytes()) {
@@ -396,7 +439,10 @@ function linkOwn(object: byte[], runtime: string, output: string): Result[void, 
     for name in ['libc.so.6', 'libm.so.6', 'libpthread.so.0'] {
         mut found = ''
 
-        for directory in ['/lib/x86_64-linux-gnu', '/usr/lib/x86_64-linux-gnu', '/lib64', '/usr/lib64', '/lib', '/usr/lib'] {
+        // Those of arm64 (on another system, those of its tools for arm64), or of x86-64.
+        immut directories = if (targetPlatform() == 1) { ['/lib/aarch64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/aarch64-linux-gnu/lib'] } else { ['/lib/x86_64-linux-gnu', '/usr/lib/x86_64-linux-gnu', '/lib64', '/usr/lib64', '/lib', '/usr/lib'] }
+
+        for directory in directories {
             if (found == '' and file.exists(path.join(directory, name))) { found = path.join(directory, name) }
         }
 
@@ -439,7 +485,8 @@ function buildLibrary(output: string): Result[void, string] {
         Err(message) => return Err(`compile error: ${message}`)
     }
     // An archive of the object, with the table of its symbols (linker.kj).
-    return writeBytes(output, archive([object]))
+    // For macOS, an archive of BSD (its linker reads no other).
+    return writeBytes(output, if (targetPlatform() / 3 == 1) { machArchive([object]) } else { archive([object]) })
 }
 
 function writeBytes(name: string, bytes: byte[]): Result[void, string] {
@@ -454,10 +501,10 @@ function writeBytesTo(name: string, bytes: byte[]): Result[void, file.FileError]
     return out.writeBytes(bytes)
 }
 
-// Whether the native backend generates the code of this platform (an ELF of x86-64, for Linux): the
-// default there, the C backend elsewhere.
+// Whether the native backend generates the code of this platform (an ELF of x86-64 or arm64, for
+// Linux): the default there, the C backend elsewhere.
 function nativeHere(): boolean {
-    return system.os == system.Linux and system.architecture == system.X64
+    return system.os == system.Linux and (system.architecture == system.X64 or system.architecture == system.Arm64)
 }
 
 // The executable of a program, by the backend of the platform.
@@ -479,6 +526,10 @@ function build(args: string[]) {
         'ir' => writeFile(options.output, text(programText(program)))
         'c' => writeFile(options.output, text(generate(program)))
         'native' => linkNative(program, options.output)
+        'object' => match (generateNative(program)) {
+            Ok(bytes) => writeBytes(options.output, bytes)
+            Err(message) => Err(`compile error: ${message}`)
+        }
         'executable-c' => compileC(text(generate(program)), options.output, program.libraries)
         _ => executable(program, options.output)
     }

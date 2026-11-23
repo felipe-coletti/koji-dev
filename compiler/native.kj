@@ -14,6 +14,7 @@
 // with its own reference, and the address where the function writes its last value, after the
 // other parameters (as in the C backend).
 
+import { reusedLoads, foldedCopies } from 'mirloads.kj'
 import { Ty, Operand, IrFunction, IrProgram, IrExtern, IrForC } from 'ir.kj'
 import { globalsSeen } from 'globals.kj'
 import { borrowedParams, constantGlobals } from 'borrow.kj'
@@ -24,6 +25,8 @@ import { MValue, MAddress, MCallee, MInstruction, MTerminator, MFunctionCode, mi
 import { MBuilder, builder } from 'mircode.kj'
 import { allocate } from 'mirregs.kj'
 import { emitX64, x64Registers } from 'x64.kj'
+import { emitA64, a64Registers } from 'a64.kj'
+import { MachSymbol, MachRelocation, machObject } from 'macho.kj'
 import system
 
 immut rsi = 6
@@ -47,6 +50,8 @@ type FunctionUse = {
     at: int
     target: int
     inData: boolean
+    // The kind of the relocation of the code (see `EmittedUse`): 0 on x86-64, patched.
+    kind: int
 }
 
 // An argument of a call.
@@ -80,6 +85,9 @@ type Native = {
     // The `blocking` functions of foreign blocks called: the places of their jobs' code.
     trampolines: Map[string, int]
     trampolineUses: Relocation[]
+    // Whether the object is for arm64, else x86-64; for macOS (a Mach-O), else Linux (an ELF).
+    arm: boolean
+    macos: boolean
     // For each function, the globals it may see (globals.kj).
     seen: Set[int][]
     // For each function, its borrowed parameters, and the globals that never change (borrow.kj):
@@ -97,7 +105,7 @@ export function generateNative(given: IrProgram): Result[byte[], string] {
 
     mut native: Native = {
         program: program, code: [], rodata: [], data: [], bss: 0, relocations: [], dataRelocations: [], uses: [], starts: [], texts: [:], strings: [], globals: [], records: [],
-        trampolines: [:], trampolineUses: [], seen: globalsSeen(program), borrowed: borrowedParams(program), constants: constantGlobals(program), trampolineStart: 0
+        trampolines: [:], trampolineUses: [], seen: globalsSeen(program), borrowed: borrowedParams(program), constants: constantGlobals(program), trampolineStart: 0, arm: targetPlatform() % 3 == 1, macos: targetPlatform() / 3 == 1
     }
 
     // The strings of the program: blocks of strings that are never freed (their count of
@@ -121,7 +129,7 @@ export function generateNative(given: IrProgram): Result[byte[], string] {
     native.recordDescriptions()
 
     // The functions the program may call on its system (target.kj); the others have no code.
-    immut reachable = reachableFunctions(program, targetPlatform)
+    immut reachable = reachableFunctions(program, targetPlatform())
 
     // Each function through the machine IR (mir.kj): lowered, its registers allocated, encoded.
     for id in range(program.functions.length()) {
@@ -194,9 +202,15 @@ export function generateNative(given: IrProgram): Result[byte[], string] {
         if (use.inData) {
             native.dataRelocations.push({ at: use.at, symbol: '.text', kind: absolute64, addend: target })
         } else {
-            native.patch32(use.at, target - (use.at + 4))
+            if (use.kind == 0) {
+                native.patch32(use.at, target - (use.at + 4))
+            } else {
+                native.relocations.push({ at: use.at, symbol: '.text', kind: use.kind, addend: target })
+            }
         }
     }
+
+    if (native.macos) { return Ok(machOf(native, extras, exported)) }
 
     return Ok(elfObject(native, mainStart, extras, exported))
 }
@@ -220,22 +234,41 @@ type Export = {
 function Native.runtimeCode(mut self): Export[] {
     mut exported: Export[] = []
 
-    // Saves the registers that calls keep, the control words of floating point, and the top of the
-    // stack at `save` (rdi); goes on with the stack at `to` (rsi), restoring them from it.
-    exported.push(self.stub('koji_task_switch', [
-        0x55, 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57,
-        0x48, 0x83, 0xEC, 0x08, 0x0F, 0xAE, 0x1C, 0x24, 0xD9, 0x7C, 0x24, 0x04,
-        0x48, 0x89, 0x27, 0x48, 0x89, 0xF4,
-        0x0F, 0xAE, 0x14, 0x24, 0xD9, 0x6C, 0x24, 0x04, 0x48, 0x83, 0xC4, 0x08,
-        0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C, 0x5B, 0x5D, 0xC3
-    ]))
-    // A new task: koji_task_main(task), the task in rbx (koji_task_stack_start), on an aligned stack.
-    immut entry = self.code.length()
-    self.bytes([0x48, 0x89, 0xDF, 0x48, 0x83, 0xE4, 0xF0, 0xE8])
-    self.relocation('koji_task_main', plt32, -4)
-    self.int32(0)
-    self.bytes([0x0F, 0x0B])
-    exported.push({ name: 'koji_task_entry', at: entry, size: self.code.length() - entry, section: 1 })
+    if (self.arm) {
+        // Saves x19 to x30, d8 to d15 and fpcr below the stack, its top at `save` (x0); goes on
+        // with the stack at `to` (x1), restoring them from it (the layout of stackStart in
+        // std/koji/task.kj).
+        exported.push(self.stub('koji_task_switch', wordBytes([
+            0xD102C3FF, 0xA90053F3, 0xA9015BF5, 0xA90263F7, 0xA9036BF9, 0xA90473FB, 0xA9057BFD, 0x6D0627E8, 0x6D072FEA, 0x6D0837EC, 0x6D093FEE,
+            0xD53B4409, 0xF90053E9, 0x910003E9, 0xF9000009, 0x9100003F, 0xF94053E9, 0xD51B4409,
+            0xA94053F3, 0xA9415BF5, 0xA94263F7, 0xA9436BF9, 0xA94473FB, 0xA9457BFD, 0x6D4627E8, 0x6D472FEA, 0x6D4837EC, 0x6D493FEE,
+            0x9102C3FF, 0xD65F03C0
+        ])))
+        // A new task: koji_task_main(task), the task in x19: mov x0, x19; bl koji_task_main; brk 1
+        immut entry = self.code.length()
+        self.bytes(wordBytes([0xAA1303E0]))
+        self.relocation('koji_task_main', 283, 0)
+        self.bytes(wordBytes([0x94000000, 0xD4200020]))
+        exported.push({ name: 'koji_task_entry', at: entry, size: self.code.length() - entry, section: 1 })
+    } else {
+        // Saves the registers that calls keep, the control words of floating point, and the top of
+        // the stack at `save` (rdi); goes on with the stack at `to` (rsi), restoring them from it.
+        exported.push(self.stub('koji_task_switch', [
+            0x55, 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57,
+            0x48, 0x83, 0xEC, 0x08, 0x0F, 0xAE, 0x1C, 0x24, 0xD9, 0x7C, 0x24, 0x04,
+            0x48, 0x89, 0x27, 0x48, 0x89, 0xF4,
+            0x0F, 0xAE, 0x14, 0x24, 0xD9, 0x6C, 0x24, 0x04, 0x48, 0x83, 0xC4, 0x08,
+            0x41, 0x5F, 0x41, 0x5E, 0x41, 0x5D, 0x41, 0x5C, 0x5B, 0x5D, 0xC3
+        ]))
+        // A new task: koji_task_main(task), the task in rbx (koji_task_stack_start), on an aligned
+        // stack.
+        immut entry = self.code.length()
+        self.bytes([0x48, 0x89, 0xDF, 0x48, 0x83, 0xE4, 0xF0, 0xE8])
+        self.relocation('koji_task_main', plt32, -4)
+        self.int32(0)
+        self.bytes([0x0F, 0x0B])
+        exported.push({ name: 'koji_task_entry', at: entry, size: self.code.length() - entry, section: 1 })
+    }
 
     // The data: the heads of the pool (18 words), whether it is off, the test to run (-1).
     self.alignData(8)
@@ -260,11 +293,18 @@ function Native.runtimeCode(mut self): Export[] {
     switchOff.add(MStore(MSymbol('koji_pool_off', 0), MImm(1), 1))
     switchOff.end(MReturn([]), -1)
     exported.push(self.exportCode(switchOff))
-    // The variable of C `environ`, through the table of the linker.
+    // The variable of C `environ`, through the table of the linker (on macOS, its address from
+    // _NSGetEnviron).
     mut environment = builder('koji_system_environment', [], [false])
     immut place = environment.register(false)
     immut value = environment.register(false)
-    environment.add(MLoad(place, MGot('environ'), 8))
+
+    if (self.macos) {
+        environment.add(MCall(MExternal('_NSGetEnviron'), [], [place]))
+    } else {
+        environment.add(MLoad(place, MGot('environ'), 8))
+    }
+
     environment.add(MLoad(value, MBase(place, 0), 8))
     environment.end(MReturn([MReg(value)]), -1)
     exported.push(self.exportCode(environment))
@@ -407,7 +447,7 @@ function Native.runtimeCode(mut self): Export[] {
             }
         }
 
-        if (wide) { code.add(MPairs([1, 3])) }
+        if (wide) { code.add(MPairs([1, 3], if (kind == 'u128') { [1, 3] } else { [] })) }
 
         code.add(MCall(MIndirect(MReg(called)), args, [result]))
         code.end(MReturn([MReg(result)]), -1)
@@ -443,6 +483,24 @@ function Native.runtimeCode(mut self): Export[] {
     }
 
     return exported
+}
+
+// The function of the C library that gives the address of errno.
+function Native.errnoFunction(self): string {
+    return if (self.macos) { '__error' } else { '__errno_location' }
+}
+
+// The bytes of instructions of 4 bytes (arm64), little-endian.
+function wordBytes(words: int[]): int[] {
+    mut bytes: int[] = []
+
+    for each in words {
+        for i in range(4) {
+            bytes.push((each >> (8 * i)) & 0xFF)
+        }
+    }
+
+    return bytes
 }
 
 // A function of the machine IR, emitted and exported under its name.
@@ -528,7 +586,7 @@ function Native.threadsCode(mut self): Export[] {
     helper.add(MLoad(job, MSlot(held, 0), 8))
     helper.add(MLoad(called, MBase(job, 0), 8))
     helper.add(MCall(MIndirect(MReg(called)), [MReg(job)], []))
-    helper.add(MCall(MExternal('__errno_location'), [], [place]))
+    helper.add(MCall(MExternal(self.errnoFunction()), [], [place]))
     helper.add(MLoad(error, MBase(place, 0), 4))
     helper.add(MUnary(error, 'sext32', MReg(error), -1))
     helper.add(MStore(MBase(job, 64), MReg(error), 8))
@@ -605,7 +663,7 @@ function Native.threadsCode(mut self): Export[] {
     immut errno = blocking.register(false)
     immut kept = blocking.register(false)
     blocking.add(MCall(MExternal('koji_task_offload'), [MReg(given)], []))
-    blocking.add(MCall(MExternal('__errno_location'), [], [errno]))
+    blocking.add(MCall(MExternal(self.errnoFunction()), [], [errno]))
     blocking.add(MLoad(kept, MBase(given, 64), 4))
     blocking.add(MStore(MBase(errno, 0), MReg(kept), 4))
     blocking.end(MJump(finished), finished)
@@ -671,7 +729,7 @@ function Native.threadsCode(mut self): Export[] {
 function Native.unlessInterrupted(mut self, mut code: MBuilder, again: int, otherwise: int) {
     immut place = code.register(false)
     immut error = code.register(false)
-    code.add(MCall(MExternal('__errno_location'), [], [place]))
+    code.add(MCall(MExternal(self.errnoFunction()), [], [place]))
     code.add(MLoad(error, MBase(place, 0), 4))
     code.end(MBranch('eq', MReg(error), MImm(4), again, otherwise), -1)
 }
@@ -694,12 +752,15 @@ function Native.forC(mut self, found: IrForC): Export {
     immut routine = self.program.functions[found.function]
     mut classes: boolean[] = []
     mut pairs: int[] = []
+    mut alignedPairs: int[] = []
     mut owners: int[] = []
 
     for param in range(routine.params) {
         immut ty = routine.locals[param].ty
 
         if (words(ty) == 2) {
+            if (ty == U128Ty) { alignedPairs.push(classes.length()) }
+
             pairs.push(classes.length())
             classes.push(false)
             owners.push(param)
@@ -712,6 +773,7 @@ function Native.forC(mut self, found: IrForC): Export {
     immut results = if (routine.returns == VoidTy) { [] } else { if (words(routine.returns) == 2) { [false, false] } else { [routine.returns == FloatTy] } }
     mut code = builder(found.name, classes, results)
     code.pairs = pairs
+    code.aligned = alignedPairs
     mut args: MValue[] = []
 
     for i in range(code.params.length()) {
@@ -736,7 +798,7 @@ function Native.forC(mut self, found: IrForC): Export {
         returned.push(code.register(float))
     }
 
-    if (pairs.length() > 0) { code.add(MPairs(pairs)) }
+    if (pairs.length() > 0) { code.add(MPairs(pairs, alignedPairs)) }
 
     code.add(MCall(MFunction(found.function), args, returned))
 
@@ -994,7 +1056,7 @@ function Native.recordFunctions(mut self): int[] {
 // with the arguments of the job (koji_run_ of cgen.kj), and keeps its result in the job.
 function Native.trampolineCode(mut self) {
     for use in self.trampolineUses {
-        if (use.kind != 0 or self.trampolines.has(use.symbol)) { continue }
+        if (self.trampolines.has(use.symbol)) { continue }
 
         immut declared = match (self.externOf(use.symbol)) {
             Some(found) => found
@@ -1028,14 +1090,13 @@ function Native.trampolineCode(mut self) {
         self.trampolines[use.symbol] = self.emitCode(code.code())
     }
 
+    // The references to them: relocations to their places in the code.
     for use in self.trampolineUses {
-        if (use.kind != 1) { continue }
-
         immut target = match (self.trampolines.get(use.symbol)) {
             Some(found) => found
             None => 0
         }
-        self.patch32(use.at, target - (use.at + 4))
+        self.relocations.push({ at: use.at, symbol: '.text', kind: use.kind, addend: target + use.addend })
     }
 }
 
@@ -1045,7 +1106,7 @@ function Native.patchDataFunction(mut self, at: int, offset: int) {
 }
 
 function Native.dataUse(mut self, at: int, target: int) {
-    self.uses.push({ at: at, target: target, inData: true })
+    self.uses.push({ at: at, target: target, inData: true, kind: 0 })
 }
 
 function Native.pointerToText(mut self, at: int, text: string) {
@@ -1079,20 +1140,18 @@ function Native.generateMir(mut self, id: int) {
 
 // A function of the machine IR, its registers allocated and encoded, put in the object: its code, its
 // relocations, its calls of functions of the program and its texts. Where it starts.
-function Native.emitCode(mut self, code: MFunctionCode): int {
-    immut emitted = emitX64(code, allocate(code, x64Registers))
+function Native.emitCode(mut self, given: MFunctionCode): int {
+    immut code = reusedLoads(foldedCopies(given))
+    immut emitted = if (self.arm) { emitA64(code, allocate(code, a64Registers), self.macos) } else { emitX64(code, allocate(code, x64Registers)) }
     immut start = self.code.length()
 
-    for each in emitted.code {
-        self.code.push(each)
-    }
+    append(mut self.code, emitted.code)
 
     for relocation in emitted.relocations {
         // The code of the job of a function that blocks (see `trampolineCode`).
         if (relocation.symbol.startsWith('trampoline:')) {
             immut name = relocation.symbol['trampoline:'.length()..relocation.symbol.length()]
-            self.trampolineUses.push({ at: 0, symbol: name, kind: 0, addend: 0 })
-            self.trampolineUses.push({ at: start + relocation.at, symbol: name, kind: 1, addend: 0 })
+            self.trampolineUses.push({ at: start + relocation.at, symbol: name, kind: relocation.kind, addend: relocation.addend })
             continue
         }
 
@@ -1100,12 +1159,17 @@ function Native.emitCode(mut self, code: MFunctionCode): int {
     }
 
     for call in emitted.calls {
-        self.uses.push({ at: start + call.at, target: call.target, inData: false })
+        self.uses.push({ at: start + call.at, target: call.target, inData: false, kind: call.kind })
     }
 
     for use in emitted.texts {
         immut offset = self.text(use.text)
-        self.relocations.push({ at: start + use.at, symbol: '.rodata', kind: pc32, addend: offset - 4 })
+
+        if (use.kind == 0) {
+            self.relocations.push({ at: start + use.at, symbol: '.rodata', kind: pc32, addend: offset - 4 })
+        } else {
+            self.relocations.push({ at: start + use.at, symbol: '.rodata', kind: use.kind, addend: offset })
+        }
     }
 
     return start
@@ -1238,11 +1302,9 @@ function putInt32(mut out: byte[], number: int) {
     putBytes(mut out, number, 4)
 }
 
-// Adds the bytes at the end, in place (a `+` would copy the whole list each time).
+// Adds the bytes at the end, in place (`out` read for the last time: see `koji_list_append`).
 function append(mut out: byte[], bytes: byte[]) {
-    for each in bytes {
-        out.push(each)
-    }
+    out = out + bytes
 }
 
 type Section = {
@@ -1263,6 +1325,37 @@ type Symbol = {
     section: int
     value: int
     size: int
+}
+
+// The relocatable object of Mach-O (macho.kj) of the code and data: the functions named as in Koji
+// (local), the frees of records, and the symbols it defines for others.
+function machOf(native: Native, extras: int[], exported: Export[]): byte[] {
+    mut symbols: MachSymbol[] = []
+
+    for id in range(native.starts.length()) {
+        immut name = native.program.functions[id].name
+        symbols.push({ name: if (name == '') { `koji_f${id}` } else { name }, section: 1, value: native.starts[id], global: false })
+    }
+
+    for i in range(extras.length()) {
+        symbols.push({ name: `free ${native.program.records[i].name}`, section: 1, value: extras[i], global: false })
+    }
+
+    for each in exported {
+        symbols.push({ name: each.name, section: each.section, value: each.at, global: true })
+    }
+
+    mut relocations: MachRelocation[] = []
+
+    for relocation in native.relocations {
+        relocations.push({ section: 1, at: relocation.at, symbol: relocation.symbol, kind: relocation.kind, addend: relocation.addend })
+    }
+
+    for relocation in native.dataRelocations {
+        relocations.push({ section: 3, at: relocation.at, symbol: relocation.symbol, kind: 257, addend: relocation.addend })
+    }
+
+    return machObject(native.arm, native.code, native.rodata, native.data, native.bss, symbols, relocations)
 }
 
 // The relocatable object of ELF64 (x86-64) of the code and data.
@@ -1311,8 +1404,8 @@ function elfObject(native: Native, mainStart: int, extras: int[], exported: Expo
     }
 
     // The relocations: offset, (symbol << 32) | type, addend.
-    immut rela = relocationBytes(native.relocations, sectionIndex, external)
-    immut relaData = relocationBytes(native.dataRelocations, sectionIndex, external)
+    immut rela = relocationBytes(native.relocations, sectionIndex, external, native.arm)
+    immut relaData = relocationBytes(native.dataRelocations, sectionIndex, external, native.arm)
     mut strtab: byte[] = [0]
     mut symtab: byte[] = []
 
@@ -1393,7 +1486,8 @@ function elfObject(native: Native, mainStart: int, extras: int[], exported: Expo
     // e_ident: ELF, 64 bits, little-endian, version 1, System V.
     out = out + [0x7F, 0x45, 0x4C, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     putBytes(mut out, 1, 2)
-    putBytes(mut out, 62, 2)
+    // EM_X86_64, or EM_AARCH64.
+    putBytes(mut out, if (native.arm) { 183 } else { 62 }, 2)
     putInt32(mut out, 1)
     putWord(mut out, 0)
     putWord(mut out, 0)
@@ -1424,7 +1518,9 @@ function elfObject(native: Native, mainStart: int, extras: int[], exported: Expo
     return out
 }
 
-function relocationBytes(relocations: Relocation[], sectionIndex: Map[string, int], external: Map[string, int]): byte[] {
+// The relocations: offset, (symbol << 32) | type, addend (a word of an address R_AARCH64_ABS64 on
+// arm64).
+function relocationBytes(relocations: Relocation[], sectionIndex: Map[string, int], external: Map[string, int], arm: boolean): byte[] {
     mut bytes: byte[] = []
 
     for relocation in relocations {
@@ -1433,7 +1529,8 @@ function relocationBytes(relocations: Relocation[], sectionIndex: Map[string, in
             None => external[relocation.symbol]
         }
         putWord(mut bytes, relocation.at)
-        putWord(mut bytes, symbol << 32 | relocation.kind)
+        immut kind = if (arm and relocation.kind == absolute64) { 257 } else { relocation.kind }
+        putWord(mut bytes, symbol << 32 | kind)
         putWord(mut bytes, relocation.addend)
     }
 
