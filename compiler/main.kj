@@ -440,7 +440,17 @@ function machLibrary(name: string, cpu: int): Result[Dylib, string] {
         None => {}
     }
 
-    for sdk in sdks + ['/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk', '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk'] {
+    sdks += ['/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk', '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk']
+
+    // Where the tools of Xcode say it is, last (a process: only when the others have no stub).
+    if (system.os == system.MacOS) {
+        match (system.capture('xcrun', ['--show-sdk-path'])) {
+            Ok(found) => if (found.status == 0 and found.stdout.trim() != '') { sdks.push(found.stdout.trim()) }
+            Err(_) => {}
+        }
+    }
+
+    for sdk in sdks {
         immut stub = path.join(sdk, `usr/lib/lib${name}.tbd`)
 
         if (not file.exists(stub)) { continue }
