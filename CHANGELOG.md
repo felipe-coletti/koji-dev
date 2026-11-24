@@ -5,6 +5,9 @@
 -   The parameters of an anonymous function given to a generic function or method take the types
     its other arguments tell: `result.mapErr((e) => ...)` and `apply((x) => x + 1, 4)` need no
     types written.
+-   On macOS, Koji's linker links the libraries of `foreign` blocks too: a `.dylib` (from
+    `LIBRARY_PATH`, Homebrew or `/usr/local/lib`), or the stub in the SDK of a library of the
+    system. Building a program with `foreign` blocks no longer needs the linker of the system.
 
 ## 0.1.0 (preview)
 
