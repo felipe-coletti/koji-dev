@@ -9,11 +9,11 @@ import { tokenize, dump } from 'lexer.kj'
 import parser from 'parser.kj'
 import { dumpTypes, check, checkLibrary } from 'checker.kj'
 import { lower, lowerTests } from 'lower.kj'
-import { IrProgram, programText } from 'ir.kj'
+import { IrExtern, IrProgram, programText } from 'ir.kj'
 import { generateNative } from 'native.kj'
 import { inlineSmall, targetPlatform } from 'inline.kj'
 import { machArchive } from 'macho.kj'
-import { machArchiveObjects, linkMach } from 'machlink.kj'
+import { Dylib, dylibIdentity, linkMach, machArchiveObjects, tbdIdentity } from 'machlink.kj'
 import { archive, archiveNamed, archiveObjects, linkExecutable, sharedName, sharedSymbols } from 'linker.kj'
 import { coffGlobals } from 'coff.kj'
 import { linkWindows } from 'pelink.kj'
@@ -298,11 +298,10 @@ function linkNative(program: IrProgram, output: string): Result[void, string] {
         if (not (library in ['c', 'm', 'pthread'])) { foreign.push(library) }
     }
 
-    immut others = foreign.length() > 0
-
-    // For macOS, its linker of Mach-O (machlink.kj).
-    if (not others and chosen != 'system' and targetPlatform() / 3 == 1) {
-        match (linkMachOwn(object, runtime, output)) {
+    // For macOS, its linker of Mach-O (machlink.kj), with the dynamic libraries of the blocks
+    // `foreign` (`foreign 'sqlite3'`: libsqlite3.dylib, its file or its stub in the SDK).
+    if (chosen != 'system' and targetPlatform() / 3 == 1) {
+        match (linkMachOwn(object, runtime, output, program.externs, foreign)) {
             Ok(_) => return Ok()
             Err(message) => {
                 if (chosen == 'koji') { return Err(`compile error: ${message}`) }
@@ -363,8 +362,24 @@ function linkNative(program: IrProgram, output: string): Result[void, string] {
 // The executable of the object of a program and of the runtime library, by Koji's linker, with the
 // libraries of C of the system: the C library and its mathematics (and its threads, on systems
 // where they are a library of their own).
-// A program for macOS by Koji's linker of Mach-O: the object and those of the archive of the runtime.
-function linkMachOwn(object: byte[], runtime: string, output: string): Result[void, string] {
+// A program for macOS by Koji's linker of Mach-O: the object and those of the archive of the
+// runtime, with the dynamic libraries of `foreign` and the functions each gives.
+function linkMachOwn(object: byte[], runtime: string, output: string, externs: IrExtern[], foreign: string[]): Result[void, string] {
+    immut cpu = if (targetPlatform() == 4) { 0x0100000C } else { 0x01000007 }
+    mut libraries: Dylib[] = []
+    mut libraryOf: Map[string, int] = [:]
+
+    for name in foreign {
+        libraries.push(machLibrary(name, cpu)?)
+    }
+
+    for each in externs {
+        match (foreign.indexOf(each.library)) {
+            Some(index) => libraryOf[`_${each.symbol}`] = index
+            None => {}
+        }
+    }
+
     immut library = match (file.open(runtime, file.Read)) {
         Ok(opened) => match (opened.readBytes()) {
             Ok(bytes) => bytes
@@ -378,12 +393,81 @@ function linkMachOwn(object: byte[], runtime: string, output: string): Result[vo
         objects.push(member)
     }
 
-    immut executable = linkMach(objects)?
+    immut executable = linkMach(objects, libraries, libraryOf)?
     writeBytes(output, executable)?
     return match (file.setPermissions(output, 0x1ED)) {
         Ok(_) => Ok()
         Err(error) => Err(`cannot make '${output}' executable: ${ioMessage(error)}`)
     }
+}
+
+// The dynamic library of a block `foreign` for macOS: its file (libsqlite3.dylib, in LIBRARY_PATH
+// or where Homebrew and others put them), or its stub in the SDK of macOS for a library of the
+// system (libz.tbd), whose file is in the cache of the dynamic loader.
+function machLibrary(name: string, cpu: int): Result[Dylib, string] {
+    mut directories: string[] = []
+
+    match (system.env('LIBRARY_PATH')) {
+        Some(paths) => {
+            for each in paths.split(':') {
+                if (each != '') { directories.push(each) }
+            }
+        }
+        None => {}
+    }
+
+    for directory in directories + ['/opt/homebrew/lib', '/usr/local/lib', '/usr/lib'] {
+        immut found = path.join(directory, `lib${name}.dylib`)
+
+        if (not file.exists(found)) { continue }
+
+        match (file.open(found, file.Read)) {
+            Ok(opened) => match (opened.readBytes()) {
+                Ok(bytes) => match (dylibIdentity(bytes, cpu)) {
+                    Some(identity) => return Ok(identity)
+                    None => {}
+                }
+                Err(_) => {}
+            }
+            Err(_) => {}
+        }
+    }
+
+    mut sdks: string[] = []
+
+    match (system.env('SDKROOT')) {
+        Some(root) => sdks.push(root)
+        None => {}
+    }
+
+    sdks += ['/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk', '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk']
+
+    // Where the tools of Xcode say it is, last (a process: only when the others have no stub).
+    if (system.os == system.MacOS) {
+        match (system.capture('xcrun', ['--show-sdk-path'])) {
+            Ok(found) => if (found.status == 0 and found.stdout.trim() != '') { sdks.push(found.stdout.trim()) }
+            Err(_) => {}
+        }
+    }
+
+    for sdk in sdks {
+        immut stub = path.join(sdk, `usr/lib/lib${name}.tbd`)
+
+        if (not file.exists(stub)) { continue }
+
+        match (file.open(stub, file.Read)) {
+            Ok(opened) => match (opened.read()) {
+                Ok(text) => match (tbdIdentity(text)) {
+                    Some(identity) => return Ok(identity)
+                    None => {}
+                }
+                Err(_) => {}
+            }
+            Err(_) => {}
+        }
+    }
+
+    return Err(`cannot find the dynamic library of 'foreign \'${name}\'' (lib${name}.dylib)`)
 }
 
 function linkWindowsOwn(object: byte[], runtime: string, output: string, dlls: Map[string, string]): Result[void, string] {
@@ -879,7 +963,7 @@ if (command == 'build') {
 }
 
 // `kojic library -o libkoji_runtime.a`: the runtime library, built natively (see "The library of the
-// runtime built by the compiler" in doc/design.md): the machine code of std/koji/ (but `koji:core`),
+// runtime built by the compiler" in doc/internals.md): the machine code of std/koji/ (but `koji:core`),
 // with `koji:prelude` and the code the backend writes for the runtime, alone in an archive.
 if (command == 'library' and args.length() == 3 and args[1] == '-o') {
     match (buildLibrary(args[2])) {

@@ -50,7 +50,7 @@ print(triple(10)) // 30
 
 The type of a function is written `(parameters) => return type`: `(int) => int`.
 
-Where the type of the function is known (a variable with a type, the parameter of a function), its parameters need no types: they have the ones of that type.
+Where the type of the function is known (a variable with a type, the parameter of a function), its parameters need no types: they have the ones of that type. For a generic function or method, they are the ones its other arguments tell (`result.mapErr((e) => ...)`, `box.map((x) => x * 2)`).
 
 ```koji
 immut half: (int) => int = (x) => x / 2

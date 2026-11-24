@@ -1551,6 +1551,27 @@ print(twice((x) => x + 1, 5))
 ---- output
 4
 7
+==== anonymous_functions_given_to_generic_functions_take_the_inferred_types
+---- source
+type Box[T] = {
+    value: T
+}
+function Box.map[U](self, f: (T) => U): Box[U] {
+    return { value: f(self.value) }
+}
+// The function comes before the argument that tells `T`.
+function applyTo[T, U](f: (T) => U, value: T): U {
+    return f(value)
+}
+immut box: Box[int] = { value: 2 }
+print(box.map((x) => x * 10).value)
+print(applyTo((text) => text.length(), 'four'))
+immut failed: Result[int, string] = Err('bad')
+print(failed.mapErr((e) => e.length()))
+---- output
+20
+4
+Err(3)
 ==== tasks_that_compute_let_the_others_run
 ---- source
 import task

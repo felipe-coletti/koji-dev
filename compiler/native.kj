@@ -1,6 +1,6 @@
 // The native backend: the machine code of x86-64 for the IR, in an object file of ELF (Linux), which
 // Koji's linker (or the system's) links with the runtime library, without a C compiler. Each function goes
-// through the machine IR (see "A machine IR between the IR and the processors" in doc/design.md):
+// through the machine IR (see "A machine IR between the IR and the processors" in doc/internals.md):
 // lowered (mirlower.kj), its registers allocated (mirregs.kj), encoded (x64.kj); this file lays out
 // the object: the data of the program (its strings, its globals, the descriptions of its records),
 // the code of the runtime written by the backend (the switch between stacks, the threads, the stubs
@@ -563,7 +563,7 @@ function Native.loadFunction(mut self, name: string, at: MAddress, width: int): 
     return self.exportCode(code)
 }
 
-// The threads of the runtime (see "The threads of the runtime" in doc/design.md), code that runs no
+// The threads of the runtime (see "The threads of the runtime" in doc/internals.md), code that runs no
 // Koji: the threads that help with the calls that block, each taking jobs (a KojiJob: its code, 6 arguments, its result, errno, the task that waits, done) from a pipe
 // and giving them back through another; the thread that ticks for preemption; the job of each call
 // that blocks of the library, and running a job (on this thread when the task is alone). Their

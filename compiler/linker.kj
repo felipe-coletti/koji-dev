@@ -1,4 +1,4 @@
-// The linker of Koji (see "A linker of Koji's own" in doc/design.md): the executable of the objects
+// The linker of Koji (see "A linker of Koji's own" in doc/internals.md): the executable of the objects
 // of ELF of a program and of its runtime library, for Linux on x86-64 or arm64, linked dynamically with the
 // C library of the system (its functions resolved by the dynamic loader when the program starts),
 // without the linker of the system. Archives (`kojic library`) are read and written here too.

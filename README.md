@@ -33,7 +33,7 @@ bootstrap/build.sh           # bootstrap\build.cmd on Windows
 build/kojic run examples/hello.kj
 ```
 
-The [Getting Started](doc/getting-started.md) guide walks through your first program and every command; [CHANGELOG.md](CHANGELOG.md) says what each version brings.
+The [Getting Started](doc/getting-started.md) guide walks through your first program and every command; [CHANGELOG.md](CHANGELOG.md) says what each version brings. For Visual Studio Code, install the extension [Koji](https://marketplace.visualstudio.com/items?itemName=koji-language.koji) (also on [Open VSX](https://open-vsx.org/extension/koji-language/koji)).
 
 ---
 
@@ -51,4 +51,4 @@ For upcoming features and long-term goals, see the [roadmap](doc/roadmap.md).
 
 ## Contributing
 
-Ideas, suggestions and contributions are welcome. See the [contributing guide](CONTRIBUTING.md).
+Ideas, suggestions and contributions are welcome. See the [contributing guide](CONTRIBUTING.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).

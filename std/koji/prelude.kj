@@ -7,7 +7,7 @@
 // functions by their names. The threads of the runtime run machine code the backend writes (no Koji
 // runs on them); here, on the thread of the program, their pipes are made, the threads started and
 // given their jobs, and the clock started and stopped (see "The threads of the runtime" in
-// doc/design.md).
+// doc/internals.md).
 //
 // A string is 3 words (its references, its length, its capacity) then its bytes; a list 6 (its
 // references, the description of its items, the words of an item, its items, its length, the

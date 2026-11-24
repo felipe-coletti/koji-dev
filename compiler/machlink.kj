@@ -1,6 +1,7 @@
 // The linker of Koji for macOS on arm64 and x86-64 (see "A linker of Koji's own" in
-// doc/design.md): the executable of Mach-O of the objects of a program and of its runtime library
-// (macho.kj writes them), linked with libSystem, without the linker of the system.
+// doc/internals.md): the executable of Mach-O of the objects of a program and of its runtime library
+// (macho.kj writes them), linked with libSystem and the libraries of its blocks `foreign`, without
+// the linker of the system.
 //
 // The executable is position-independent, as macOS asks: __PAGEZERO, then __TEXT (the headers, the
 // code, the stubs, the constants), __DATA (the table of addresses of libSystem, the data, the
@@ -87,7 +88,114 @@ export function machArchiveObjects(bytes: byte[]): Result[byte[][], string] {
     return Ok(objects)
 }
 
-export function linkMach(objects: byte[][]): Result[byte[], string] {
+// A dynamic library a program loads: its path for the dynamic loader (its install name) and its
+// versions, as LC_ID_DYLIB gives them.
+export type Dylib = {
+    path: string
+    current: int
+    compatibility: int
+}
+
+// The identity of a dynamic library of the processor `cpu` (LC_ID_DYLIB), in a Mach-O of 64 bits
+// or in a universal file of several.
+export function dylibIdentity(bytes: byte[], cpu: int): Option[Dylib] {
+    // FAT_MAGIC: the architectures (big-endian), each with its place in the file.
+    if (bytes.length() >= 8 and bigNumber(bytes, 0) == 0xCAFEBABE) {
+        for i in range(bigNumber(bytes, 4)) {
+            immut at = 8 + 20 * i
+
+            if (at + 20 > bytes.length()) { return None }
+
+            if (bigNumber(bytes, at) != cpu) { continue }
+
+            immut offset = bigNumber(bytes, at + 8)
+            immut size = bigNumber(bytes, at + 12)
+
+            if (offset + size > bytes.length()) { return None }
+
+            return dylibIdentity(bytes[offset..offset + size], cpu)
+        }
+
+        return None
+    }
+
+    // MH_MAGIC_64, of the processor, MH_DYLIB.
+    if (bytes.length() < 32 or number(bytes, 0, 4) != 0xFEEDFACF or number(bytes, 4, 4) != cpu or number(bytes, 12, 4) != 6) { return None }
+
+    mut at = 32
+
+    for _ in range(number(bytes, 16, 4)) {
+        if (at + 24 > bytes.length()) { return None }
+
+        immut command = number(bytes, at, 4)
+        immut size = number(bytes, at + 4, 4)
+
+        if (command == 0xD) {
+            immut name = at + number(bytes, at + 8, 4)
+            return Some({ path: cString(bytes, name, at + size - name), current: number(bytes, at + 16, 4), compatibility: number(bytes, at + 20, 4) })
+        }
+
+        if (size <= 0) { return None }
+
+        at += size
+    }
+
+    return None
+}
+
+// The identity of a dynamic library in its stub of the SDK of macOS (a .tbd: the text of its
+// install name, versions and symbols), for the libraries of the system, which are not files of
+// their own (they are in the cache of the dynamic loader).
+export function tbdIdentity(text: string): Option[Dylib] {
+    mut found = ''
+    mut current = 0x10000
+    mut compatibility = 0x10000
+
+    for line in text.split('\n') {
+        immut trimmed = line.trim()
+
+        // Its first document is the library itself (those after it, the libraries it re-exports).
+        if (found != '' and trimmed.startsWith('---')) { break }
+
+        if (trimmed.startsWith('install-name:')) { found = unquoted(trimmed[13..]) }
+
+        if (trimmed.startsWith('current-version:')) { current = packedVersion(unquoted(trimmed[16..])) }
+
+        if (trimmed.startsWith('compatibility-version:')) { compatibility = packedVersion(unquoted(trimmed[22..])) }
+    }
+
+    if (found == '') { return None }
+
+    return Some({ path: found, current: current, compatibility: compatibility })
+}
+
+function unquoted(text: string): string {
+    return text.trim().replace('\'', '').replace('"', '')
+}
+
+// A version `x.y.z` as Mach-O keeps it: x in 16 bits, y and z in 8 each.
+function packedVersion(text: string): int {
+    immut parts = text.split('.')
+    mut packed = 0
+
+    for i in range(3) {
+        immut part = if (i < parts.length()) { match (int(parts[i])) {
+            Ok(value) => value
+            Err(_) => 0
+        } } else { 0 }
+        packed = packed << (if (i == 0) { 0 } else { 8 }) | (if (i == 0) { part } else { part & 0xFF })
+    }
+
+    return packed
+}
+
+function bigNumber(bytes: byte[], at: int): int {
+    return int(bytes[at]) << 24 | int(bytes[at + 1]) << 16 | int(bytes[at + 2]) << 8 | int(bytes[at + 3])
+}
+
+// The executable of `objects`, with libSystem and `libraries`: the symbols no object defines come
+// from libSystem, but those `libraryOf` gives the library of (its place in `libraries`).
+export function linkMach(objects: byte[][], libraries: Dylib[], libraryOf: Map[string, int]): Result[byte[], string] {
     mut inputs: MachInput[] = []
 
     for object in objects {
@@ -362,9 +470,17 @@ export function linkMach(objects: byte[][]): Result[byte[], string] {
     mut bind: byte[] = []
 
     for each in binds {
-        // BIND_OPCODE_SET_DYLIB_ORDINAL_IMM 1, SET_SYMBOL_TRAILING_FLAGS_IMM (the name),
-        // SET_TYPE_IMM pointer, SET_ADDEND_SLEB, SET_SEGMENT_AND_OFFSET_ULEB, DO_BIND.
-        bind.push(0x11)
+        // BIND_OPCODE_SET_DYLIB_ORDINAL_IMM (or _ULEB) of its library, SET_SYMBOL_TRAILING_FLAGS_IMM
+        // (the name), SET_TYPE_IMM pointer, SET_ADDEND_SLEB, SET_SEGMENT_AND_OFFSET_ULEB, DO_BIND.
+        immut ordinal = ordinalOf(externals[each[1]], libraryOf)
+
+        if (ordinal < 16) {
+            bind.push(byte(0x10 | ordinal))
+        } else {
+            bind.push(0x20)
+            uleb(mut bind, ordinal)
+        }
+
         bind.push(0x40)
         append(mut bind, utf8(externals[each[1]]))
         bind.push(0)
@@ -423,10 +539,10 @@ export function linkMach(objects: byte[][]): Result[byte[], string] {
         putInt32(mut symtab, strtab.length())
         append(mut strtab, utf8(name))
         strtab.push(0)
-        // N_UNDF | N_EXT, from the first library (the ordinal in the high byte of n_desc).
+        // N_UNDF | N_EXT, from its library (the ordinal in the high byte of n_desc).
         symtab.push(1)
         symtab.push(0)
-        putBytes(mut symtab, 0x100, 2)
+        putBytes(mut symtab, ordinalOf(name, libraryOf) << 8, 2)
         putWord(mut symtab, 0)
         undefined += 1
     }
@@ -509,6 +625,13 @@ export function linkMach(objects: byte[][]): Result[byte[], string] {
     putWord(mut commands, mainAddress)
     putWord(mut commands, 0)
     loadPath(mut commands, 0xC, 24, '/usr/lib/libSystem.B.dylib', [2, 0x05276403, 0x00010000])
+
+    // LC_LOAD_DYLIB of each library of the blocks `foreign`, in the order of their ordinals.
+    for library in libraries {
+        loadPath(mut commands, 0xC, 24, library.path, [2, library.current, library.compatibility])
+        count += 1
+    }
+
     putInt32(mut commands, 0x1D)
     putInt32(mut commands, 16)
     putInt32(mut commands, signatureAt)
@@ -536,6 +659,14 @@ export function linkMach(objects: byte[][]): Result[byte[], string] {
     zeros(mut out, signatureAt - out.length())
     append(mut out, signature(out, identifier, pages, signatureAt, textEnd))
     return Ok(out)
+}
+
+// The ordinal of the library of the symbol `name`: 1 for libSystem, the first library loaded.
+function ordinalOf(name: string, libraryOf: Map[string, int]): int {
+    return match (libraryOf.get(name)) {
+        Some(index) => index + 2
+        None => 1
+    }
 }
 
 // The ad-hoc signature (a SuperBlob of one CodeDirectory, big-endian): the hash of each page of 4 KB of

@@ -356,7 +356,7 @@ test 'printing_to_a_full_pipe_lets_the_other_tasks_run' {
 }
 
 // The runtime library built natively (`kojic library`, see "The library of the runtime built by the
-// compiler" in doc/design.md), given by its path: a program linked with it does what it does with
+// compiler" in doc/internals.md), given by its path: a program linked with it does what it does with
 // the one next to the compiler.
 test 'the_native_library_runs_programs' {
     immut directory = scratch('native-library')
@@ -564,16 +564,27 @@ test 'koji_links_executables_itself' {
 }
 
 // Koji's linker with the shared libraries of blocks `foreign` (libz, where it is): found in the
-// directories of libraries, named for the dynamic loader by their own names (libz.so.1).
+// directories of libraries, named for the dynamic loader by their own names (libz.so.1); on macOS,
+// by the stub of the SDK (libz.tbd: /usr/lib/libz.1.dylib, in the cache of the dynamic loader).
 test 'koji_links_the_libraries_of_foreign_blocks' {
-    if (system.os != system.Linux) { return }
+    if (system.os != system.Linux and system.os != system.MacOS) { return }
 
     immut source = 'foreign \'z\' {\n    function crc32(crc: CLong, data: byte[], size: CInt): CLong\n    function zlibVersion(): string\n}\n\nprint(crc32(0, [104, 101, 108, 108, 111], 5), zlibVersion().length() > 0)\n'
     immut directory = scratch('foreign-linked')
     writeFile(path.join(directory, 'zlib.kj'), source)
     immut linked = kojicWith(directory, ['build', 'zlib.kj', '-o', 'zlib'], ['KOJI_LINKER': 'koji'])
 
+    // Left out where there is no libz (on macOS, no SDK: xcrun names none).
     if ('cannot find the shared library' in linked.stderr) { return }
+
+    if ('cannot find the dynamic library' in linked.stderr) {
+        immut sdk = match (system.capture('xcrun', ['--show-sdk-path'])) {
+            Ok(found) => if (found.status == 0) { found.stdout.trim() } else { '' }
+            Err(_) => ''
+        }
+        assert(sdk == '', `the SDK is at ${sdk}, and: ${linked.stderr}`)
+        return
+    }
 
     assert(linked.status == 0, linked.stderr)
     immut ran = runBuilt(path.join(directory, 'zlib'), true)
@@ -581,7 +592,8 @@ test 'koji_links_the_libraries_of_foreign_blocks' {
     // A library that is nowhere.
     writeFile(path.join(directory, 'none.kj'), 'foreign \'kojinowhere\' {\n    function nothing(): CInt\n}\n\nprint(nothing())\n')
     immut missing = kojicWith(directory, ['build', 'none.kj', '-o', 'none'], ['KOJI_LINKER': 'koji'])
-    assert(missing.status != 0 and 'cannot find the shared library of \'foreign \'kojinowhere\'\' (libkojinowhere.so)' in missing.stderr, missing.stderr)
+    immut expected = if (system.os == system.MacOS) { 'cannot find the dynamic library of \'foreign \'kojinowhere\'\' (libkojinowhere.dylib)' } else { 'cannot find the shared library of \'foreign \'kojinowhere\'\' (libkojinowhere.so)' }
+    assert(missing.status != 0 and expected in missing.stderr, missing.stderr)
 }
 
 // The machine IR (compiler/mir.kj): functions of ints, booleans and chars (recursion, loops, ranges,
@@ -699,6 +711,17 @@ function macosObjects(linker: string, target: string, arch: string, cpu: int) {
 
     immut binds = finish(system.command('llvm-objdump', ['--macho', '--bind', own]))
     assert('libSystem        _kevent' in binds.stdout, binds.stdout)
+    // A block `foreign` of a library of the system: its install name and versions from its stub in
+    // the SDK (SDKROOT), its functions bound to it.
+    writeFile(path.join(directory, 'sdk/usr/lib/libz.tbd'), `--- !tapi-tbd\ntbd-version: 4\ntargets: [ ${arch}-macos ]\ninstall-name: '/usr/lib/libz.1.dylib'\ncurrent-version: 1.2.12\ncompatibility-version: 1\nexports:\n  - targets: [ ${arch}-macos ]\n    symbols: [ _crc32 ]\n...\n`)
+    writeFile(path.join(directory, 'zlib.kj'), 'foreign \'z\' {\n    function crc32(crc: CLong, data: byte[], size: CInt): CLong\n}\n\nprint(crc32(0, [104, 101, 108, 108, 111], 5))\n')
+    immut zlib = path.join(directory, 'zlib-own')
+    immut zlibBuilt = kojicWith(directory, ['build', 'zlib.kj', '-o', zlib], ['KOJI_TARGET': target, 'KOJI_LINKER': 'koji', 'KOJI_RUNTIME': library, 'SDKROOT': path.join(directory, 'sdk')])
+    assert(zlibBuilt.status == 0, zlibBuilt.stderr)
+    immut zlibCommands = finish(system.command('llvm-objdump', ['--macho', '-p', zlib])).stdout
+    assert('name /usr/lib/libz.1.dylib' in zlibCommands and 'current version 1.2.12' in zlibCommands, zlibCommands)
+    immut zlibBinds = finish(system.command('llvm-objdump', ['--macho', '--bind', zlib])).stdout
+    assert('libz             _crc32' in zlibBinds and 'libSystem        _write' in zlibBinds, zlibBinds)
 }
 
 // Objects of Mach-O for macOS on arm64 and on x86-64 (compiler/macho.kj, KOJI_TARGET=macos-arm64 and

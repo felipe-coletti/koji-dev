@@ -1,4 +1,4 @@
-// The machine IR (see "A machine IR between the IR and the processors" in doc/design.md): what the
+// The machine IR (see "A machine IR between the IR and the processors" in doc/internals.md): what the
 // native backend generates for a function, knowing no processor. Values are in virtual registers
 // (words or floats, unbounded in number), which the register allocator (regalloc.kj) gives
 // registers of the processor or slots of the frame; an emitter (x64.kj) encodes the instructions.
