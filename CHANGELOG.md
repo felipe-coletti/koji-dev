@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+-   The parameters of an anonymous function given to a generic function or method take the types
+    its other arguments tell: `result.mapErr((e) => ...)` and `apply((x) => x + 1, 4)` need no
+    types written.
+
 ## 0.1.0 (preview)
 
 The first release of Koji, a statically typed language that aims to be simple, readable and

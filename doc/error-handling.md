@@ -110,7 +110,7 @@ function f(): Result[int, E] {
 
 ```koji
 function parse(text: string): Result[int, string] {
-	immut n = int(text).mapErr((error: ParseError) => `bad number: ${text}`)?
+	immut n = int(text).mapErr((error) => `bad number: ${text}`)?
 
 	return Ok(n)
 }

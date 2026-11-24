@@ -2438,7 +2438,21 @@ function Checker.checkGenericCall(mut self, signature: Type, initial: Type[], co
         None => {}
     }
 
-    for i in range(params.length()) {
+    // An anonymous function whose parameters are written without their types is checked after
+    // the other arguments, which may tell them (`apply((x) => x + 1, 4)`).
+    mut order: int[] = []
+    mut later: int[] = []
+
+    for i in range(args.length()) {
+        if (untypedLambda(args[i])) {
+            later.push(i)
+            continue
+        }
+
+        order.push(i)
+    }
+
+    for i in order + later {
         immut param = params[i]
         immut arg = args[i]
         immut mode = modeAt(modes, i)
@@ -2478,6 +2492,20 @@ function Checker.checkGenericCall(mut self, signature: Type, initial: Type[], co
     self.ensureConstraints(generic, constraints, what)?
     self.typeArgs = Some(generic)
     return Ok(substitute(parts.returns, generic))
+}
+
+// Whether `node` is an anonymous function with a parameter written without its type.
+function untypedLambda(node: Node): boolean {
+    match (unlocated(node).kind) {
+        Lambda(params, _, _) => {
+            for param in params {
+                if (param.annotation is None) { return true }
+            }
+
+            return false
+        }
+        _ => return false
+    }
 }
 
 // Move-only values
@@ -5649,7 +5677,8 @@ function Checker.checkMapErr(mut self, typeArgs: Type[], args: Node[]): Result[T
 
     if (args.length() != 1) { return Err(self.failure(`'mapErr' expects 1 argument, found ${args.length()}`)) }
 
-    immut converter = self.checkValue(args[0], None)?
+    // `(e) => ...` takes the type of the error.
+    immut converter = self.checkValue(args[0], if (isComplete(error)) { Some(FunctionType([error], UnknownType)) } else { None })?
 
     match (converter) {
         FunctionType(params, returns) if (params.length() == 1) => {

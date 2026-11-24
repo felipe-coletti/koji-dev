@@ -1190,6 +1190,14 @@ function f() { return 1 }
 type error: test.kj:1:16: cannot return a value from a function without a return type
     1 | function f() { return 1 }
       |                ^^^^^^^^
+==== anonymous_functions_need_types_where_nothing_tells_them
+---- source
+function applyTo[T, U](f: (T) => U): int {
+    return 0
+}
+print(applyTo((x) => x))
+---- error containing
+parameter 'x' of 'anonymous function' needs a type annotation: its type is not known here
 ==== anonymous_functions_and_closures
 ---- source
 immut double = (x: int): int => {

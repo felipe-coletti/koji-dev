@@ -172,7 +172,7 @@ The cost is speed, and a `float` is there when it matters. 34 digits hold every 
 
 ### Anonymous functions take their parameter types from where they are written
 
-**Decision**: a parameter of an anonymous function written without a type has the one of the function type expected where it is written (`task.group((tasks) => ...)`, `immut f: (int) => int = (x) => x * 2`); with no such type, it needs one.
+**Decision**: a parameter of an anonymous function written without a type has the one of the function type expected where it is written (`task.group((tasks) => ...)`, `immut f: (int) => int = (x) => x * 2`), or, given to a generic function, the one its other arguments tell (`result.mapErr((e) => ...)`, which are checked first); with no such type, it needs one.
 
 **Why**: the type is already written once, in the signature; writing it again at each call is noise, the more so for the functions given to tasks. It is what TypeScript, Kotlin and Swift do.
 
