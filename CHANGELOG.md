@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+-   The license is the Apache License 2.0 with LLVM Exceptions: a program compiled by Koji, which
+    has its runtime and standard library built in, may be distributed without the license or the
+    notice of Koji. NOTICE names the data of others in the standard library (the certificate
+    authorities of Mozilla, the Unicode Character Database).
 -   The parameters of an anonymous function given to a generic function or method take the types
     its other arguments tell: `result.mapErr((e) => ...)` and `apply((x) => x + 1, 4)` need no
     types written.
