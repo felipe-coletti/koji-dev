@@ -51,4 +51,4 @@ For upcoming features and long-term goals, see the [roadmap](doc/roadmap.md).
 
 ## Contributing
 
-Ideas, suggestions and contributions are welcome. See the [contributing guide](CONTRIBUTING.md).
+Ideas, suggestions and contributions are welcome. See the [contributing guide](CONTRIBUTING.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
