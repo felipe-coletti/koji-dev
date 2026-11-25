@@ -36,6 +36,7 @@ immut equal = 4
 immut absolute64 = 1
 immut pc32 = 2
 immut plt32 = 4
+
 type Relocation = {
     at: int
     // An external symbol, or a section (`.text`, `.data`, `.rodata`, `.bss`).
@@ -1309,7 +1310,6 @@ function Native.relocation(mut self, symbol: string, kind: int, addend: int) {
 }
 
 function Native.bytes(mut self, values: int[]) {
-
     for each in values {
         self.code.push(byte(each))
     }

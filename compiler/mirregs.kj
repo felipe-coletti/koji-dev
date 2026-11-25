@@ -500,7 +500,7 @@ export function allocate(code: MFunctionCode, set: RegisterSet): Allocation {
         }
 
         active = still
-            // A call strictly inside the range (a call reads its arguments before and writes its
+        // A call strictly inside the range (a call reads its arguments before and writes its
         // results after).
         immut crossing = hasBit(across, id)
         immut limited = if (clobbersBefore[last[id] + 1] > clobbersBefore[first[id]]) { [] } else { set.limited }
@@ -624,9 +624,6 @@ function extend(mut first: int[], mut last: int[], id: int, at: int) {
 
     if (at > last[id]) { last[id] = at }
 }
-
-
-
 
 // The virtual registers in registers that calls do not keep, met in the order of the positions
 // where they start, for the registers alive at each call (the positions only grow as the code is

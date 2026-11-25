@@ -68,8 +68,6 @@ export function mirRefusal(program: IrProgram, id: int): string {
 
     if (not oneOrTwo(routine.returns) and routine.returns != VoidTy) { return `a result of ${tyText(routine.returns)}` }
 
-
-
     for block in routine.blocks {
         // The first block starts the function only (its locals set to none there).
         if (0 in successors(block.terminator)) { return 'a jump to the first block' }
@@ -298,6 +296,7 @@ immut binaryHelpers: Map[string, string] = [
     'IntPow': 'koji_int_pow',
     'BytePow': 'koji_byte_pow'
 ]
+
 immut placed = ['IntPow', 'BytePow']
 // Done inline, checked.
 immut checkedBinaries = ['ShiftLeft', 'ShiftRight', 'ByteDiv', 'ByteRem', 'ByteShiftLeft', 'ByteShiftRight']
@@ -1337,10 +1336,6 @@ function Lowering.heldAtBlocks(mut self): int[][] {
 
     return heldIn
 }
-
-
-
-
 
 // `step` for the summaries of a block (see `heldAtBlocks`): what an instruction does to those that
 // hold a reference after the instructions before it whatever held one (`low`), and to those that

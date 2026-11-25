@@ -1,0 +1,503 @@
+// `kojic fmt`: the code of Koji in its one style (doc/conventions.md), from its tokens. The lines
+// stay where they were written; within each, the spaces between the tokens are those of the style,
+// and its indentation that of the brackets open around it (4 spaces each, one more for a line that
+// goes on from the one before). Strings take single quotes where they need no escape for it.
+// Blank lines are kept, one at most, but none right after an opening bracket or before a closing
+// one; a declaration of several lines at the top level is separated from its neighbors by one.
+// Comments stay where they are: one space before a comment after code, the indentation of the
+// code for a comment on its own line. The file ends with one line break.
+//
+// What is written is checked: the same tokens (strings by their values) and the same comments as
+// the source, or no text at all.
+
+import { Spanned, Token, tokenize } from 'lexer.kj'
+import parser from 'parser.kj'
+
+// A token, by its text in the source, or a comment.
+type Piece = {
+    token: Token
+    text: string
+    comment: boolean
+    line: int
+    endLine: int
+}
+
+// A line of the source, its pieces, and the blank line before it.
+type Line = {
+    pieces: Piece[]
+    blankBefore: boolean
+    // Its indentation, in levels, and the depth of brackets open after it.
+    indent: int
+    depthBefore: int
+    depthAfter: int
+}
+
+immut openers = ['(', '[', '{']
+immut closers = [')', ']', '}']
+
+// The binary operators: a space on each side.
+immut binary = [
+    '=', '+=', '-=', '*=', '/=', '%=', '**=', '<<=', '>>=', '&=', '|=', '^=', '==', '!=', '<', '>', '<=', '>=',
+    '+', '-', '*', '/', '%', '**', '<<', '>>', '&', '|', '^', '=>', '->'
+]
+
+// The words of a declaration at the top level, which a blank line separates when it takes several lines.
+immut wordsOfDeclarations = ['function', 'type', 'export', 'opaque', 'foreign', 'extern', 'test', 'import']
+
+// The source in the style of Koji, or why it cannot be: its syntax is wrong, or (a bug of the
+// formatter) what it would write is not the same program.
+export function format(source: string): Result[string, string] {
+    match (parser.parse(source)) {
+        Ok(_) => {}
+        Err(message) => return Err(message)
+    }
+
+    immut chars = source.chars()
+    immut pieces = piecesOf(tokenize(source), chars)
+    mut lines = linesOf(pieces)
+    indentLines(mut lines)
+    separate(mut lines)
+    immut text = write(lines)
+
+    if (not same(source, text)) { return Err('kojic fmt would change the program (a bug of the formatter): the file is left as it is') }
+
+    return Ok(text)
+}
+
+function part(chars: char[], start: int, end: int): string {
+    mut text = ''
+
+    for i in range(start, end) {
+        text += string(chars[i])
+    }
+
+    return text
+}
+
+// The tokens and the comments of the source, in order.
+function piecesOf(tokens: Spanned[], chars: char[]): Piece[] {
+    mut pieces: Piece[] = []
+    mut previousEnd = 0
+    mut line = 1
+
+    for spanned in tokens {
+        // The comments between the last token and this one.
+        mut at = previousEnd
+
+        while (at < spanned.start) {
+            immut c = chars[at]
+
+            if (c == '\n') {
+                line += 1
+                at += 1
+                continue
+            }
+
+            if (c == '/' and at + 1 < spanned.start and chars[at + 1] == '/') {
+                mut end = at
+
+                while (end < spanned.start and chars[end] != '\n') {
+                    end += 1
+                }
+
+                pieces.push({ token: End, text: part(chars, at, end).trim(), comment: true, line: line, endLine: line })
+                at = end
+                continue
+            }
+
+            if (c == '/' and at + 1 < spanned.start and chars[at + 1] == '*') {
+                mut end = at + 2
+
+                while (end + 1 < spanned.start and not (chars[end] == '*' and chars[end + 1] == '/')) {
+                    end += 1
+                }
+
+                end = if (end + 1 < spanned.start) { end + 2 } else { spanned.start }
+                immut text = part(chars, at, end)
+                mut lines = 0
+
+                for ch in text {
+                    if (ch == '\n') { lines += 1 }
+                }
+
+                pieces.push({ token: End, text: text, comment: true, line: line, endLine: line + lines })
+                line += lines
+                at = end
+                continue
+            }
+
+            at += 1
+        }
+
+        if (spanned.token == End) { break }
+
+        pieces.push({ token: spanned.token, text: textOf(spanned.token, part(chars, spanned.start, spanned.end)), comment: false, line: spanned.line, endLine: spanned.endLine })
+        previousEnd = spanned.end
+        line = spanned.endLine
+    }
+
+    return pieces
+}
+
+// The text of a token: a string in double quotes takes single quotes, if it has none in it (its
+// escaped double quotes need no escape then).
+function textOf(token: Token, written: string): string {
+    match (token) {
+        StringLiteral(_) => {}
+        _ => return written
+    }
+
+    if (not written.startsWith('"') or written.indexOf('\'') is Some) { return written }
+
+    immut chars = written.chars()
+    mut text = '\''
+    mut i = 1
+
+    while (i < chars.length() - 1) {
+        if (chars[i] == '\\' and i + 1 < chars.length() - 1) {
+            if (chars[i + 1] != '"') { text += '\\' }
+
+            text += string(chars[i + 1])
+            i += 2
+            continue
+        }
+
+        text += string(chars[i])
+        i += 1
+    }
+
+    return text + '\''
+}
+
+// The pieces by line: a line goes on after a piece of several lines (a template, a comment) on the
+// line where it ends.
+function linesOf(pieces: Piece[]): Line[] {
+    mut lines: Line[] = []
+    mut current: Piece[] = []
+    mut lastLine = 0
+
+    for piece in pieces {
+        if (current.length() > 0 and piece.line > lastLine) {
+            lines.push({ pieces: current, blankBefore: false, indent: 0, depthBefore: 0, depthAfter: 0 })
+            current = []
+        }
+
+        if (current.length() == 0 and lines.length() > 0 and piece.line > lastLine + 1) {
+            current.push(piece)
+            lines.push({ pieces: [], blankBefore: true, indent: 0, depthBefore: 0, depthAfter: 0 })
+            lastLine = piece.endLine
+            continue
+        }
+
+        current.push(piece)
+        lastLine = piece.endLine
+    }
+
+    if (current.length() > 0) { lines.push({ pieces: current, blankBefore: false, indent: 0, depthBefore: 0, depthAfter: 0 }) }
+
+    // An empty line marks a blank line before the next one.
+    mut result: Line[] = []
+    mut blank = false
+
+    for line in lines {
+        if (line.pieces.length() == 0) {
+            blank = true
+            continue
+        }
+
+        result.push({ pieces: line.pieces, blankBefore: blank, indent: 0, depthBefore: 0, depthAfter: 0 })
+        blank = false
+    }
+
+    return result
+}
+
+function isSymbol(piece: Piece, texts: string[]): boolean {
+    if (piece.comment) { return false }
+
+    return match (piece.token) {
+        Symbol(text) => text in texts
+        _ => false
+    }
+}
+
+function isKeyword(piece: Piece, names: string[]): boolean {
+    if (piece.comment) { return false }
+
+    return match (piece.token) {
+        Keyword(name) => name in names
+        _ => false
+    }
+}
+
+// The last piece of a line that is not a comment, if any.
+function lastCode(line: Line): Option[Piece] {
+    for i in range(line.pieces.length() - 1, -1, -1) {
+        if (not line.pieces[i].comment) { return Some(line.pieces[i]) }
+    }
+
+    return None
+}
+
+// Whether a line goes on from the one before it: it starts with a binary operator, `and`, `or` or
+// `.`, or the one before ends with one.
+function goesOn(line: Line, previous: Option[Line]): boolean {
+    immut first = line.pieces[0]
+
+    if (isSymbol(first, binary) or isSymbol(first, ['.', '..', '?']) or isKeyword(first, ['and', 'or'])) { return true }
+
+    return match (previous) {
+        Some(before) => match (lastCode(before)) {
+            Some(last) => isSymbol(last, binary) or isKeyword(last, ['and', 'or', 'not'])
+            None => false
+        }
+        None => false
+    }
+}
+
+// The indentation of each line: the level of the innermost bracket open before it (the level of
+// the line that opened it, plus one), or that of the line that opened the bracket it starts by
+// closing; one more for a line that goes on from the one before.
+function indentLines(mut lines: Line[]) {
+    mut levels: int[] = []
+    mut previous: Option[Line] = None
+
+    for i in range(lines.length()) {
+        immut line = lines[i]
+        immut first = line.pieces[0]
+        mut indent = 0
+        lines[i].depthBefore = levels.length()
+
+        if (isSymbol(first, closers) and levels.length() > 0) {
+            indent = levels[levels.length() - 1]
+        } else {
+            indent = if (levels.length() == 0) { 0 } else { levels[levels.length() - 1] + 1 }
+
+            if (not first.comment and goesOn(line, previous)) { indent += 1 }
+        }
+
+        lines[i].indent = indent
+
+        for piece in line.pieces {
+            if (isSymbol(piece, openers)) { levels.push(indent) }
+
+            if (isSymbol(piece, closers) and levels.length() > 0) { levels.pop() }
+        }
+
+        lines[i].depthAfter = levels.length()
+
+        if (not first.comment or line.pieces.length() > 1) { previous = Some(lines[i]) }
+    }
+
+    // A comment on its own line takes the indentation of the code below it (a line that goes on,
+    // say), but of a closing bracket.
+    for i in range(lines.length() - 2, -1, -1) {
+        if (not onlyComments(lines[i])) { continue }
+
+        immut next = lines[i + 1]
+
+        if (next.depthBefore == lines[i].depthBefore and not isSymbol(next.pieces[0], closers)) { lines[i].indent = next.indent }
+    }
+}
+
+// The blank lines: none right after an opening bracket or before a closing one, and one around a
+// declaration of several lines at the top level (before the comments that go with it).
+function separate(mut lines: Line[]) {
+    for i in range(lines.length()) {
+        if (not lines[i].blankBefore or i == 0) { continue }
+
+        immut before = lines[i - 1]
+
+        match (lastCode(before)) {
+            Some(last) => {
+                if (isSymbol(last, openers) and before.depthAfter > before.depthBefore) { lines[i].blankBefore = false }
+            }
+            None => {}
+        }
+
+        if (isSymbol(lines[i].pieces[0], closers)) { lines[i].blankBefore = false }
+    }
+
+    // The statements at the top level: from a line of code at depth 0 to the line that closes what
+    // it opens. The comments on their own lines right above one (no blank line between) go with it.
+    mut heads: int[] = []
+    mut starts: int[] = []
+    mut ends: int[] = []
+    mut i = 0
+
+    while (i < lines.length()) {
+        if (lines[i].depthBefore != 0 or onlyComments(lines[i])) {
+            i += 1
+            continue
+        }
+
+        immut start = i
+        mut head = i
+
+        while (head > 0 and onlyComments(lines[head - 1]) and lines[head - 1].depthBefore == 0 and not lines[head].blankBefore) {
+            head -= 1
+        }
+
+        while (i < lines.length() - 1 and lines[i].depthAfter != 0) {
+            i += 1
+        }
+
+        heads.push(head)
+        starts.push(start)
+        ends.push(i)
+        i += 1
+    }
+
+    for k in range(1, starts.length()) {
+        immut multiline = ends[k] > starts[k]
+        immut previousMultiline = ends[k - 1] > starts[k - 1]
+
+        if (multiline or previousMultiline) { lines[heads[k]].blankBefore = true }
+    }
+}
+
+function onlyComments(line: Line): boolean {
+    for piece in line.pieces {
+        if (not piece.comment) { return false }
+    }
+
+    return true
+}
+
+// Whether a space goes between two pieces of a line.
+function spaceBetween(before: Piece, after: Piece, beforeBefore: Option[Piece]): boolean {
+    if (after.comment) { return true }
+
+    if (before.comment) { return true }
+
+    if (isSymbol(before, ['(', '[']) or isSymbol(after, [')', ']', ',', ';', '.', '..', '?'])) { return false }
+
+    if (isSymbol(before, ['.', '..'])) { return false }
+
+    if (isSymbol(after, [':'])) { return false }
+
+    if (isSymbol(before, ['{'])) { return not isSymbol(after, ['}']) }
+
+    if (isSymbol(after, ['}'])) { return true }
+
+    // A unary minus or `~`: right before its operand.
+    if (isSymbol(before, ['-', '~']) and isUnary(beforeBefore)) { return false }
+
+    // A word of the language after `.` is a name (`Set.from(...)`).
+    immut member = match (beforeBefore) {
+        Some(piece) => isSymbol(piece, ['.'])
+        None => false
+    }
+
+    if (isSymbol(after, ['(', '['])) { return not (member or callable(before)) }
+
+    return true
+}
+
+// Whether what comes before a `-` makes it unary: nothing, an operator, an opening bracket, a
+// separator, a word of the language.
+function isUnary(before: Option[Piece]): boolean {
+    return match (before) {
+        None => true
+        Some(piece) => piece.comment or isSymbol(piece, binary) or isSymbol(piece, ['(', '[', '{', ',', ':', ';', '?']) or piece.token is Keyword
+    }
+}
+
+// Whether a `(` or `[` right after the piece is a call or an index (no space), not a group or a list.
+function callable(piece: Piece): boolean {
+    if (piece.comment) { return false }
+
+    return match (piece.token) {
+        Identifier(_) => true
+        StringLiteral(_) => true
+        TemplateString(_) => true
+        Symbol(text) => text == ')' or text == ']' or text == '?'
+        _ => false
+    }
+}
+
+function write(lines: Line[]): string {
+    mut text = ''
+
+    for i in range(lines.length()) {
+        immut line = lines[i]
+
+        if (line.blankBefore and i > 0) { text += '\n' }
+
+        for _ in range(line.indent) {
+            text += '    '
+        }
+
+        for k in range(line.pieces.length()) {
+            immut piece = line.pieces[k]
+
+            if (k > 0) {
+                immut beforeBefore = if (k > 1) { Some(line.pieces[k - 2]) } else { None }
+
+                if (spaceBetween(line.pieces[k - 1], piece, beforeBefore)) { text += ' ' }
+            }
+
+            text += piece.text
+        }
+
+        text += '\n'
+    }
+
+    return text
+}
+
+// Whether two sources are the same program, with the same comments: their tokens (strings by their
+// values) and their comments, in order.
+function same(source: string, formatted: string): boolean {
+    immut a = piecesOf(tokenize(source), source.chars())
+    immut b = piecesOf(tokenize(formatted), formatted.chars())
+
+    if (a.length() != b.length()) { return false }
+
+    for i in range(a.length()) {
+        if (a[i].comment != b[i].comment) { return false }
+
+        if (a[i].comment and a[i].text.trim() != b[i].text.trim()) { return false }
+
+        if (not a[i].comment and a[i].token != b[i].token) { return false }
+    }
+
+    return true
+}
+
+test 'spaces and indentation' {
+    immut source = 'function f(x:int):int{\nif(x>0){return -x}\nimmut list=[1,2,3]\nreturn list[0]+f( x-1 )\n}\n'
+    assert(format(source) == Ok('function f(x: int): int {\n    if (x > 0) { return -x }\n    immut list = [1, 2, 3]\n    return list[0] + f(x - 1)\n}\n'), format(source).debug())
+}
+
+test 'quotes' {
+    assert(format('print("a", "it\'s", "say \\"hi\\"")\n') == Ok('print(\'a\', "it\'s", \'say "hi"\')\n'), format('print("a", "it\'s", "say \\"hi\\"")\n').debug())
+}
+
+test 'blank lines' {
+    immut source = 'import file\nfunction a() {\n\n    print(1)\n\n\n    print(2)\n\n}\nfunction b() {\n    print(3)\n}\nimmut x = 1\nimmut y = 2\n\n\n'
+    assert(format(source) == Ok('import file\n\nfunction a() {\n    print(1)\n\n    print(2)\n}\n\nfunction b() {\n    print(3)\n}\n\nimmut x = 1\nimmut y = 2\n'), format(source).debug())
+}
+
+test 'comments' {
+    immut source = '// The value.\nimmut x = 1   // one\nfunction f() {\n// inside\n    print(x)\n}\n'
+    assert(format(source) == Ok('// The value.\nimmut x = 1 // one\n\nfunction f() {\n    // inside\n    print(x)\n}\n'), format(source).debug())
+}
+
+test 'lines that go on, templates, maps and ranges' {
+    immut source = 'immut ok = a()\nand b()\nimmut m: Map[string, int] = [:]\nprint(`a\n  ${x}`, items[1..], m[\'k\'])\n'
+    assert(format(source) == Ok('immut ok = a()\n    and b()\nimmut m: Map[string, int] = [:]\nprint(`a\n  ${x}`, items[1..], m[\'k\'])\n'), format(source).debug())
+}
+
+test 'words of the language as names' {
+    assert(format('immut s: Set[int] = Set.from([])\n') == Ok('immut s: Set[int] = Set.from([])\n'))
+}
+
+test 'a comment takes the indentation of the code below it' {
+    immut source = 'immut x = a()\n// then b\n    and b()\nfunction f() {\n    print(1)\n// the end\n}\n'
+    assert(format(source) == Ok('immut x = a()\n    // then b\n    and b()\n\nfunction f() {\n    print(1)\n    // the end\n}\n'), format(source).debug())
+}
+
+test 'what does not parse is left as it is' {
+    assert(format('function (') is Err)
+}

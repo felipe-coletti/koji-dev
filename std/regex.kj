@@ -2,7 +2,12 @@
 // into a tree, compiled into a program for a Pike machine (a Thompson automaton run with one
 // thread per state), and matched in a time proportional to the length of the text: no
 // backtracking. The first match is the leftmost one, and among those the one that the pattern
-// prefers (the first branch of `|`, the longest repetition unless it is lazy).
+// prefers (the first branch of `|`, the longest repetition unless it is lazy). A look-around is a
+// program of its own, whose answer at every position of the text comes from one pass over it (a
+// table, made when the look-around is first tried): a look-behind matches before a position when
+// its program, started at every position, reaches its end there going forward; a look-ahead, when
+// its program reversed does, going backward. So a look-behind can have any length, and matching
+// stays proportional to the length of the text.
 
 // A compiled regular expression: built by `compile` only.
 export opaque type Regex = {
@@ -17,6 +22,15 @@ export opaque type Regex = {
     // (`prefilter`): a search skips the positions where none of them matches.
     firsts: Instruction[]
     prefilter: boolean
+    // The programs of the look-arounds (`AroundIns`).
+    looks: Look[]
+}
+
+// The program of a look-around, which makes its table: for a look-ahead (`ahead`), its pattern
+// reversed, run backward over the text; for a look-behind, its pattern, run forward.
+type Look = {
+    program: Instruction[]
+    ahead: boolean
 }
 
 // A match: its text and its positions in characters (`end` excluded).
@@ -29,7 +43,7 @@ export type Match = {
 export type RegexError = {
     // The syntax is wrong: `(abc`.
     InvalidPattern(pattern: string, message: string)
-    // Valid, but not supported: look-around, backreferences.
+    // Valid, but not supported: backreferences, a group that captures in a look-around.
     Unsupported(pattern: string, message: string)
     // Too large to compile: `a{1000}{1000}`.
     TooLarge(pattern: string)
@@ -56,6 +70,8 @@ type Node = {
     Dot(all: boolean)
     Set(set: CharClass, fold: boolean)
     Look(kind: int)
+    // A look-around: `(?=...)`, `(?!...)` (`ahead`), `(?<=...)`, `(?<!...)`; `negate` for `!`.
+    Around(inner: Node, ahead: boolean, negate: boolean)
     Capture(index: int, inner: Node)
     Concat(items: Node[])
     Alternate(items: Node[])
@@ -110,6 +126,8 @@ type Instruction = {
     JumpIns(target: int)
     SaveIns(slot: int)
     LookIns(kind: int)
+    // Goes on when the program `looks[index]` matches here (does not, when `negate`).
+    AroundIns(index: int, negate: boolean)
     MatchIns
 }
 
@@ -128,6 +146,8 @@ type Parser = {
     position: int
     groups: int
     names: Map[string, int]
+    // How many look-arounds the parser is in (a group in one does not capture).
+    looks: int
 }
 
 // The most instructions a program may have.
@@ -135,7 +155,7 @@ immut largest = 500000
 
 // The regular expression `pattern`, compiled.
 export function compile(pattern: string): Result[Regex, RegexError] {
-    mut parser: Parser = { pattern: pattern, chars: pattern.chars(), position: 0, groups: 1, names: [:] }
+    mut parser: Parser = { pattern: pattern, chars: pattern.chars(), position: 0, groups: 1, names: [:], looks: 0 }
     mut flags: Flags = { fold: false, multiline: false, dotAll: false, extended: false, lazy: false }
     immut tree = parser.alternation(mut flags, 0)?
 
@@ -144,14 +164,15 @@ export function compile(pattern: string): Result[Regex, RegexError] {
     if (size(tree) > largest) { return Err(TooLarge(pattern)) }
 
     mut program: Instruction[] = [SaveIns(0)]
-    emit(tree, mut program)
+    mut looks: Look[] = []
+    emit(tree, mut program, mut looks)
     program.push(SaveIns(1))
     program.push(MatchIns)
     mut firsts: Instruction[] = []
     immut prefilter = firstInstructions(program, mut firsts)
     return Ok({
         pattern: pattern, program: program, groups: parser.groups, names: parser.names, anchored: startsAnchored(tree),
-        firsts: firsts, prefilter: prefilter
+        firsts: firsts, prefilter: prefilter, looks: looks
     })
 }
 
@@ -184,6 +205,7 @@ function firstInstructions(program: Instruction[], mut firsts: Instruction[]): b
             }
             SaveIns(_) => pending.push(pc + 1)
             LookIns(_) => return false
+            AroundIns(_, _) => return false
             MatchIns => return false
             other => firsts.push(other)
         }
@@ -380,6 +402,8 @@ function literal(c: char, fold: boolean): Node {
 
 function Parser.group(mut self, mut flags: Flags, depth: int): Result[Option[Node], RegexError] {
     if (not self.at('?')) {
+        if (self.looks > 0) { return Err(self.unsupported('a group in a look-around captures nothing: write (?:...)')) }
+
         immut index = self.groups
         self.groups += 1
         return Ok(Some(Capture(index, self.groupBody(flags, depth)?)))
@@ -391,10 +415,18 @@ function Parser.group(mut self, mut flags: Flags, depth: int): Result[Option[Nod
 
     immut c = self.peek()
 
-    if (c == '=' or c == '!') { return Err(self.unsupported('look-around, including look-ahead and look-behind, is not supported')) }
+    // A look-ahead (`(?=...)`, `(?!...)`) or a look-behind (`(?<=...)`, `(?<!...)`).
+    immut behind = c == '<' and self.position + 1 < self.chars.length() and (self.chars[self.position + 1] == '=' or self.chars[self.position + 1] == '!')
 
-    if (c == '<' and self.position + 1 < self.chars.length() and (self.chars[self.position + 1] == '=' or self.chars[self.position + 1] == '!')) {
-        return Err(self.unsupported('look-around, including look-ahead and look-behind, is not supported'))
+    if (c == '=' or c == '!' or behind) {
+        if (behind) { self.position += 1 }
+
+        immut negate = self.peek() == '!'
+        self.position += 1
+        self.looks += 1
+        immut inner = self.groupBody(flags, depth)?
+        self.looks -= 1
+        return Ok(Some(Around(inner, not behind, negate)))
     }
 
     if (c == 'P' and self.position + 1 < self.chars.length() and self.chars[self.position + 1] == '=') {
@@ -407,6 +439,8 @@ function Parser.group(mut self, mut flags: Flags, depth: int): Result[Option[Nod
         immut name = self.groupName()?
 
         if (self.names.has(name)) { return Err(self.invalid('duplicate capture group name')) }
+
+        if (self.looks > 0) { return Err(self.unsupported('a group in a look-around captures nothing: write (?:...)')) }
 
         immut index = self.groups
         self.groups += 1
@@ -880,6 +914,7 @@ function size(node: Node): int {
     return match (node) {
         Empty => 0
         Capture(_, inner) => size(inner) + 2
+        Around(inner, _, _) => size(inner) + 2
         Concat(items) => {
             mut total = 0
 
@@ -914,81 +949,110 @@ function size(node: Node): int {
     }
 }
 
-function emit(node: Node, mut program: Instruction[]) {
+function emit(node: Node, mut program: Instruction[], mut looks: Look[]) {
     match (node) {
         Empty => {}
         Literal(c, fold) => program.push(CharIns(c, fold))
         Dot(all) => program.push(AnyIns(all))
         Set(set, fold) => program.push(SetIns(set, fold))
         Look(kind) => program.push(LookIns(kind))
+        Around(inner, ahead, negate) => {
+            // Its own program: a look-ahead's reversed, to be run backward over the text.
+            mut own: Instruction[] = []
+            emit(if (ahead) { reversed(inner) } else { inner }, mut own, mut looks)
+            own.push(MatchIns)
+            program.push(AroundIns(looks.length(), negate))
+            looks.push({ program: own, ahead: ahead })
+        }
         Capture(index, inner) => {
             program.push(SaveIns(index * 2))
-            emit(inner, mut program)
+            emit(inner, mut program, mut looks)
             program.push(SaveIns(index * 2 + 1))
         }
         Concat(items) => {
             for item in items {
-                emit(item, mut program)
+                emit(item, mut program, mut looks)
             }
         }
-        Alternate(items) => emitAlternation(items, 0, mut program)
+        Alternate(items) => emitAlternation(items, 0, mut program, mut looks)
         Repeat(inner, min, max, greedy) => {
             for i in range(min) {
-                emit(inner, mut program)
+                emit(inner, mut program, mut looks)
             }
 
             if (max == -1) {
-                emitStar(inner, greedy, mut program)
+                emitStar(inner, greedy, mut program, mut looks)
                 return
             }
 
-            emitOptional(inner, max - min, greedy, mut program)
+            emitOptional(inner, max - min, greedy, mut program, mut looks)
         }
     }
 }
 
 // `items[index] | items[index + 1] | ...`: each branch preferred to the ones after it.
-function emitAlternation(items: Node[], index: int, mut program: Instruction[]) {
+function emitAlternation(items: Node[], index: int, mut program: Instruction[], mut looks: Look[]) {
     if (index == items.length() - 1) {
-        emit(items[index], mut program)
+        emit(items[index], mut program, mut looks)
         return
     }
 
     immut split = program.length()
     program.push(SplitIns(0, 0))
-    emit(items[index], mut program)
+    emit(items[index], mut program, mut looks)
     immut jump = program.length()
     program.push(JumpIns(0))
     immut next = program.length()
-    emitAlternation(items, index + 1, mut program)
+    emitAlternation(items, index + 1, mut program, mut looks)
     program[split] = SplitIns(split + 1, next)
     program[jump] = JumpIns(program.length())
 }
 
 // `inner*`.
-function emitStar(inner: Node, greedy: boolean, mut program: Instruction[]) {
+function emitStar(inner: Node, greedy: boolean, mut program: Instruction[], mut looks: Look[]) {
     immut split = program.length()
     program.push(SplitIns(0, 0))
-    emit(inner, mut program)
+    emit(inner, mut program, mut looks)
     program.push(JumpIns(split))
     immut after = program.length()
     program[split] = if (greedy) { SplitIns(split + 1, after) } else { SplitIns(after, split + 1) }
 }
 
 // `(inner(inner(...)?)?)?`, `count` times.
-function emitOptional(inner: Node, count: int, greedy: boolean, mut program: Instruction[]) {
+function emitOptional(inner: Node, count: int, greedy: boolean, mut program: Instruction[], mut looks: Look[]) {
     mut splits: int[] = []
 
     for i in range(count) {
         splits.push(program.length())
         program.push(SplitIns(0, 0))
-        emit(inner, mut program)
+        emit(inner, mut program, mut looks)
     }
 
     immut after = program.length()
 
     for split in splits {
         program[split] = if (greedy) { SplitIns(split + 1, after) } else { SplitIns(after, split + 1) }
+    }
+}
+
+// The pattern that matches the reversed texts of `node`: what a look-ahead runs backward.
+function reversed(node: Node): Node {
+    return match (node) {
+        Concat(items) => {
+            mut backward: Node[] = []
+
+            for i in range(items.length() - 1, -1, -1) {
+                backward.push(reversed(items[i]))
+            }
+
+            Concat(backward)
+        }
+        Alternate(items) => Alternate(items.map((item) => reversed(item)))
+        Repeat(inner, min, max, greedy) => Repeat(reversed(inner), min, max, greedy)
+        Capture(index, inner) => Capture(index, reversed(inner))
+        // The rest reads one character, or none (an assertion, a look-around of its own, which is
+        // tried at a position whatever the direction).
+        other => other
     }
 }
 
@@ -1020,7 +1084,8 @@ type Thread = {
 
 // The slots (start and end of each group, -1 when it did not match) of the first match of the
 // program in `chars` from `start`, if there is one.
-function Regex.search(self, chars: char[], start: int): Option[int[]] {
+// `tables` keeps the answers of the look-arounds over `chars` (see `noTables`).
+function Regex.search(self, chars: char[], start: int, mut tables: boolean[][]): Option[int[]] {
     immut count = chars.length()
     mut empty: int[] = []
 
@@ -1051,7 +1116,7 @@ function Regex.search(self, chars: char[], start: int): Option[int[]] {
     while (true) {
         // A new thread at each position, after the others: they started earlier.
         if (found is None and (not self.anchored or position == 0)) {
-            self.follow(mut current, mut seen, step, { pc: 0, slots: empty }, chars, position)
+            self.follow(mut current, mut seen, step, { pc: 0, slots: empty }, chars, position, mut tables)
         }
 
         step += 1
@@ -1086,7 +1151,7 @@ function Regex.search(self, chars: char[], start: int): Option[int[]] {
             }
 
             if (position < count and consumes(instruction, chars[position])) {
-                self.follow(mut next, mut seen, step, { pc: thread.pc + 1, slots: thread.slots }, chars, position + 1)
+                self.follow(mut next, mut seen, step, { pc: thread.pc + 1, slots: thread.slots }, chars, position + 1, mut tables)
             }
         }
 
@@ -1102,7 +1167,7 @@ function Regex.search(self, chars: char[], start: int): Option[int[]] {
 
 // Adds `thread` to `list`, through the instructions that consume nothing, in the order of
 // preference. `seen` and `step` keep each state once per step.
-function Regex.follow(self, mut list: Thread[], mut seen: int[], step: int, thread: Thread, chars: char[], position: int) {
+function Regex.follow(self, mut list: Thread[], mut seen: int[], step: int, thread: Thread, chars: char[], position: int, mut tables: boolean[][]) {
     if (seen[thread.pc] == step) { return }
 
     // Most often the next instruction reads a character: the thread waits for it.
@@ -1139,9 +1204,111 @@ function Regex.follow(self, mut list: Thread[], mut seen: int[], step: int, thre
             LookIns(kind) => {
                 if (holds(kind, chars, position)) { pending.push({ pc: current.pc + 1, slots: current.slots }) }
             }
+            AroundIns(index, negate) => {
+                if (self.around(index, chars, position, mut tables) != negate) { pending.push({ pc: current.pc + 1, slots: current.slots }) }
+            }
             _ => list.push(current)
         }
     }
+}
+
+// No answers of look-arounds yet: a table for each, made when it is first tried.
+function Regex.noTables(self): boolean[][] {
+    mut tables: boolean[][] = []
+
+    for _ in self.looks {
+        tables.push([])
+    }
+
+    return tables
+}
+
+// Whether the look-around `index` matches at `position` of `chars`, from its table.
+function Regex.around(self, index: int, chars: char[], position: int, mut tables: boolean[][]): boolean {
+    if (tables[index].length() == 0) { tables[index] = self.table(index, chars, mut tables) }
+
+    return tables[index][position]
+}
+
+// The answers of the look-around `index` at every position of `chars`, in one pass: its program
+// (reversed for a look-ahead) started at every position, going forward for a look-behind and
+// backward for a look-ahead; it matches at a position where a thread reaches the end.
+function Regex.table(self, index: int, chars: char[], mut tables: boolean[][]): boolean[] {
+    immut look = self.looks[index]
+    immut program = look.program
+    immut count = chars.length()
+    mut answers: boolean[] = []
+    mut seen: int[] = []
+
+    for i in range(count + 1) {
+        answers.push(false)
+    }
+
+    for i in range(program.length()) {
+        seen.push(-1)
+    }
+
+    mut current: int[] = []
+
+    for k in range(count + 1) {
+        immut position = if (look.ahead) { count - k } else { k }
+        mut following: int[] = []
+        mut matched = false
+
+        // The threads go on over the character between the last position and this one.
+        if (k > 0) {
+            immut c = if (look.ahead) { chars[position] } else { chars[position - 1] }
+
+            for pc in current {
+                if (consumes(program[pc], c) and self.close(program, mut following, mut seen, k, pc + 1, chars, position, mut tables)) { matched = true }
+            }
+        }
+
+        // And one starts here.
+        if (self.close(program, mut following, mut seen, k, 0, chars, position, mut tables)) { matched = true }
+
+        answers[position] = matched
+        current = following
+    }
+
+    return answers
+}
+
+// Adds to `list` the states that reading can go on from, from `pc` through the instructions that
+// read nothing; whether one of them is the end of the program.
+function Regex.close(self, program: Instruction[], mut list: int[], mut seen: int[], step: int, pc: int, chars: char[], position: int, mut tables: boolean[][]): boolean {
+    mut pending = [pc]
+    mut matched = false
+
+    while (true) {
+        immut current = match (pending.pop()) {
+            Some(found) => found
+            None => break
+        }
+
+        if (seen[current] == step) { continue }
+
+        seen[current] = step
+
+        match (program[current]) {
+            MatchIns => matched = true
+            JumpIns(target) => pending.push(target)
+            SplitIns(first, second) => {
+                pending.push(second)
+                pending.push(first)
+            }
+            SaveIns(_) => pending.push(current + 1)
+            LookIns(kind) => {
+                if (holds(kind, chars, position)) { pending.push(current + 1) }
+            }
+            AroundIns(inner, negate) => {
+                if (self.around(inner, chars, position, mut tables) != negate) { pending.push(current + 1) }
+            }
+            _ => list.push(current)
+        }
+    }
+
+    return matched
 }
 
 function readsChar(instruction: Instruction): boolean {
@@ -1260,14 +1427,16 @@ function isWord(c: char): boolean {
 
 // Whether the pattern matches anywhere in `input`.
 function Regex.test(self, input: string): boolean {
-    return self.search(input.chars(), 0) is Some
+    mut tables = self.noTables()
+    return self.search(input.chars(), 0, mut tables) is Some
 }
 
 // The first match.
 function Regex.find(self, input: string): Option[Match] {
     immut chars = input.chars()
+    mut tables = self.noTables()
 
-    return match (self.search(chars, 0)) {
+    return match (self.search(chars, 0, mut tables)) {
         Some(slots) => Some(matchOf(chars, slots))
         None => None
     }
@@ -1295,9 +1464,10 @@ function Regex.matches(self, chars: char[]): int[][] {
     mut found: int[][] = []
     mut position = 0
     mut lastEnd = -1
+    mut tables = self.noTables()
 
     while (position <= chars.length()) {
-        immut slots = match (self.search(chars, position)) {
+        immut slots = match (self.search(chars, position, mut tables)) {
             Some(slots) => slots
             None => break
         }
@@ -1331,8 +1501,9 @@ function Regex.findAll(self, input: string): Match[] {
 // `$name` or `${name}` that of a named group, `$$` a `$`.
 function Regex.replace(self, input: string, replacement: string): string {
     immut chars = input.chars()
+    mut tables = self.noTables()
 
-    return match (self.search(chars, 0)) {
+    return match (self.search(chars, 0, mut tables)) {
         Some(slots) => piece(chars, 0, slots[0]) + self.expand(chars, slots, replacement) + piece(chars, slots[1], chars.length())
         None => input
     }

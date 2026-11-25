@@ -52,3 +52,12 @@ For upcoming features and long-term goals, see the [roadmap](doc/roadmap.md).
 ## Contributing
 
 Ideas, suggestions and contributions are welcome. See the [contributing guide](CONTRIBUTING.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
+---
+
+## License
+
+Koji is licensed under the [Apache License 2.0 with LLVM Exceptions](LICENSE): the programs you
+write in Koji are yours, under any license, and the compiled programs, though the runtime and the
+standard library of Koji are built into them, need not carry the license of Koji. [NOTICE](NOTICE)
+names the data of others that the standard library includes, under their own licenses.

@@ -836,4 +836,3 @@ extern function koji_string_free(text: Address) {
     immut capacity: int = read(text, 16)
     koji_memory_give(text, 3 + capacity / 8)
 }
-

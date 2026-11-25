@@ -11,12 +11,12 @@ The Koji compiler, `kojic`, is written in Koji, and compiles programs to machine
 A release has a package for each platform (`koji-<version>-<platform>.tar.gz`, a `.zip` for Windows): `kojic` and the runtime library next to it. Unpack it and add its directory to your `PATH`:
 
 ```sh
-tar -xzf koji-0.1.0-linux-x64.tar.gz
-export PATH=$PWD/koji-0.1.0-linux-x64:$PATH
+tar -xzf koji-0.2.0-linux-x64.tar.gz
+export PATH=$PWD/koji-0.2.0-linux-x64:$PATH
 kojic version
 ```
 
-On macOS, a downloaded executable is quarantined by the system: `xattr -d com.apple.quarantine koji-0.1.0-macos-arm64/kojic` lets it run (or build Koji from the repository, below).
+On macOS, a downloaded executable is quarantined by the system: `xattr -d com.apple.quarantine koji-0.2.0-macos-arm64/kojic` lets it run (or build Koji from the repository, below).
 
 ## Building
 
@@ -92,10 +92,11 @@ The message gives the file, the line and the column of the error, and shows the 
 | `kojic check <file.kj>` | Only checks syntax and types |
 | `kojic build <file.kj> [-o <output>]` | Compiles a program to an executable |
 | `kojic test [file.kj \| directory]...` | Runs the tests of files, the `test` blocks (see [Testing](testing.md)) |
+| `kojic fmt [file.kj \| directory]...` | Writes files in the style of Koji ([Conventions](conventions.md)); with `--check`, only lists those that are not |
 | `kojic lsp` | The language server, for editors (on the standard input and output) |
 | `kojic help` | Shows the available commands |
 
-`kojic build` compiles a program to a native executable, through C. `kojic run` does the same in a temporary file, runs it with the arguments and the input of `kojic`, and ends with its exit code.
+`kojic build` compiles a program to a native executable, of machine code that `kojic` generates and links itself. `kojic run` does the same in a temporary file, runs it with the arguments and the input of `kojic`, and ends with its exit code.
 
 ```sh
 kojic build hello.kj
@@ -106,7 +107,7 @@ kojic build hello.kj
 
 The extension of Visual Studio Code, with the syntax highlighting of Koji and its language server (`kojic lsp`), is on the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=koji-language.koji) and on [Open VSX](https://open-vsx.org/extension/koji-language/koji) (for VSCodium, Cursor and other editors): search for Koji in the extensions of the editor. Its source is [koji-vscode](https://github.com/koji-language/koji-vscode). The grammar of the syntax, which other editors can use too, is `editors/textmate/koji.tmLanguage.json`.
 
-`kojic lsp` is the language server, for any editor that speaks the Language Server Protocol (VS Code, Neovim, Helix, Zed, Emacs...): it shows every error of a file as it is edited, the type of what is under the cursor, and goes to where a name is declared, in the file or in the module it comes from.
+`kojic lsp` is the language server, for any editor that speaks the Language Server Protocol (VS Code, Neovim, Helix, Zed, Emacs...): it shows every error of a file as it is edited, the type of what is under the cursor with the comment above its declaration (see [Comments](comments.md#documentation)), goes to where a name is declared, in the file or in the module it comes from, and formats the file as `kojic fmt` does.
 
 ## Examples
 

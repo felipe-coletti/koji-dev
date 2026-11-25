@@ -491,9 +491,6 @@ function deadCopies(given: IrFunction): IrFunction {
     return routine
 }
 
-
-
-
 // A branch to a block of copies that branches on a value known on that edge (the condition of the
 // branch, or a copy of it, or a constant copied): the edge goes to a block of its own with those
 // copies, which goes where that branch would (`a or b` of functions inlined: `t = a; branch a, x,

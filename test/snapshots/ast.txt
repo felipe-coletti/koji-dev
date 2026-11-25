@@ -65,10 +65,10 @@
 (at 7 (type Dictionary () (alias Map[string, string])))
 (at 9 (function describe () ((param product Product)) string (block (at 10 (return (template (expr (member (name product) name)) (text ' (') (expr (member (name product) id)) (text ') - ') (expr (member (name product) price))))))))
 (at 13 (immut translations Dictionary (map (entry (string 'hello') (string 'olá')) (entry (string 'world') (string 'mundo')))))
-(at 19 (call (name print) (call (name describe) (object (field 'id' (int 1)) (field 'name' (string 'Pen')) (field 'price' (decimal 2.5))))))
-(at 20 (call (name print) (index (name translations) (string 'hello'))))
-(at 22 (immut label string (match (call (member (name translations) length)) (arm (literal (int 0)) _ (string 'empty')) (arm (bind n) (binary < (name n) (int 3)) (string 'small')) (arm (wildcard) _ (string 'large')))))
-(at 28 (call (name print) (name label)))
+(at 18 (call (name print) (call (name describe) (object (field 'id' (int 1)) (field 'name' (string 'Pen')) (field 'price' (decimal 2.5))))))
+(at 19 (call (name print) (index (name translations) (string 'hello'))))
+(at 21 (immut label string (match (call (member (name translations) length)) (arm (literal (int 0)) _ (string 'empty')) (arm (bind n) (binary < (name n) (int 3)) (string 'small')) (arm (wildcard) _ (string 'large')))))
+(at 27 (call (name print) (name label)))
 ==== test/lexer/edge.kj
 error: syntax error: line 1:58: expected member name after '.', found 3
 ==== test/lexer/edge2.kj

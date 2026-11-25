@@ -787,3 +787,59 @@ function decimalOf(text: string): Result[decimal, ParseError] {
     return Ok(value)
 }
 
+// The methods of lists that take a function (`items.map(f)`...): the compiler calls them with the
+// list first, for its type of items (and of results).
+
+function listMap[T, U](items: T[], transform: (T) => U): U[] {
+    mut results: U[] = []
+
+    for item in items {
+        results.push(transform(item))
+    }
+
+    return results
+}
+
+function listFilter[T](items: T[], keep: (T) => boolean): T[] {
+    mut kept: T[] = []
+
+    for item in items {
+        if (keep(item)) { kept.push(item) }
+    }
+
+    return kept
+}
+
+function listReduce[T, A](items: T[], initial: A, combine: (A, T) => A): A {
+    mut result = initial
+
+    for item in items {
+        result = combine(result, item)
+    }
+
+    return result
+}
+
+function listAny[T](items: T[], test: (T) => boolean): boolean {
+    for item in items {
+        if (test(item)) { return true }
+    }
+
+    return false
+}
+
+function listAll[T](items: T[], test: (T) => boolean): boolean {
+    for item in items {
+        if (not test(item)) { return false }
+    }
+
+    return true
+}
+
+function listFind[T](items: T[], test: (T) => boolean): Option[T] {
+    for item in items {
+        if (test(item)) { return Some(item) }
+    }
+
+    return None
+}

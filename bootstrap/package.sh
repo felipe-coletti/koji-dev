@@ -1,8 +1,8 @@
 #!/bin/sh
 # Packs a release of Koji for every platform, from build/kojic (bootstrap/build.sh): in dist/,
 # koji-<version>-<platform>.tar.gz (koji-<version>-windows-x64.zip), each with kojic and the runtime
-# library next to it, the README and the license, and SHA256SUMS of them. Run from any platform of
-# the seed: Koji builds and links for the others itself.
+# library next to it, the README, the license and its notice, and SHA256SUMS of them. Run from any
+# platform of the seed: Koji builds and links for the others itself.
 #
 #     bootstrap/package.sh
 set -eu
@@ -32,7 +32,7 @@ for platform in linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64; do
     mkdir -p "dist/$name"
     KOJI_TARGET=$target build/kojic library -o "dist/$name/libkoji_runtime.a"
     KOJI_TARGET=$target KOJI_LINKER=koji KOJI_RUNTIME="$PWD/dist/$name/libkoji_runtime.a" build/kojic build compiler/main.kj -o "dist/$name/kojic$exe"
-    cp README.md LICENSE CHANGELOG.md "dist/$name/"
+    cp README.md LICENSE NOTICE CHANGELOG.md "dist/$name/"
 
     if [ "$platform" = windows-x64 ]; then
         (cd dist && zip -qr "$name.zip" "$name")
