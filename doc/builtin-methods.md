@@ -55,6 +55,19 @@ The `is...` methods return `false` for an empty string.
 | `list.indexOf(x)`     | Position of the first `x` (equatable items)                    | `[5, 6].indexOf(6) → Some(1)`        |
 | `list.join(sep)`      | Joins a list of strings, with `sep` between them               | `['a', 'b'].join(', ') → 'a, b'`     |
 
+Methods that take a function, which receives each item (its parameters need no types: they are those of the items). None changes the list:
+
+| Method                    | Description                                                         | Example                                      |
+| ------------------------- | ------------------------------------------------------------------- | -------------------------------------------- |
+| `list.map(f)`             | A list of what `f` gives for each item                              | `[1, 2].map((x) => x * 10) → [10, 20]`       |
+| `list.filter(f)`          | The items for which `f` gives `true`                                | `[1, 2, 3].filter((x) => x > 1) → [2, 3]`    |
+| `list.reduce(initial, f)` | `f(f(initial, first), second)`... over every item                   | `[1, 2, 3].reduce(0, (sum, x) => sum + x) → 6` |
+| `list.any(f)`             | Whether `f` gives `true` for an item (`false` for an empty list)    | `[1, 2].any((x) => x > 1) → true`            |
+| `list.all(f)`             | Whether `f` gives `true` for every item (`true` for an empty list)  | `[1, 2].all((x) => x > 1) → false`           |
+| `list.find(f)`            | The first item for which `f` gives `true`, or `None`                | `[1, 2].find((x) => x > 1) → Some(2)`        |
+
+They can be chained: `words.filter((w) => w.length() > 3).map((w) => w.upper())`. `filter` and `find` give copies of the items, so they do not take a list of move-only values (files, handles): go through it with `for` instead.
+
 `push`, `insert`, `pop`, `removeAt`, `sort` and `sortBy` change the list, like a `mut self` method: the variable must be `mut`, not `immut` or a parameter without `mut`. They change it in place; other copies of the list do not change. To check whether a list has an item, use `x in list`.
 
 ## Map and Set Methods

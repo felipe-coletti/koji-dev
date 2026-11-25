@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+-   Lists have `map`, `filter`, `reduce`, `any`, `all` and `find`, which take a function whose
+    parameters need no types: `numbers.filter((x) => x > 0).map((x) => x * 2)`.
 -   The license is the Apache License 2.0 with LLVM Exceptions: a program compiled by Koji, which
     has its runtime and standard library built in, may be distributed without the license or the
     notice of Koji. NOTICE names the data of others in the standard library (the certificate

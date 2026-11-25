@@ -1190,6 +1190,66 @@ function f() { return 1 }
 type error: test.kj:1:16: cannot return a value from a function without a return type
     1 | function f() { return 1 }
       |                ^^^^^^^^
+==== list_methods_that_take_functions
+---- source
+immut numbers = [3, 1, 4, 1, 5, 9, 2, 6]
+print(numbers.map((x) => x * 2))
+print(numbers.filter((x) => x > 3))
+print(numbers.reduce(0, (sum, x) => sum + x))
+print(numbers.any((x) => x > 8), numbers.all((x) => x > 0), numbers.all((x) => x > 1))
+print(numbers.find((x) => x > 4), numbers.find((x) => x > 100))
+immut words = ['koji', 'is', 'simple']
+print(words.map((w) => w.length()), words.map((w) => w.upper()).join(' '))
+print(words.filter((w) => w.length() > 2).map((w) => `<${w}>`))
+immut empty: int[] = []
+print(empty.map((x) => x + 1), empty.reduce(10, (a, x) => a + x), empty.any((x) => true), empty.all((x) => false))
+type Point = {
+    x: int
+    y: int
+}
+immut points: Point[] = [{ x: 1, y: 2 }, { x: 3, y: 4 }]
+print(points.map((p) => p.x + p.y), points.find((p) => p.y > 3))
+print(numbers.map((x) => decimal(x) / 2).reduce(decimal(0), (a, x) => a + x))
+immut factor = 3
+print(numbers.map((x) => x * factor))
+// The list is not changed.
+print(numbers)
+---- output
+[6, 2, 8, 2, 10, 18, 4, 12]
+[4, 5, 9, 6]
+31
+true true false
+Some(5) None
+[4, 2, 6] KOJI IS SIMPLE
+['<koji>', '<simple>']
+[] 10 false true
+[3, 7] Some({ x: 3, y: 4 })
+15.5
+[9, 3, 12, 3, 15, 27, 6, 18]
+[3, 1, 4, 1, 5, 9, 2, 6]
+==== list_methods_that_take_functions #2
+---- source
+print([1, 2].filter((x) => x + 1))
+---- error containing
+the function given to 'filter' must be (int) => boolean, found (int) => int
+==== list_methods_that_take_functions #3
+---- source
+print([1, 2].reduce([], (a, x) => a))
+---- error containing
+the type of the initial value of 'reduce' is not known here
+==== list_methods_that_take_functions #4
+---- source
+import file
+
+match (file.open('kojinowhere.txt', file.Read)) {
+    Ok(opened) => {
+        immut files = [opened]
+        print(files.filter((f) => true).length())
+    }
+    Err(_) => print('none')
+}
+---- error containing
+'filter' gives copies of the items, and File is move-only: it cannot be copied
 ==== anonymous_functions_need_types_where_nothing_tells_them
 ---- source
 function applyTo[T, U](f: (T) => U): int {

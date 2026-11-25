@@ -3,7 +3,7 @@
 
 import { Node, Pattern, TypeExpr, Param, Arm, Entry, ObjectEntry, isTestName } from 'parser.kj'
 import { Type, TypeInfo, FieldType, substitute, display } from 'types.kj'
-import { MethodRef, LoadedModule, Tables, Program, coreStringMethods, libraryModules, parentDir, resolvePath, foreignPrefix, foreignPath } from 'checker.kj'
+import { MethodRef, LoadedModule, Tables, Program, coreStringMethods, listFunctionMethods, libraryModules, parentDir, resolvePath, foreignPrefix, foreignPath } from 'checker.kj'
 import { IrExtern, IrForC, IrTest, Ty, Operand, Place, Step, Target, IrField, IrVariant, IrRecord, StdArg, Writeback, MapEntry, Instruction, Terminator, IrBlock, IrLocal, IrFunction, IrGlobal, IrProgram, isManaged, itemOf, tyText, tysText } from 'ir.kj'
 import { decimalLiteral } from 'decimal.kj'
 import { foreignModule } from 'foreign.kj'
@@ -3714,9 +3714,28 @@ function Lowerer.kojiCall(mut self, mut builder: Builder, path: string, name: st
     return self.callWithPlace(mut builder, key, args)
 }
 
+// A call of the generic function `name` of the module `path` of the standard library, for the
+// types `typeArgs`.
+function Lowerer.kojiGenericCall(mut self, mut builder: Builder, path: string, name: string, typeArgs: Ty[], args: Node[]): Result[Option[Operand], string] {
+    immut module = match (self.moduleIds.get(path)) {
+        Some(id) => id
+        None => return Err(self.unsupported(`'${name}'`))
+    }
+    immut key = match (self.modules[module].names.get(name)) {
+        Some(FunctionItem(key)) => key
+        _ => return Err(self.unsupported(`'${name}'`))
+    }
+
+    return self.callWithPlaceFor(mut builder, key, typeArgs, args)
+}
+
 // A call of the function `key` with `args`, and the place of the call when it takes one more.
 function Lowerer.callWithPlace(mut self, mut builder: Builder, key: string, args: Node[]): Result[Option[Operand], string] {
-    immut signature = self.callee(key, [])?
+    return self.callWithPlaceFor(mut builder, key, [], args)
+}
+
+function Lowerer.callWithPlaceFor(mut self, mut builder: Builder, key: string, typeArgs: Ty[], args: Node[]): Result[Option[Operand], string] {
+    immut signature = self.callee(key, typeArgs)?
     mut values: Operand[] = []
 
     for i in range(args.length()) {
@@ -4503,6 +4522,28 @@ function Lowerer.builtinMethod(mut self, mut builder: Builder, call: Node, objec
                     immut value = self.valueOf(mut builder, args[1], element)?
                     builder.emit(ListInsertIns(list, index, value, line))
                     return Ok(None)
+                }
+                method if (method in listFunctionMethods) => {
+                    // `listMap`... of std/koji/core.kj, for the type of the items (and of the result).
+                    mut typeArgs = [element]
+
+                    if (method == 'map') {
+                        match (self.typeIn(builder, call)?) {
+                            ListTy(result) => typeArgs.push(result)
+                            _ => return Err(self.unsupported("'map'"))
+                        }
+                    }
+
+                    if (method == 'reduce') { typeArgs.push(self.typeIn(builder, call)?) }
+
+                    mut all = [object]
+
+                    for arg in args {
+                        all.push(arg)
+                    }
+
+                    immut functionName = 'list' + method[0..1].upper() + method[1..]
+                    return self.kojiGenericCall(mut builder, 'std:core', functionName, typeArgs, all)
                 }
                 'sortBy' => {
                     immut list = self.target(mut builder, object)?

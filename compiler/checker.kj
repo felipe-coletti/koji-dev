@@ -4460,6 +4460,10 @@ function Checker.checkMember(mut self, object: Node, name: string): Result[Type,
 // The methods of lists (besides `length` and `join`); all but `indexOf` change the list.
 immut listMethods = ['push', 'pop', 'insert', 'removeAt', 'sort', 'sortBy', 'indexOf']
 
+// The methods of lists that take a function, written in Koji (`listMap`... of std/koji/core.kj):
+// none changes the list.
+export immut listFunctionMethods = ['map', 'filter', 'reduce', 'any', 'all', 'find']
+
 function Checker.checkCall(mut self, node: Node, callee: Node, args: Node[], expected: Option[Type]): Result[Type, string] {
     immut target = unlocated(callee)
 
@@ -4502,6 +4506,8 @@ function Checker.checkCall(mut self, node: Node, callee: Node, args: Node[], exp
             match (objectType) {
                 ListType(item) => {
                     if (name in listMethods) { return self.checkListMethod(callee, object, item, name, args) }
+
+                    if (name in listFunctionMethods) { return self.checkListFunctionMethod(item, name, args) }
                 }
                 _ => {}
             }
@@ -4936,6 +4942,61 @@ function Checker.checkListMethod(mut self, callee: Node, object: Node, item: Typ
 
             self.itemArgument(args[0], item)?
             return Ok(self.optionOf(IntType))
+        }
+    }
+}
+
+// `items.map((x) => x * 2)`, `items.filter(...)`, `items.reduce(0, (sum, x) => sum + x)`...: the
+// function takes the items (its parameters need no types), and the result of `map` and `reduce`
+// is the type it returns.
+function Checker.checkListFunctionMethod(mut self, item: Type, name: string, args: Node[]): Result[Type, string] {
+    self.coreModule()?
+    immut count = if (name == 'reduce') { 2 } else { 1 }
+
+    if (args.length() != count) { return Err(self.failure(`'${name}' expects ${count} argument(s), found ${args.length()}`)) }
+
+    match (name) {
+        'map' => {
+            immut given = self.checkValue(args[0], Some(FunctionType([item], UnknownType)))?
+
+            return match (given) {
+                FunctionType(params, returns) if (params.length() == 1 and assignable(params[0], item)) => {
+                    if (returns == VoidType) { return Err(self.failureAt(args[0], "the function given to 'map' must return a value")) }
+
+                    Ok(ListType(returns))
+                }
+                other => Err(self.failureAt(args[0], `the function given to 'map' must take ${self.show(item)}, found ${self.show(other)}`))
+            }
+        }
+        'reduce' => {
+            // The initial value tells the type of the result.
+            immut initial = self.checkValue(args[0], None)?
+
+            if (containsUnknown(initial)) { return Err(self.failureAt(args[0], "the type of the initial value of 'reduce' is not known here: write it (`immut start: int[] = []`)")) }
+
+            immut wanted = FunctionType([initial, item], initial)
+            immut given = self.checkValue(args[1], Some(wanted))?
+
+            if (not assignable(wanted, given)) {
+                return Err(self.failureAt(args[1], `the function given to 'reduce' must be ${self.show(wanted)}, found ${self.show(given)}`))
+            }
+
+            return Ok(initial)
+        }
+        _ => {
+            // `filter` and `find` give items of the list: copies, which a move-only item has none of.
+            if ((name == 'filter' or name == 'find') and self.isMoveOnly(item)) {
+                return Err(self.failure(`'${name}' gives copies of the items, and ${self.show(item)} is move-only: it cannot be copied`))
+            }
+
+            immut wanted = FunctionType([item], BooleanType)
+            immut given = self.checkValue(args[0], Some(wanted))?
+
+            if (not assignable(wanted, given)) {
+                return Err(self.failureAt(args[0], `the function given to '${name}' must be ${self.show(wanted)}, found ${self.show(given)}`))
+            }
+
+            return Ok(if (name == 'find') { self.optionOf(item) } else { if (name == 'filter') { ListType(item) } else { BooleanType } })
         }
     }
 }

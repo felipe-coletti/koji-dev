@@ -178,6 +178,14 @@ The cost is speed, and a `float` is there when it matters. 34 digits hold every 
 
 **Alternatives**: always writing the types, clearer for a reader without an editor but heavy; inferring them from the body too (as ML), which gives errors far from their cause.
 
+### Methods of lists that take a function: lists, not iterators
+
+**Decision**: lists have `map`, `filter`, `reduce`, `any`, `all` and `find`, which take a function of the items, whose parameters take their types from the list (`numbers.filter((x) => x > 0)`). Each goes through the list at once and gives a value: `map` and `filter` a new list, `reduce` the value its function builds from an initial one, `find` an `Option`. They are written in Koji (`koji:core`), generic functions that the compiler calls with the list first. `filter` and `find` give copies of the items, so a list of move-only values does not have them.
+
+**Why**: these are what a program does with a list most often after going through it with `for`, and what a beginner coming from JavaScript, Python or Kotlin looks for; with the types of the parameters taken from the list, they read as short as in those languages. Lists that are made at once keep the cost visible (each step is a list) and need no new concept: no iterator, no laziness, no `collect`.
+
+**Alternatives**: lazy iterators (Rust's `iter().map().collect()`, Java's streams), which save the lists between steps but add a type and a step to learn; functions of a module (`list.map(items, f)`), longer to read and to chain; comprehensions (`[x * 2 for x in items]`, as Python), a second syntax for loops.
+
 ## Memory
 
 ### Ownership and value semantics
