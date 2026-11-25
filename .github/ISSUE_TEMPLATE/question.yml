@@ -1,0 +1,15 @@
+name: Question
+description: Something about Koji that the documentation does not answer.
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The [documentation](https://koji-language.github.io/koji-website/docs/index.html) may answer it already. If it does not, that is worth knowing too: ask here.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What you want to do, and what you tried. Code helps.
+    validations:
+      required: true

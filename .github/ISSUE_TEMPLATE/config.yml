@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/koji-language/koji/security/policy
+    about: Privately, through GitHub, as SECURITY.md says. Do not open an issue for it.
+  - name: Documentation
+    url: https://koji-language.github.io/koji-website/docs/index.html
+    about: The language, its standard library and its tools.

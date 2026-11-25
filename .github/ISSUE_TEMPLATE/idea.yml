@@ -1,0 +1,28 @@
+name: Idea
+description: A change of the language, of the standard library or of the tools.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Each decision of Koji is kept in [doc/design.md](https://github.com/koji-language/koji/blob/main/doc/design.md): what it does, why, and what was considered instead. It helps to read the decisions near your idea first, and to tell why it is worth what it costs.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What is hard, long or impossible to write today. A small example of code helps.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The proposal
+      description: What you would write instead, and what it would do.
+      render: koji
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other ways to solve it, what other languages do, and why you prefer this one.
