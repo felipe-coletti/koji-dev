@@ -95,7 +95,7 @@ The message gives the file, the line and the column of the error, and shows the 
 | `kojic lsp` | The language server, for editors (on the standard input and output) |
 | `kojic help` | Shows the available commands |
 
-`kojic build` compiles a program to a native executable, through C. `kojic run` does the same in a temporary file, runs it with the arguments and the input of `kojic`, and ends with its exit code.
+`kojic build` compiles a program to a native executable, of machine code that `kojic` generates and links itself. `kojic run` does the same in a temporary file, runs it with the arguments and the input of `kojic`, and ends with its exit code.
 
 ```sh
 kojic build hello.kj

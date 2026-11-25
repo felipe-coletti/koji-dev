@@ -24,7 +24,7 @@ This document outlines the planned features and milestones for the Koji programm
 -   [x] Module system with mandatory `export`
 -   [x] Value semantics with copy-on-write, move-only types and `drop`
 -   [x] User-defined generics, with `equatable` and `orderable` constraints
--   [x] A compiler targeting native binaries (`kojic build`, through C)
+-   [x] A compiler targeting native binaries (`kojic build`)
 -   [x] A self-hosted compiler, written in Koji, with its runtime written in Koji too
 
 ---
@@ -41,7 +41,7 @@ This document outlines the planned features and milestones for the Koji programm
 -   [x] Generating machine code without a C compiler (Linux on x86-64 and arm64, macOS on arm64 and x86-64, Windows on x86-64: the code, the runtime library and the linking, each tested in CI on its own system; the C backend retired)
 -   [x] Koji alone builds and tests Koji: the test suite and the generators of the tables of the library are written in Koji (no Rust, no C compiler)
 -   [ ] WebAssembly (WASM) compilation
--   [ ] Editor support (syntax highlighting, LSP integration)
+-   [x] Editor support: a language server (`kojic lsp`), a TextMate grammar, and an extension of VS Code on the Marketplace and Open VSX
 -   [ ] Runtime optimizations
 -   [ ] Production-ready tooling
 
