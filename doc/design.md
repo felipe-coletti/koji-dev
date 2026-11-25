@@ -278,6 +278,14 @@ The cost is speed, and a `float` is there when it matters. 34 digits hold every 
 
 **Alternatives**: `system.current()`, which reads as the current directory, as `current_dir` in Rust and `getcwd` in Python; `system.programPath()`, longer; `system.self()`, vague.
 
+### Regular expressions in a time proportional to the text, look-around included
+
+**Decision**: `regex` compiles a pattern for a Pike machine (an automaton that follows every way the pattern can match at once, one thread per state), so a match takes a time proportional to the length of the text, times the size of the pattern, whatever the pattern and the text. Look-around (`(?=...)`, `(?!...)`, `(?<=...)`, `(?<!...)`) keeps it so: each look-around is a program of its own, answered for every position of the text in one pass over it (forward for a look-behind, backward with its pattern reversed for a look-ahead), the first time it is tried. A look-behind can then have any length. Backreferences (`(a)\1`) are not supported.
+
+**Why**: a pattern that takes exponential time on some text (catastrophic backtracking) is a bug that shows only in production, and a way to bring a server down with a crafted input; with this machine no pattern can, so a program can take patterns from its users. Look-around is what people reach for most among what such machines usually leave out (RE2 and Go have none), and the tables give it without losing the guarantee.
+
+**Alternatives**: backtracking (as Perl, Python, JavaScript and Java), with backreferences and every extension, but exponential in the worst case; look-around run from each position where it is tried, simpler but quadratic; no look-around at all (RE2, Go, Rust's `regex`).
+
 ### The epoch of Koji is 0000-01-01
 
 **Decision**: a timestamp counts the seconds since 0000-01-01 00:00:00 UTC, in the proleptic Gregorian calendar (where the year before 1 is 0, as in ISO 8601): `time.now()`, `datetime.format` and `datetime.parse` use it. A timestamp of Unix (since 1970-01-01), which files, HTTP, most APIs and other languages use, is 62,167,219,200 seconds (719,528 days) less.
