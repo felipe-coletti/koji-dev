@@ -273,12 +273,7 @@ function indentLines(mut lines: Line[]) {
         } else {
             indent = if (levels.length() == 0) { 0 } else { levels[levels.length() - 1] + 1 }
 
-            if (first.comment) {
-                // A comment on its own line: the indentation of the code around it.
-                indent += 0
-            } else {
-                if (goesOn(line, previous)) { indent += 1 }
-            }
+            if (not first.comment and goesOn(line, previous)) { indent += 1 }
         }
 
         lines[i].indent = indent
@@ -292,6 +287,16 @@ function indentLines(mut lines: Line[]) {
         lines[i].depthAfter = levels.length()
 
         if (not first.comment or line.pieces.length() > 1) { previous = Some(lines[i]) }
+    }
+
+    // A comment on its own line takes the indentation of the code below it (a line that goes on,
+    // say), but of a closing bracket.
+    for i in range(lines.length() - 2, -1, -1) {
+        if (not onlyComments(lines[i])) { continue }
+
+        immut next = lines[i + 1]
+
+        if (next.depthBefore == lines[i].depthBefore and not isSymbol(next.pieces[0], closers)) { lines[i].indent = next.indent }
     }
 }
 
@@ -486,6 +491,11 @@ test 'lines that go on, templates, maps and ranges' {
 
 test 'words of the language as names' {
     assert(format('immut s: Set[int] = Set.from([])\n') == Ok('immut s: Set[int] = Set.from([])\n'))
+}
+
+test 'a comment takes the indentation of the code below it' {
+    immut source = 'immut x = a()\n// then b\n    and b()\nfunction f() {\n    print(1)\n// the end\n}\n'
+    assert(format(source) == Ok('immut x = a()\n    // then b\n    and b()\n\nfunction f() {\n    print(1)\n    // the end\n}\n'), format(source).debug())
 }
 
 test 'what does not parse is left as it is' {

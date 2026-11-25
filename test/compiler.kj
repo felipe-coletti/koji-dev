@@ -235,17 +235,21 @@ test 'the_language_server' {
     server.input = message('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}')
         + message(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"${uri}","text":${text}}}}`)
         + request(2, 'hover', 4, 7) + request(3, 'definition', 4, 15) + request(4, 'definition', 1, 11)
+        // The text changed, out of the style, then formatted: one edit of the whole text.
+        + message(`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"${uri}"},"contentChanges":[{"text":"immut x=1\\nprint( x )"}]}}`)
+        + message(`{"jsonrpc":"2.0","id":6,"method":"textDocument/formatting","params":{"textDocument":{"uri":"${uri}"},"options":{"tabSize":4,"insertSpaces":true}}}`)
         + message('{"jsonrpc":"2.0","id":5,"method":"shutdown"}') + message('{"jsonrpc":"2.0","method":"exit"}')
     immut output = finish(server)
     assert(output.status == 0, output.stderr)
     immut answers = messages(output.stdout)
-    assert(answers.length() == 6, output.stdout)
-    assert('"hoverProvider":true' in answers[0], answers[0])
+    assert(answers.length() == 8, output.stdout)
+    assert('"hoverProvider":true' in answers[0] and '"documentFormattingProvider":true' in answers[0], answers[0])
     assert(answers[1] == `{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"${uri}","diagnostics":[{"range":{"start":{"line":5,"character":22},"end":{"line":5,"character":27}},"severity":1,"source":"kojic","message":"type error: cannot assign a value of type int to 'wrong' of type string"}]}}`, answers[1])
     assert('"value":"```koji\\ncount: int\\n```"' in answers[2], answers[2])
     assert('"range":{"start":{"line":0,"character":0}' in answers[3], answers[3])
     assert('"range":{"start":{"line":0,"character":0}' in answers[4], answers[4])
-    assert(answers[5] == '{"jsonrpc":"2.0","id":5,"result":null}', answers[5])
+    assert(answers[6] == '{"jsonrpc":"2.0","id":6,"result":[{"range":{"start":{"line":0,"character":0},"end":{"line":1,"character":10}},"newText":"immut x = 1\\nprint(x)\\n"}]}', answers[6])
+    assert(answers[7] == '{"jsonrpc":"2.0","id":5,"result":null}', answers[7])
 }
 
 test 'requests_in_tasks_are_sent_at_the_same_time' {

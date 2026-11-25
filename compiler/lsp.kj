@@ -10,6 +10,7 @@ import path
 import system
 import { Node, Span, Param, Pattern, parse } from 'parser.kj'
 import { checkText } from 'checker.kj'
+import { format } from 'format.kj'
 import { display } from 'types.kj'
 
 // The text of each open file, by its URI.
@@ -797,13 +798,50 @@ function definition(id: json.Json, message: json.Json) {
     }
 }
 
+// `textDocument/formatting`: the text in the style of Koji (compiler/format.kj), as one edit of the
+// whole text; none when it is already in it, or does not parse (the errors say why).
+function formatting(id: json.Json, uri: string) {
+    immut text = match (documents.get(uri)) {
+        Some(found) => found
+        None => {
+            respond(id, json.Null)
+            return
+        }
+    }
+    immut formatted = match (format(text)) {
+        Ok(found) => found
+        Err(_) => {
+            respond(id, json.Null)
+            return
+        }
+    }
+
+    if (formatted == text) {
+        respond(id, json.Array([]))
+        return
+    }
+
+    // To the end of the last line, in units of UTF-16, as the protocol counts.
+    immut lines = text.split('\n')
+    mut units = 0
+
+    for c in lines[lines.length() - 1] {
+        units += if (c.code() > 0xFFFF) { 2 } else { 1 }
+    }
+
+    immut start = json.Object(['line': json.Int(0), 'character': json.Int(0)])
+    immut end = json.Object(['line': json.Int(lines.length() - 1), 'character': json.Int(units)])
+    immut edit = json.Object(['range': json.Object(['start': start, 'end': end]), 'newText': json.String(formatted)])
+    respond(id, json.Array([edit]))
+}
+
 // The server
 
 // The answer to `initialize`: what the server does.
 function capabilities(): json.Json {
     immut sync = json.Object(['openClose': json.Bool(true), 'change': json.Int(1), 'save': json.Bool(true)])
     return json.Object([
-        'capabilities': json.Object(['textDocumentSync': sync, 'hoverProvider': json.Bool(true), 'definitionProvider': json.Bool(true)]),
+        'capabilities': json.Object(['textDocumentSync': sync, 'hoverProvider': json.Bool(true), 'definitionProvider': json.Bool(true), 'documentFormattingProvider': json.Bool(true)]),
         'serverInfo': json.Object(['name': json.String('kojic')])
     ])
 }
@@ -852,6 +890,7 @@ export function serve() {
             }
             'textDocument/hover' => hover(id, message)
             'textDocument/definition' => definition(id, message)
+            'textDocument/formatting' => formatting(id, uri)
             _ => {
                 // A request the server does not know: an error, as the protocol asks (a
                 // notification is ignored).

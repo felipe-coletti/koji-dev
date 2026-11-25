@@ -107,7 +107,7 @@ kojic build hello.kj
 
 The extension of Visual Studio Code, with the syntax highlighting of Koji and its language server (`kojic lsp`), is on the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=koji-language.koji) and on [Open VSX](https://open-vsx.org/extension/koji-language/koji) (for VSCodium, Cursor and other editors): search for Koji in the extensions of the editor. Its source is [koji-vscode](https://github.com/koji-language/koji-vscode). The grammar of the syntax, which other editors can use too, is `editors/textmate/koji.tmLanguage.json`.
 
-`kojic lsp` is the language server, for any editor that speaks the Language Server Protocol (VS Code, Neovim, Helix, Zed, Emacs...): it shows every error of a file as it is edited, the type of what is under the cursor, and goes to where a name is declared, in the file or in the module it comes from.
+`kojic lsp` is the language server, for any editor that speaks the Language Server Protocol (VS Code, Neovim, Helix, Zed, Emacs...): it shows every error of a file as it is edited, the type of what is under the cursor, goes to where a name is declared, in the file or in the module it comes from, and formats the file as `kojic fmt` does.
 
 ## Examples
 
