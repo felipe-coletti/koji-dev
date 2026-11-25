@@ -1,0 +1,51 @@
+name: Bug report
+description: Koji does something wrong, or fails where it should not.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting it. The smaller the program that shows the bug, the faster it can be fixed.
+        A vulnerability is not reported here: see [SECURITY.md](https://github.com/koji-language/koji/blob/main/SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: What `kojic version` prints.
+      placeholder: kojic 0.2.0
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux, x86-64
+        - Linux, arm64
+        - macOS, Apple silicon
+        - macOS, Intel
+        - Windows, x86-64
+        - Another
+    validations:
+      required: true
+  - type: textarea
+    id: program
+    attributes:
+      label: The program
+      description: The smallest program that shows the bug, and the command you ran (`kojic run main.kj`, `kojic build`...).
+      render: koji
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: "What Koji printed or did: the error, the panic, the wrong output."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
