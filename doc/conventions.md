@@ -1,5 +1,7 @@
 # Conventions
 
+`kojic fmt` writes code in this style: the spaces and the indentation, the quotes, the blank lines it can decide alone (see below). `kojic fmt --check` lists the files that are not in it, for a check in CI. The names, the types written and the order of the code are left to the writer.
+
 -   Variables and functions use `camelCase`: `userName`, `parseAge`.
 -   Types and variants use `PascalCase`: `Person`, `FileError`, `NotFound`.
 -   Parentheses are required around conditions (`if (x > 0)`, `while (running)`, `match (value)`) and in function calls.

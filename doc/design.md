@@ -400,6 +400,14 @@ Code for one operating system, and the functions of the libraries of the system.
 
 **Why**: the same names everywhere, which the reader recognizes from the code.
 
+### `kojic fmt`: one style, the lines as they were written
+
+**Decision**: `kojic fmt` writes code in the one style of Koji, with no options: the spaces between the tokens, the indentation (4 spaces for each bracket open around a line, one more for a line that goes on from the one before), single quotes where a string needs no escape for them, at most one blank line, none after an opening bracket or before a closing one, one around a declaration of several lines at the top level, one space before a comment after code, one line break at the end. The lines stay where the writer put them: a block on one line stays on one, and no line is broken for its length. It works on the tokens, the comments taken from the text between them, and checks what it writes: the same tokens (strings by their values) and the same comments, or the file is left as it is. A file that does not parse is not touched. `--check` lists the files that are not in the style and fails, and the language server formats too.
+
+**Why**: one style, which nobody configures, ends the discussions of style (as gofmt did for Go) and makes every program of Koji read the same. Keeping the lines as written keeps the diffs of a change small and leaves the writer the shape of the code: breaking long lines (as Prettier does) moves lines at each small edit. The check of the tokens makes a bug of the formatter harmless: it can leave a file badly formatted, never change what it does.
+
+**Alternatives**: a printer of the syntax tree, which decides every line (as Prettier and rustfmt), with a width to break at; options for the indentation and the quotes, which bring the discussions back; no formatter, the conventions being a document only.
+
 ### Tests: `test` blocks next to the code, one `assert`
 
 **Decision**: a test is a block `test 'name' { ... }` at the top level of a file, next to the code it tests, which it sees whole (private functions and types included). `test` is a word only there (followed by a string, at the top level): elsewhere it stays a name. A test is checked like a function and left out of a program; `kojic test` compiles each file with its tests and runs each test in a process of its own, after the top-level statements of the file, showing what a failing test printed. A test fails when it panics. The one function for checking is the built-in `assert(condition)` or `assert(condition, message)`: the compiler keeps the condition as written, and for a comparison the values of its two sides, shown when it fails (`assertion failed: total == 10`, `left: 9`, `right: 10`); a program's own `assert` takes its place.

@@ -554,6 +554,25 @@ test 'packages_from_repositories_of_git_at_the_versions_mvs_chooses' {
 // failure an error instead of a fallback): an executable of the program and of the native library,
 // linked dynamically with the C library, that runs (under valgrind), with tasks, files and the
 // threads of the runtime.
+// `kojic fmt` (compiler/format.kj): a file written again in the style of Koji, and `--check`,
+// which lists it before and fails, and not after.
+test 'kojic_fmt_writes_the_style_of_koji' {
+    immut directory = scratch('fmt')
+    writeFile(path.join(directory, 'messy.kj'), 'function f(x:int):int{\nif(x>0){return -x}\n\n\nreturn x+"a".length()\n}\nprint( f(2) )')
+    immut before = kojicWith(directory, ['fmt', '--check', 'messy.kj'], [:])
+    assert(before.status == 1 and before.stdout == 'messy.kj\n', before.stdout + before.stderr)
+    immut done = kojicWith(directory, ['fmt', 'messy.kj'], [:])
+    assert(done.status == 0, done.stderr)
+    immut expected = 'function f(x: int): int {\n    if (x > 0) { return -x }\n\n    return x + \'a\'.length()\n}\n\nprint(f(2))\n'
+    assert(readFile(path.join(directory, 'messy.kj')) == expected, readFile(path.join(directory, 'messy.kj')))
+    immut after = kojicWith(directory, ['fmt', '--check', 'messy.kj'], [:])
+    assert(after.status == 0 and after.stdout == '', after.stdout)
+    // A file that does not parse is left as it is, and named.
+    writeFile(path.join(directory, 'broken.kj'), 'function (')
+    immut broken = kojicWith(directory, ['fmt', 'broken.kj'], [:])
+    assert(broken.status == 1 and 'broken.kj' in broken.stderr and readFile(path.join(directory, 'broken.kj')) == 'function (', broken.stderr)
+}
+
 test 'koji_links_executables_itself' {
     if (not onLinuxX64) { return }
 

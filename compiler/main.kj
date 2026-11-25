@@ -18,6 +18,7 @@ import { archive, archiveNamed, archiveObjects, linkExecutable, sharedName, shar
 import { coffGlobals } from 'coff.kj'
 import { linkWindows } from 'pelink.kj'
 import { serve } from 'lsp.kj'
+import { format } from 'format.kj'
 import { initModule, addModule, updateModules } from 'packages.kj'
 
 // The version of Koji: of the language, its standard library and this compiler.
@@ -30,6 +31,8 @@ immut usage = [
     '    kojic run <file.kj> [arguments]   check, compile and run a program',
     '    kojic check <file.kj>             only check syntax and types',
     '    kojic test [file.kj | dir]...     run the tests (`test` blocks) of files (default: .)',
+    '    kojic fmt [file.kj | dir]...      write files in the style of Koji (default: .)',
+    '        --check                       only list the files that are not, and fail if any',
     '    kojic lsp                         a language server for editors (on stdin and stdout)',
     '    kojic build <file.kj> [options]   compile a program to an executable',
     '        -o <output>                   the executable (default: the file name without .kj)',
@@ -931,8 +934,121 @@ function testCommand(args: string[]) {
     system.exit(if (failed + broken > 0) { 1 } else { 0 })
 }
 
+// The .kj files of a directory and of the directories in it, but those whose names start with a dot.
+function sourcesIn(directory: string): string[] {
+    mut found: string[] = []
+
+    match (file.list(directory)) {
+        Ok(names) => {
+            for name in names {
+                if (name.startsWith('.')) { continue }
+
+                immut inner = path.join(directory, name)
+
+                if (name.endsWith('.kj')) {
+                    if (file.list(inner) is Err) { found.push(inner) }
+
+                    continue
+                }
+
+                if (file.list(inner) is Ok) { found += sourcesIn(inner) }
+            }
+        }
+        Err(_) => {}
+    }
+
+    return found
+}
+
+function writeSource(name: string, text: string): Result[void, string] {
+    return match (file.open(name, file.Write)) {
+        Ok(opened) => match (opened.write(text)) {
+            Ok(_) => Ok()
+            Err(error) => Err(ioMessage(error))
+        }
+        Err(error) => Err(ioMessage(error))
+    }
+}
+
+// `kojic fmt [--check] [file.kj | dir]...`: the files written again in the style of Koji (see
+// compiler/format.kj), or, with --check, only listed when they are not in it.
+function formatCommand(given: string[]) {
+    mut check = false
+    mut targets: string[] = []
+
+    for arg in given {
+        if (arg == '--check') {
+            check = true
+            continue
+        }
+
+        targets.push(arg)
+    }
+
+    if (targets.length() == 0) { targets.push('.') }
+
+    mut files: string[] = []
+
+    for target in targets {
+        if (target.endsWith('.kj') and file.list(target) is Err) {
+            files.push(target)
+            continue
+        }
+
+        if (file.list(target) is Err) {
+            printError(`${target}: no such file or directory`)
+            system.exit(1)
+        }
+
+        files += sourcesIn(target)
+    }
+
+    mut failed = 0
+    mut unformatted = 0
+
+    for name in files {
+        immut source = match (readSource(name)) {
+            Ok(text) => text
+            Err(error) => {
+                printError(`${name}: ${ioMessage(error)}`)
+                failed += 1
+                continue
+            }
+        }
+        immut formatted = match (format(source)) {
+            Ok(text) => text
+            Err(message) => {
+                printError(`${name}: ${message}`)
+                failed += 1
+                continue
+            }
+        }
+
+        if (formatted == source) { continue }
+
+        unformatted += 1
+
+        if (check) {
+            print(name)
+            continue
+        }
+
+        match (writeSource(name, formatted)) {
+            Ok(_) => print(name)
+            Err(message) => {
+                printError(`${name}: ${message}`)
+                failed += 1
+            }
+        }
+    }
+
+    system.exit(if (failed > 0 or (check and unformatted > 0)) { 1 } else { 0 })
+}
+
 immut args = system.args()
 immut command = if (args.length() > 0) { args[0] } else { '' }
+
+if (command == 'fmt') { formatCommand(args[1..]) }
 
 if (command == 'test') { testCommand(args[1..]) }
 

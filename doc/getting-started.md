@@ -92,6 +92,7 @@ The message gives the file, the line and the column of the error, and shows the 
 | `kojic check <file.kj>` | Only checks syntax and types |
 | `kojic build <file.kj> [-o <output>]` | Compiles a program to an executable |
 | `kojic test [file.kj \| directory]...` | Runs the tests of files, the `test` blocks (see [Testing](testing.md)) |
+| `kojic fmt [file.kj \| directory]...` | Writes files in the style of Koji ([Conventions](conventions.md)); with `--check`, only lists those that are not |
 | `kojic lsp` | The language server, for editors (on the standard input and output) |
 | `kojic help` | Shows the available commands |
 

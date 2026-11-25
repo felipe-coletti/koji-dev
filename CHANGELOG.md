@@ -4,6 +4,8 @@
 
 -   Lists have `map`, `filter`, `reduce`, `any`, `all` and `find`, which take a function whose
     parameters need no types: `numbers.filter((x) => x > 0).map((x) => x * 2)`.
+-   `kojic fmt` writes code in the style of Koji (`--check` only lists the files that are not):
+    the spaces, the indentation, the quotes and the blank lines, the lines kept as written.
 -   `regex` has look-around: `(?=...)`, `(?!...)`, `(?<=...)` and `(?<!...)`, a look-behind of any
     length, with matching still proportional to the length of the text.
 -   The license is the Apache License 2.0 with LLVM Exceptions: a program compiled by Koji, which
