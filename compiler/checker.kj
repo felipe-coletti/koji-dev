@@ -4572,7 +4572,6 @@ function Checker.checkReceiver(mut self, object: Node, ty: Type, name: string): 
         return Err(self.failure("'drop' cannot be called: it runs by itself when the value goes out of scope"))
     }
 
-
     self.noteTemporary(object, ty)
     return Ok()
 }
@@ -5843,7 +5842,6 @@ function Checker.checkPattern(mut self, pattern: Pattern, ty: Type): Result[void
             match (self.variantOf(ty, name)) {
                 Some(found) => {
                     self.ensureVisibleVariants(ty)?
-
 
                     if (found.info.fields.length() > 0) {
                         return Err(self.failure(`variant '${name}' has fields; use '${name}(...)' in the pattern`))

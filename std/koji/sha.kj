@@ -9,7 +9,6 @@ import { Address, CInt, CSize, U128, allocate, free, isNull, lowWord, nullAddres
 extern function memcpy(target: Address, source: Address, size: CSize): Address
 extern function memset(target: Address, value: CInt, size: CSize): Address
 
-
 // The constants, in hexadecimal: the first 32 (or 64) bits of the fractional parts of the cube roots
 // of the first 64 (or 80) primes, and the first values, of their square roots (of the 9th to 16th
 // primes for SHA-384).

@@ -405,7 +405,7 @@ function Parser.statement(mut self): Result[Node, string] {
 
 function Parser.statementFrom(mut self): Result[Node, string] {
     // A test is read by the loop of the top level: here it is inside a block.
-    if (self.startsTest()) { return Err(self.failure("a test can only be at the top level of a file")) }
+    if (self.startsTest()) { return Err(self.failure('a test can only be at the top level of a file')) }
 
     // `extern function`: `extern` is a name anywhere else.
     if (self.current() == Identifier('extern') and (self.peek() == Keyword('function') or self.peek() == Identifier('blocking'))) { return self.externDeclaration() }
@@ -1436,7 +1436,7 @@ function Parser.index(mut self, target: Node): Result[Node, string] {
 
     return match (parts.start) {
         Some(index) => Ok(self.node(IndexNode(target, index)))
-        None => Err(self.failure("expected an index"))
+        None => Err(self.failure('expected an index'))
     }
 }
 

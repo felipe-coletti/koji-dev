@@ -573,6 +573,13 @@ test 'kojic_fmt_writes_the_style_of_koji' {
     assert(broken.status == 1 and 'broken.kj' in broken.stderr and readFile(path.join(directory, 'broken.kj')) == 'function (', broken.stderr)
 }
 
+// The code of Koji is in its own style: `kojic fmt --check` finds nothing to write again (but the
+// files of the tests of the lexer and the parser, which are wrong on purpose).
+test 'the_code_of_koji_is_in_its_style' {
+    immut checked = kojicWith(root, ['fmt', '--check', 'std', 'compiler', 'bootstrap', 'examples', 'test/koji.kj', 'test/cases.kj', 'test/compiler.kj', 'test/language.kj', 'test/crypto.kj', 'test/stages.kj', 'test/bootstrap.kj', 'test/programs'], [:])
+    assert(checked.status == 0, `run kojic fmt on these files:\n${checked.stdout}${checked.stderr}`)
+}
+
 test 'koji_links_executables_itself' {
     if (not onLinuxX64) { return }
 

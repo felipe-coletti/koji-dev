@@ -10,6 +10,7 @@ import { Address, CInt, CSize, U128, aesAvailable, aesLastRound, aesRound, alloc
 
 extern function memcpy(target: Address, source: Address, size: CSize): Address
 extern function memset(target: Address, value: CInt, size: CSize): Address
+
 // Whether this processor has the instructions.
 export function available(): boolean {
     return aesAvailable()

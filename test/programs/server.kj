@@ -8,6 +8,7 @@ immut port = match (int(system.args()[0])) {
     Ok(n) => n
     Err(_) => 0
 }
+
 immut failed = http.serve(port, (request) => {
     if (request.path == '/quit') { system.exit(0) }
     if (request.path == '/slow') {
@@ -30,4 +31,5 @@ immut failed = http.serve(port, (request) => {
     }
     return http.text(404, `no ${request.path}`)
 })
+
 print(failed)

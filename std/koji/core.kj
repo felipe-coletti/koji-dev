@@ -787,7 +787,6 @@ function decimalOf(text: string): Result[decimal, ParseError] {
     return Ok(value)
 }
 
-
 // The methods of lists that take a function (`items.map(f)`...): the compiler calls them with the
 // list first, for its type of items (and of results).
 
