@@ -1,25 +1,88 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (preview)
+
+The second preview of Koji: methods of lists that take functions, look-around in regular
+expressions, a formatter, and documentation in the editor. Programs compiled by Koji are now free
+of its license. Expect breaking changes before 1.0.
+
+```koji
+import regex
+
+immut prices = [12.5, 3, 40, 7.25]
+immut doubled = prices.filter((p) => p < 10).map((p) => p * 2)
+print(doubled, prices.reduce(0.0, (sum, p) => sum + p)) // [6, 14.5] 62.75
+print(prices.any((p) => p > 30), prices.find((p) => p > 100)) // true None
+
+// Look-around: the amounts in dollars, not the others.
+match (regex.compile('(?<=\\$)\\d+(?:\\.\\d+)?')) {
+    Ok(dollars) => print(dollars.findAll('$15, 20 euros, $7.50').map((m) => m.value)) // ['15', '7.50']
+    Err(error) => print(error)
+}
+```
+
+### Getting it
+
+Download the package of your platform below, unpack it and put its directory on your `PATH`:
+
+| Platform | Package |
+| --- | --- |
+| Linux, x86-64 | `koji-0.2.0-linux-x64.tar.gz` |
+| Linux, arm64 | `koji-0.2.0-linux-arm64.tar.gz` |
+| macOS, Apple silicon | `koji-0.2.0-macos-arm64.tar.gz` |
+| macOS, Intel | `koji-0.2.0-macos-x64.tar.gz` |
+| Windows, x86-64 | `koji-0.2.0-windows-x64.zip` |
+
+`SHA256SUMS` has the checksums of the packages. For VS Code, the extension
+[Koji](https://marketplace.visualstudio.com/items?itemName=koji-language.koji) (also on
+[Open VSX](https://open-vsx.org/extension/koji-language/koji)) colors the code and runs the
+language server of `kojic`.
+
+### The language
 
 -   Lists have `map`, `filter`, `reduce`, `any`, `all` and `find`, which take a function whose
-    parameters need no types: `numbers.filter((x) => x > 0).map((x) => x * 2)`.
--   `kojic fmt` writes code in the style of Koji (`--check` only lists the files that are not):
-    the spaces, the indentation, the quotes and the blank lines, the lines kept as written.
--   The language server shows the comment right above a declaration as its documentation, with
-    its type: in the file, in the modules it imports, and for the standard library.
--   `regex` has look-around: `(?=...)`, `(?!...)`, `(?<=...)` and `(?<!...)`, a look-behind of any
-    length, with matching still proportional to the length of the text.
--   The license is the Apache License 2.0 with LLVM Exceptions: a program compiled by Koji, which
-    has its runtime and standard library built in, may be distributed without the license or the
-    notice of Koji. NOTICE names the data of others in the standard library (the certificate
-    authorities of Mozilla, the Unicode Character Database).
+    parameters need no types: `numbers.filter((x) => x > 0).map((x) => x * 2)`. They go through
+    the list at once and give a value: no iterators to learn.
 -   The parameters of an anonymous function given to a generic function or method take the types
     its other arguments tell: `result.mapErr((e) => ...)` and `apply((x) => x + 1, 4)` need no
     types written.
--   On macOS, Koji's linker links the libraries of `foreign` blocks too: a `.dylib` (from
-    `LIBRARY_PATH`, Homebrew or `/usr/local/lib`), or the stub in the SDK of a library of the
-    system. Building a program with `foreign` blocks no longer needs the linker of the system.
+
+### The standard library
+
+-   `regex` has look-around: `(?=...)`, `(?!...)`, `(?<=...)` and `(?<!...)`. A look-behind can
+    have any length (`(?<=ab+)c`), and matching stays proportional to the length of the text:
+    no pattern can take exponential time.
+
+### Tools
+
+-   `kojic fmt` writes code in the one style of Koji, with no options: the spaces, the
+    indentation, the quotes and the blank lines, the lines kept as written. `kojic fmt --check`
+    lists the files that are not in the style, for CI. What it writes is checked to be the same
+    program, and a file that does not parse is left as it is.
+-   The language server formats files (Format Document, and when saving in VS Code), and shows the
+    comment right above a declaration as its documentation, with its type: in the file, in the
+    modules it imports, and for the standard library.
+-   On macOS, Koji's linker links the libraries of `foreign` blocks too (a `.dylib`, or the stub
+    in the SDK of a library of the system): building a program needs no linker of the system.
+
+### The license
+
+Koji is now licensed under the Apache License 2.0 with LLVM Exceptions: a program compiled by
+Koji, which has its runtime and standard library built in, may be distributed without the license
+or the notice of Koji. `NOTICE` names the data of others in the standard library (the certificate
+authorities of Mozilla, the Unicode Character Database). To report a vulnerability, see
+`SECURITY.md`.
+
+### Known limits
+
+-   Tasks run on one thread.
+-   `regex` has no backreferences.
+-   `break` and `continue` leave only the innermost loop (there are no labels).
+-   The code is about 1.3 times as slow as C compiled by gcc (measured on the compiler itself).
+
+### Feedback
+
+Issues and ideas are welcome at https://github.com/koji-language/koji/issues.
 
 ## 0.1.0 (preview)
 

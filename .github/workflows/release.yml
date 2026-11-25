@@ -1,6 +1,8 @@
 # A release, made when a tag v<version> is pushed: Koji built from the seed and tested, the packages
 # of every platform (bootstrap/package.sh), and a draft release on GitHub with them and the notes of
-# the version in CHANGELOG.md, to read and publish by hand.
+# the version in CHANGELOG.md, to read and publish by hand. The tag may come from a release made on
+# GitHub (Releases, Draft a new release, a new tag on publish): the packages are then added to that
+# release, and its notes are those of CHANGELOG.md if it has none.
 name: Release
 
 on:
@@ -29,7 +31,15 @@ jobs:
         run: sh bootstrap/package.sh
       - name: The notes of the version, from CHANGELOG.md
         run: awk -v version="${GITHUB_REF_NAME#v}" '/^## / { found = index($0, "## " version) == 1; next } found' CHANGELOG.md > dist/NOTES.md
-      - name: A draft release
+      - name: The release, with the packages
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS --draft --prerelease --title "Koji ${GITHUB_REF_NAME#v}" --notes-file dist/NOTES.md
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS --clobber
+            if [ -z "$(gh release view "$GITHUB_REF_NAME" --json body --jq .body)" ]; then
+              gh release edit "$GITHUB_REF_NAME" --notes-file dist/NOTES.md
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS --draft --prerelease --title "Koji ${GITHUB_REF_NAME#v}" --notes-file dist/NOTES.md
+          fi

@@ -6,11 +6,13 @@
     CI, which runs the tests on every platform (Linux on x86-64 and arm64, macOS on arm64 and x86-64, Windows) and must be green.
 3.  `bootstrap/package.sh` makes the packages in `dist/` locally, to try them before (CI makes them
     too, on each push, as the artifact `koji-packages`).
-4.  Push the tag `v<version>` (`git tag v0.1.0 && git push origin v0.1.0`): the workflow
-    `.github/workflows/release.yml` builds, tests and packs Koji again, and makes a draft release
-    with the packages, `SHA256SUMS` and the notes. Read it, then publish it on GitHub. Do not
-    create the release on GitHub by hand before: the workflow would make a second one, a draft
-    with the packages, and the one created by hand would have none.
+4.  Make the tag `v<version>`, one of two ways; either way, the workflow
+    `.github/workflows/release.yml` builds, tests and packs Koji again (some 10 minutes):
+    -   with a release on GitHub (Releases, Draft a new release, `v0.2.0` as a new tag on `main`,
+        Publish release): the packages and `SHA256SUMS` are added to it, and its notes are those
+        of `CHANGELOG.md` if it was published with none;
+    -   or pushed (`git tag v0.2.0 && git push origin v0.2.0`): the workflow makes a draft release
+        with the packages and the notes, to read and publish on GitHub.
 5.  The site ([koji-website](https://github.com/koji-language/koji-website)) is built every day
     with the last release and the documentation of its tag: the new version is there by the next
     day, or at once by running its workflow Pages by hand.
