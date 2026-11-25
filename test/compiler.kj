@@ -252,6 +252,32 @@ test 'the_language_server' {
     assert(answers[7] == '{"jsonrpc":"2.0","id":5,"result":null}', answers[7])
 }
 
+// The documentation of a name in its hover: the comment above its declaration, in the file or in
+// a module of the standard library.
+test 'the_language_server_shows_the_documentation' {
+    immut directory = scratch('lsp-documentation')
+    immut uri = `file://${path.join(directory, 'main.kj')}`
+
+    function request(id: int, line: int, character: int): string {
+        return message(`{"jsonrpc":"2.0","id":${id},"method":"textDocument/hover","params":{"textDocument":{"uri":"${uri}"},"position":{"line":${line},"character":${character}}}}`)
+    }
+
+    immut text = '"import json\\n\\n// Twice the number.\\n// It never fails.\\nfunction twice(n: int): int {\\n    return n * 2\\n}\\n\\nimmut count = twice(3)\\nprint(json.parse(\'1\'), count)\\n"'
+    mut server = compiler(['lsp'], directory)
+    server.input = message('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}')
+        + message(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"${uri}","text":${text}}}}`)
+        + request(2, 8, 15) + request(3, 9, 12) + request(4, 8, 7)
+        + message('{"jsonrpc":"2.0","id":5,"method":"shutdown"}') + message('{"jsonrpc":"2.0","method":"exit"}')
+    immut output = finish(server)
+    assert(output.status == 0, output.stderr)
+    immut answers = messages(output.stdout)
+    assert(answers.length() == 6, output.stdout)
+    assert('"value":"```koji\\ntwice: (int) => int\\n```\\n\\nTwice the number.\\nIt never fails."' in answers[2], answers[2])
+    assert('\\n\\nThe `Json` value that `text` writes."' in answers[3], answers[3])
+    // A declaration with no comment above it: its type only.
+    assert('"value":"```koji\\ncount: int\\n```"' in answers[4], answers[4])
+}
+
 test 'requests_in_tasks_are_sent_at_the_same_time' {
     // A server that answers each request after 0.3 seconds, several at once.
     immut server = listenLocally()

@@ -12,6 +12,7 @@ import { Node, Span, Param, Pattern, parse } from 'parser.kj'
 import { checkText } from 'checker.kj'
 import { format } from 'format.kj'
 import { display } from 'types.kj'
+import { stdSource } from 'stdlib.kj'
 
 // The text of each open file, by its URI.
 mut documents: Map[string, string] = [:]
@@ -466,6 +467,81 @@ function pathTo(nodes: Node[], line: int, column: int, mut found: Node[]) {
 
 // Hover
 
+// The comment on its own lines right above the line `line` (from 1) of `lines`: what documents a
+// declaration, `//` and the space after it taken away, as Markdown.
+function documentation(lines: string[], line: int): string {
+    mut found: string[] = []
+    mut k = line - 2
+
+    while (k >= 0 and k < lines.length() and lines[k].trim().startsWith('//')) {
+        mut text = lines[k].trim()[2..]
+
+        if (text.startsWith(' ')) { text = text[1..] }
+
+        found.insert(0, text)
+        k -= 1
+    }
+
+    return found.join('\n')
+}
+
+// The documentation of the name under the cursor: the comment above its declaration, in the file,
+// in a module it imports, or in a module of the standard library.
+function documentationAt(statements: Node[], found: Node[], line: int, column: int, fileName: string, lines: string[]): string {
+    if (found.length() == 0) { return '' }
+
+    mut place: Option[Place] = None
+
+    match (found[found.length() - 1].kind) {
+        Name(written) => {
+            place = orElse(localDeclaration(found, written, line, column, fileName), topDeclaration(statements, written, fileName))
+            place = orElse(place, importedDeclaration(statements, written, None, fileName))
+        }
+        Member(object, member) => {
+            match (object.kind) {
+                Name(moduleName) => place = importedDeclaration(statements, member, Some(moduleName), fileName)
+                _ => {}
+            }
+        }
+        // The name of a declaration (`immut count = ...`).
+        VarDecl(_, _, _, _) => return documentation(lines, found[found.length() - 1].span.line)
+        _ => {}
+    }
+
+    return match (place) {
+        Some(declared) => documentation(sourceLines(declared.file, fileName, lines), declared.span.line)
+        None => ''
+    }
+}
+
+// The lines of the file `declared` (those of the open document when it is the one, the source of a
+// module of the standard library for `std:name`).
+function sourceLines(declared: string, fileName: string, lines: string[]): string[] {
+    if (declared == fileName) { return lines }
+
+    if (declared.startsWith('std:')) {
+        return match (stdSource(declared[4..])) {
+            Some(source) => source.split('\n')
+            None => []
+        }
+    }
+
+    return match (file.open(declared, file.Read)) {
+        Ok(opened) => match (opened.read()) {
+            Ok(source) => source.split('\n')
+            Err(_) => []
+        }
+        Err(_) => []
+    }
+}
+
+// What a hover shows: the code of `label`, then the documentation, if any.
+function hoverContents(label: string, documented: string): json.Json {
+    immut code = `\`\`\`koji\n${label}\n\`\`\``
+    immut value = if (documented == '') { code } else { `${code}\n\n${documented}` }
+    return json.Object(['kind': json.String('markdown'), 'value': json.String(value)])
+}
+
 function hover(id: json.Json, message: json.Json) {
     immut uri = textAt(message, ['params', 'textDocument', 'uri'])
     immut text = match (documents.get(uri)) {
@@ -487,6 +563,7 @@ function hover(id: json.Json, message: json.Json) {
 
     mut found: Node[] = []
     pathTo(checked.program.modules[0].statements, line, column, mut found)
+    immut documented = documentationAt(checked.program.modules[0].statements, found, line, column, pathOfUri(uri), lines)
     mut i = found.length() - 1
 
     // The innermost node with a type: a name shows its name too, and so does the name of a
@@ -500,8 +577,7 @@ function hover(id: json.Json, message: json.Json) {
                     match (checked.program.tables.variableTypes.get(node.id)) {
                         Some(ty) => {
                             immut label = `${declared}: ${display(checked.program.table, ty)}`
-                            immut contents = json.Object(['kind': json.String('markdown'), 'value': json.String(`\`\`\`koji\n${label}\n\`\`\``)])
-                            respond(id, json.Object(['contents': contents, 'range': rangeOf(lines, node.span)]))
+                            respond(id, json.Object(['contents': hoverContents(label, documented), 'range': rangeOf(lines, node.span)]))
                             return
                         }
                         None => {}
@@ -518,8 +594,7 @@ function hover(id: json.Json, message: json.Json) {
                     Name(name) => `${name}: ${shown}`
                     _ => shown
                 }
-                immut contents = json.Object(['kind': json.String('markdown'), 'value': json.String(`\`\`\`koji\n${label}\n\`\`\``)])
-                respond(id, json.Object(['contents': contents, 'range': rangeOf(lines, node.span)]))
+                respond(id, json.Object(['contents': hoverContents(label, documented), 'range': rangeOf(lines, node.span)]))
                 return
             }
             None => {}
@@ -543,8 +618,7 @@ function hover(id: json.Json, message: json.Json) {
                                 match (checked.program.tables.variableTypes.get(unwrapped(statement).id)) {
                                     Some(ty) => {
                                         immut label = `${written}: ${display(checked.program.table, ty)}`
-                                        immut contents = json.Object(['kind': json.String('markdown'), 'value': json.String(`\`\`\`koji\n${label}\n\`\`\``)])
-                                        respond(id, json.Object(['contents': contents, 'range': rangeOf(lines, found[found.length() - 1].span)]))
+                                        respond(id, json.Object(['contents': hoverContents(label, documented), 'range': rangeOf(lines, found[found.length() - 1].span)]))
                                         return
                                     }
                                     None => {}
@@ -698,8 +772,17 @@ function importedDeclaration(statements: Node[], name: string, moduleName: Optio
 
         match (target) {
             Some(modulePath) => {
-                // Only files: the standard library has no file here.
-                if (not modulePath.endsWith('.kj')) { return None }
+                // A module of the standard library: its source, which the compiler carries
+                // (`std:json`, a place with no file).
+                if (not modulePath.endsWith('.kj')) {
+                    return match (stdSource(modulePath)) {
+                        Some(source) => match (parse(source)) {
+                            Ok(otherStatements) => topDeclaration(otherStatements, name, `std:${modulePath}`)
+                            Err(_) => None
+                        }
+                        None => None
+                    }
+                }
 
                 immut directory = match (path.parent(fileName)) {
                     Some(found) => found
@@ -781,6 +864,8 @@ function definition(id: json.Json, message: json.Json) {
     }
 
     match (place) {
+        // The standard library has no file to go to.
+        Some(declared) if (declared.file.startsWith('std:')) => respond(id, json.Null)
         Some(declared) => {
             immut declaredLines = if (declared.file == name) { lines } else {
                 match (file.open(declared.file, file.Read)) {
