@@ -1624,20 +1624,22 @@ import system
 import task
 import time
 
+// One after the other, the calls would take 1.3 seconds; at the same time, about 0.5 (the margin
+// is for slow machines, where starting a process takes long).
 immut start = time.monotonic()
 immut ticks = task.shared(0)
 immut results = task.group((tasks) => {
     tasks.spawn(() => {
         for i in range(20) {
-            time.sleep(0.01)
+            time.sleep(0.02)
             ticks.update((n) => n + 1)
         }
     })
-    immut sleeper = tasks.spawn(() => match (system.capture('sleep', ['0.3'])) {
+    immut sleeper = tasks.spawn(() => match (system.capture('sleep', ['0.5'])) {
         Ok(output) => output.status
         Err(_) => -1
     })
-    immut echo = tasks.spawn(() => match (system.run('sh', ['-c', 'sleep 0.2'])) {
+    immut echo = tasks.spawn(() => match (system.run('sh', ['-c', 'sleep 0.4'])) {
         Ok(status) => status
         Err(_) => -1
     })
@@ -1648,7 +1650,7 @@ immut results = task.group((tasks) => {
     return `${sleeper.wait()} ${echo.wait()} ${listed.wait()} ${ticks.get() >= 10}`
 })
 print(results)
-print(time.monotonic() - start < 0.6)
+print(time.monotonic() - start < 1)
 ---- output
 0 0 true true
 true
