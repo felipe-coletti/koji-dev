@@ -1856,19 +1856,12 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l96: Float
     local l97: Int
     local l98: Int
-    local l99: Int
-    local l100: Int // copy
-    local l101: Int
-    local l102: Int
-    local l103: Int
-    local l104: Byte // zero
-    local l105: Int
-    local l106: Float
-    local l107: Float // largest
-    local l108: Bool
-    local l109: Bool
-    local l110: Float
-    local l111: Bool
+    local l99: Float
+    local l100: Float // largest
+    local l101: Bool
+    local l102: Bool
+    local l103: Float
+    local l104: Bool
   b0:
     l4 = l1
     l5 = false
@@ -2080,23 +2073,14 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l86 = IntCompare(Less) l74, 0
     branch l86, b52, b53
   b51:
-    l97 = IntSub l2, l1
-    l98 = IntAdd l97, 1
-    l99 = koji_unsafe_allocate([Value(Local(98))])
-    l100 = l99
-    l101 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
-    l102 = IntSub l2, l1
-    l103 = memcpy([Value(Local(100)), Value(Local(101)), Value(Local(102))])
-    l104 = 0
-    l105 = IntSub l2, l1
-    koji_unsafe_write_byte([Value(Local(100)), Value(Local(105)), Value(Local(104))])
-    l106 = strtod([Value(Local(100)), Value(Int(0))])
-    l3 = l106
-    koji_unsafe_free([Value(Local(100))])
-    l107 = 0x1.fffffffffffffp1023
-    l109 = FloatCompare(Greater) l3, l107
-    l108 = l109
-    branch l108, b62, b61
+    l97 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
+    l98 = IntSub l2, l1
+    l99 = koji_float_parse([Value(Local(97)), Value(Local(98))])
+    l3 = l99
+    l100 = 0x1.fffffffffffffp1023
+    l102 = FloatCompare(Greater) l3, l100
+    l101 = l102
+    branch l101, b62, b61
   b52:
     l87 = IntNeg l74
     l85 = l87
@@ -2131,12 +2115,12 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l3 = l95
     return 0
   b61:
-    l110 = FloatNeg l107
-    l111 = FloatCompare(Less) l3, l110
-    l108 = l111
+    l103 = FloatNeg l100
+    l104 = FloatCompare(Less) l3, l103
+    l101 = l104
     goto b62
   b62:
-    branch l108, b63, b64
+    branch l101, b63, b64
   b63:
     return 2
   b64:
@@ -2582,7 +2566,7 @@ function f32 hexFloat(l0: Str, l1: Int): Float
   b27:
     l54 = IntAdd l35, 1
     l55 = l54
-    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
+    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(627)])
     l57 = call f25(l56)
     l58 = l57
     l59 = RecordTag l58
@@ -2599,11 +2583,11 @@ function f32 hexFloat(l0: Str, l1: Int): Float
   b29:
     l72 = IntAdd l35, 1
     l73 = l72
-    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
+    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(637)])
     l75 = call f2(l74)
     l76 = IntAdd l35, 1
     l77 = l76
-    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
+    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(637)])
     l79 = StrCompare(NotEqual) l75, l78
     branch l79, b40, b41
   b30:
@@ -3329,7 +3313,7 @@ function f4 absInt(l0: Int, l1: Int): Int
 function f5 absFloat(l0: Float, l1: Int): Float
     local l2: Float
   b0:
-    l2 = fabs([Value(Local(0))])
+    l2 = koji_float_abs([Value(Local(0))])
     return l2
 
 function f6 absDecimal(l0: Decimal, l1: Int): Decimal
@@ -3374,7 +3358,7 @@ function f8 sqrtFloat(l0: Float, l1: Int): Record(2)
     l5 = record variant 1 (l4)
     return l5
   b2:
-    l6 = sqrt([Value(Local(0))])
+    l6 = koji_float_sqrt([Value(Local(0))])
     l7 = record variant 0 (l6)
     return l7
 
@@ -3460,7 +3444,7 @@ function f10 powFloat(l0: Float, l1: Float, l2: Int): Record(2)
     l3 = l5
     branch l3, b1, b2
   b1:
-    l6 = floor([Value(Local(1))])
+    l6 = koji_float_floor([Value(Local(1))])
     l7 = FloatCompare(NotEqual) l6, l1
     l3 = l7
     goto b2
@@ -3487,7 +3471,7 @@ function f10 powFloat(l0: Float, l1: Float, l2: Int): Record(2)
     l16 = record variant 1 (l15)
     return l16
   b8:
-    l17 = pow([Value(Local(0)), Value(Local(1))])
+    l17 = koji_float_power([Value(Local(0)), Value(Local(1))])
     l18 = l17
     l20 = FloatCompare(Greater) l18, g4
     l19 = l20
@@ -3528,7 +3512,7 @@ function f14 floorFloat(l0: Float, l1: Int): Int
     local l2: Float
     local l3: Int
   b0:
-    l2 = floor([Value(Local(0))])
+    l2 = koji_float_floor([Value(Local(0))])
     l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
     return l3
 
@@ -3536,7 +3520,7 @@ function f15 ceilFloat(l0: Float, l1: Int): Int
     local l2: Float
     local l3: Int
   b0:
-    l2 = ceil([Value(Local(0))])
+    l2 = koji_float_ceil([Value(Local(0))])
     l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
     return l3
 
@@ -3544,7 +3528,7 @@ function f16 roundFloat(l0: Float, l1: Int): Int
     local l2: Float
     local l3: Int
   b0:
-    l2 = round([Value(Local(0))])
+    l2 = koji_float_round([Value(Local(0))])
     l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
     return l3
 
@@ -5523,19 +5507,12 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l96: Float
     local l97: Int
     local l98: Int
-    local l99: Int
-    local l100: Int // copy
-    local l101: Int
-    local l102: Int
-    local l103: Int
-    local l104: Byte // zero
-    local l105: Int
-    local l106: Float
-    local l107: Float // largest
-    local l108: Bool
-    local l109: Bool
-    local l110: Float
-    local l111: Bool
+    local l99: Float
+    local l100: Float // largest
+    local l101: Bool
+    local l102: Bool
+    local l103: Float
+    local l104: Bool
   b0:
     l4 = l1
     l5 = false
@@ -5747,23 +5724,14 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l86 = IntCompare(Less) l74, 0
     branch l86, b52, b53
   b51:
-    l97 = IntSub l2, l1
-    l98 = IntAdd l97, 1
-    l99 = koji_unsafe_allocate([Value(Local(98))])
-    l100 = l99
-    l101 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
-    l102 = IntSub l2, l1
-    l103 = memcpy([Value(Local(100)), Value(Local(101)), Value(Local(102))])
-    l104 = 0
-    l105 = IntSub l2, l1
-    koji_unsafe_write_byte([Value(Local(100)), Value(Local(105)), Value(Local(104))])
-    l106 = strtod([Value(Local(100)), Value(Int(0))])
-    l3 = l106
-    koji_unsafe_free([Value(Local(100))])
-    l107 = 0x1.fffffffffffffp1023
-    l109 = FloatCompare(Greater) l3, l107
-    l108 = l109
-    branch l108, b62, b61
+    l97 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
+    l98 = IntSub l2, l1
+    l99 = koji_float_parse([Value(Local(97)), Value(Local(98))])
+    l3 = l99
+    l100 = 0x1.fffffffffffffp1023
+    l102 = FloatCompare(Greater) l3, l100
+    l101 = l102
+    branch l101, b62, b61
   b52:
     l87 = IntNeg l74
     l85 = l87
@@ -5798,12 +5766,12 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l3 = l95
     return 0
   b61:
-    l110 = FloatNeg l107
-    l111 = FloatCompare(Less) l3, l110
-    l108 = l111
+    l103 = FloatNeg l100
+    l104 = FloatCompare(Less) l3, l103
+    l101 = l104
     goto b62
   b62:
-    branch l108, b63, b64
+    branch l101, b63, b64
   b63:
     return 2
   b64:
@@ -6249,7 +6217,7 @@ function f32 hexFloat(l0: Str, l1: Int): Float
   b27:
     l54 = IntAdd l35, 1
     l55 = l54
-    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
+    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(627)])
     l57 = call f25(l56)
     l58 = l57
     l59 = RecordTag l58
@@ -6266,11 +6234,11 @@ function f32 hexFloat(l0: Str, l1: Int): Float
   b29:
     l72 = IntAdd l35, 1
     l73 = l72
-    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
+    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(637)])
     l75 = call f2(l74)
     l76 = IntAdd l35, 1
     l77 = l76
-    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
+    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(637)])
     l79 = StrCompare(NotEqual) l75, l78
     branch l79, b40, b41
   b30:
@@ -8705,19 +8673,12 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l96: Float
     local l97: Int
     local l98: Int
-    local l99: Int
-    local l100: Int // copy
-    local l101: Int
-    local l102: Int
-    local l103: Int
-    local l104: Byte // zero
-    local l105: Int
-    local l106: Float
-    local l107: Float // largest
-    local l108: Bool
-    local l109: Bool
-    local l110: Float
-    local l111: Bool
+    local l99: Float
+    local l100: Float // largest
+    local l101: Bool
+    local l102: Bool
+    local l103: Float
+    local l104: Bool
   b0:
     l4 = l1
     l5 = false
@@ -8929,23 +8890,14 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l86 = IntCompare(Less) l74, 0
     branch l86, b52, b53
   b51:
-    l97 = IntSub l2, l1
-    l98 = IntAdd l97, 1
-    l99 = koji_unsafe_allocate([Value(Local(98))])
-    l100 = l99
-    l101 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
-    l102 = IntSub l2, l1
-    l103 = memcpy([Value(Local(100)), Value(Local(101)), Value(Local(102))])
-    l104 = 0
-    l105 = IntSub l2, l1
-    koji_unsafe_write_byte([Value(Local(100)), Value(Local(105)), Value(Local(104))])
-    l106 = strtod([Value(Local(100)), Value(Int(0))])
-    l3 = l106
-    koji_unsafe_free([Value(Local(100))])
-    l107 = 0x1.fffffffffffffp1023
-    l109 = FloatCompare(Greater) l3, l107
-    l108 = l109
-    branch l108, b62, b61
+    l97 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
+    l98 = IntSub l2, l1
+    l99 = koji_float_parse([Value(Local(97)), Value(Local(98))])
+    l3 = l99
+    l100 = 0x1.fffffffffffffp1023
+    l102 = FloatCompare(Greater) l3, l100
+    l101 = l102
+    branch l101, b62, b61
   b52:
     l87 = IntNeg l74
     l85 = l87
@@ -8980,12 +8932,12 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l3 = l95
     return 0
   b61:
-    l110 = FloatNeg l107
-    l111 = FloatCompare(Less) l3, l110
-    l108 = l111
+    l103 = FloatNeg l100
+    l104 = FloatCompare(Less) l3, l103
+    l101 = l104
     goto b62
   b62:
-    branch l108, b63, b64
+    branch l101, b63, b64
   b63:
     return 2
   b64:
@@ -9431,7 +9383,7 @@ function f32 hexFloat(l0: Str, l1: Int): Float
   b27:
     l54 = IntAdd l35, 1
     l55 = l54
-    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
+    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(627)])
     l57 = call f25(l56)
     l58 = l57
     l59 = RecordTag l58
@@ -9448,11 +9400,11 @@ function f32 hexFloat(l0: Str, l1: Int): Float
   b29:
     l72 = IntAdd l35, 1
     l73 = l72
-    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
+    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(637)])
     l75 = call f2(l74)
     l76 = IntAdd l35, 1
     l77 = l76
-    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
+    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(637)])
     l79 = StrCompare(NotEqual) l75, l78
     branch l79, b40, b41
   b30:
@@ -11638,19 +11590,12 @@ function f28 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l96: Float
     local l97: Int
     local l98: Int
-    local l99: Int
-    local l100: Int // copy
-    local l101: Int
-    local l102: Int
-    local l103: Int
-    local l104: Byte // zero
-    local l105: Int
-    local l106: Float
-    local l107: Float // largest
-    local l108: Bool
-    local l109: Bool
-    local l110: Float
-    local l111: Bool
+    local l99: Float
+    local l100: Float // largest
+    local l101: Bool
+    local l102: Bool
+    local l103: Float
+    local l104: Bool
   b0:
     l4 = l1
     l5 = false
@@ -11862,23 +11807,14 @@ function f28 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l86 = IntCompare(Less) l74, 0
     branch l86, b52, b53
   b51:
-    l97 = IntSub l2, l1
-    l98 = IntAdd l97, 1
-    l99 = koji_unsafe_allocate([Value(Local(98))])
-    l100 = l99
-    l101 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
-    l102 = IntSub l2, l1
-    l103 = memcpy([Value(Local(100)), Value(Local(101)), Value(Local(102))])
-    l104 = 0
-    l105 = IntSub l2, l1
-    koji_unsafe_write_byte([Value(Local(100)), Value(Local(105)), Value(Local(104))])
-    l106 = strtod([Value(Local(100)), Value(Int(0))])
-    l3 = l106
-    koji_unsafe_free([Value(Local(100))])
-    l107 = 0x1.fffffffffffffp1023
-    l109 = FloatCompare(Greater) l3, l107
-    l108 = l109
-    branch l108, b62, b61
+    l97 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
+    l98 = IntSub l2, l1
+    l99 = koji_float_parse([Value(Local(97)), Value(Local(98))])
+    l3 = l99
+    l100 = 0x1.fffffffffffffp1023
+    l102 = FloatCompare(Greater) l3, l100
+    l101 = l102
+    branch l101, b62, b61
   b52:
     l87 = IntNeg l74
     l85 = l87
@@ -11913,12 +11849,12 @@ function f28 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l3 = l95
     return 0
   b61:
-    l110 = FloatNeg l107
-    l111 = FloatCompare(Less) l3, l110
-    l108 = l111
+    l103 = FloatNeg l100
+    l104 = FloatCompare(Less) l3, l103
+    l101 = l104
     goto b62
   b62:
-    branch l108, b63, b64
+    branch l101, b63, b64
   b63:
     return 2
   b64:
@@ -12364,7 +12300,7 @@ function f33 hexFloat(l0: Str, l1: Int): Float
   b27:
     l54 = IntAdd l35, 1
     l55 = l54
-    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
+    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(627)])
     l57 = call f26(l56)
     l58 = l57
     l59 = RecordTag l58
@@ -12381,11 +12317,11 @@ function f33 hexFloat(l0: Str, l1: Int): Float
   b29:
     l72 = IntAdd l35, 1
     l73 = l72
-    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
+    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(637)])
     l75 = call f3(l74)
     l76 = IntAdd l35, 1
     l77 = l76
-    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
+    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(637)])
     l79 = StrCompare(NotEqual) l75, l78
     branch l79, b40, b41
   b30:
@@ -13455,7 +13391,7 @@ function f7 absInt(l0: Int, l1: Int): Int
 function f8 absFloat(l0: Float, l1: Int): Float
     local l2: Float
   b0:
-    l2 = fabs([Value(Local(0))])
+    l2 = koji_float_abs([Value(Local(0))])
     return l2
 
 function f9 absDecimal(l0: Decimal, l1: Int): Decimal
@@ -13500,7 +13436,7 @@ function f11 sqrtFloat(l0: Float, l1: Int): Record(2)
     l5 = record variant 1 (l4)
     return l5
   b2:
-    l6 = sqrt([Value(Local(0))])
+    l6 = koji_float_sqrt([Value(Local(0))])
     l7 = record variant 0 (l6)
     return l7
 
@@ -13586,7 +13522,7 @@ function f13 powFloat(l0: Float, l1: Float, l2: Int): Record(2)
     l3 = l5
     branch l3, b1, b2
   b1:
-    l6 = floor([Value(Local(1))])
+    l6 = koji_float_floor([Value(Local(1))])
     l7 = FloatCompare(NotEqual) l6, l1
     l3 = l7
     goto b2
@@ -13613,7 +13549,7 @@ function f13 powFloat(l0: Float, l1: Float, l2: Int): Record(2)
     l16 = record variant 1 (l15)
     return l16
   b8:
-    l17 = pow([Value(Local(0)), Value(Local(1))])
+    l17 = koji_float_power([Value(Local(0)), Value(Local(1))])
     l18 = l17
     l20 = FloatCompare(Greater) l18, g7
     l19 = l20
@@ -13654,7 +13590,7 @@ function f17 floorFloat(l0: Float, l1: Int): Int
     local l2: Float
     local l3: Int
   b0:
-    l2 = floor([Value(Local(0))])
+    l2 = koji_float_floor([Value(Local(0))])
     l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
     return l3
 
@@ -13662,7 +13598,7 @@ function f18 ceilFloat(l0: Float, l1: Int): Int
     local l2: Float
     local l3: Int
   b0:
-    l2 = ceil([Value(Local(0))])
+    l2 = koji_float_ceil([Value(Local(0))])
     l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
     return l3
 
@@ -13670,7 +13606,7 @@ function f19 roundFloat(l0: Float, l1: Int): Int
     local l2: Float
     local l3: Int
   b0:
-    l2 = round([Value(Local(0))])
+    l2 = koji_float_round([Value(Local(0))])
     l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
     return l3
 
@@ -18110,19 +18046,12 @@ function f78 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l96: Float
     local l97: Int
     local l98: Int
-    local l99: Int
-    local l100: Int // copy
-    local l101: Int
-    local l102: Int
-    local l103: Int
-    local l104: Byte // zero
-    local l105: Int
-    local l106: Float
-    local l107: Float // largest
-    local l108: Bool
-    local l109: Bool
-    local l110: Float
-    local l111: Bool
+    local l99: Float
+    local l100: Float // largest
+    local l101: Bool
+    local l102: Bool
+    local l103: Float
+    local l104: Bool
   b0:
     l4 = l1
     l5 = false
@@ -18334,23 +18263,14 @@ function f78 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l86 = IntCompare(Less) l74, 0
     branch l86, b52, b53
   b51:
-    l97 = IntSub l2, l1
-    l98 = IntAdd l97, 1
-    l99 = koji_unsafe_allocate([Value(Local(98))])
-    l100 = l99
-    l101 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
-    l102 = IntSub l2, l1
-    l103 = memcpy([Value(Local(100)), Value(Local(101)), Value(Local(102))])
-    l104 = 0
-    l105 = IntSub l2, l1
-    koji_unsafe_write_byte([Value(Local(100)), Value(Local(105)), Value(Local(104))])
-    l106 = strtod([Value(Local(100)), Value(Int(0))])
-    l3 = l106
-    koji_unsafe_free([Value(Local(100))])
-    l107 = 0x1.fffffffffffffp1023
-    l109 = FloatCompare(Greater) l3, l107
-    l108 = l109
-    branch l108, b62, b61
+    l97 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
+    l98 = IntSub l2, l1
+    l99 = koji_float_parse([Value(Local(97)), Value(Local(98))])
+    l3 = l99
+    l100 = 0x1.fffffffffffffp1023
+    l102 = FloatCompare(Greater) l3, l100
+    l101 = l102
+    branch l101, b62, b61
   b52:
     l87 = IntNeg l74
     l85 = l87
@@ -18385,12 +18305,12 @@ function f78 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l3 = l95
     return 0
   b61:
-    l110 = FloatNeg l107
-    l111 = FloatCompare(Less) l3, l110
-    l108 = l111
+    l103 = FloatNeg l100
+    l104 = FloatCompare(Less) l3, l103
+    l101 = l104
     goto b62
   b62:
-    branch l108, b63, b64
+    branch l101, b63, b64
   b63:
     return 2
   b64:
@@ -18836,7 +18756,7 @@ function f83 hexFloat(l0: Str, l1: Int): Float
   b27:
     l54 = IntAdd l35, 1
     l55 = l54
-    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
+    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(627)])
     l57 = call f76(l56)
     l58 = l57
     l59 = RecordTag l58
@@ -18853,11 +18773,11 @@ function f83 hexFloat(l0: Str, l1: Int): Float
   b29:
     l72 = IntAdd l35, 1
     l73 = l72
-    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
+    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(637)])
     l75 = call f53(l74)
     l76 = IntAdd l35, 1
     l77 = l76
-    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
+    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(637)])
     l79 = StrCompare(NotEqual) l75, l78
     branch l79, b40, b41
   b30:
@@ -31931,19 +31851,12 @@ function f124 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l96: Float
     local l97: Int
     local l98: Int
-    local l99: Int
-    local l100: Int // copy
-    local l101: Int
-    local l102: Int
-    local l103: Int
-    local l104: Byte // zero
-    local l105: Int
-    local l106: Float
-    local l107: Float // largest
-    local l108: Bool
-    local l109: Bool
-    local l110: Float
-    local l111: Bool
+    local l99: Float
+    local l100: Float // largest
+    local l101: Bool
+    local l102: Bool
+    local l103: Float
+    local l104: Bool
   b0:
     l4 = l1
     l5 = false
@@ -32155,23 +32068,14 @@ function f124 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l86 = IntCompare(Less) l74, 0
     branch l86, b52, b53
   b51:
-    l97 = IntSub l2, l1
-    l98 = IntAdd l97, 1
-    l99 = koji_unsafe_allocate([Value(Local(98))])
-    l100 = l99
-    l101 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
-    l102 = IntSub l2, l1
-    l103 = memcpy([Value(Local(100)), Value(Local(101)), Value(Local(102))])
-    l104 = 0
-    l105 = IntSub l2, l1
-    koji_unsafe_write_byte([Value(Local(100)), Value(Local(105)), Value(Local(104))])
-    l106 = strtod([Value(Local(100)), Value(Int(0))])
-    l3 = l106
-    koji_unsafe_free([Value(Local(100))])
-    l107 = 0x1.fffffffffffffp1023
-    l109 = FloatCompare(Greater) l3, l107
-    l108 = l109
-    branch l108, b62, b61
+    l97 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
+    l98 = IntSub l2, l1
+    l99 = koji_float_parse([Value(Local(97)), Value(Local(98))])
+    l3 = l99
+    l100 = 0x1.fffffffffffffp1023
+    l102 = FloatCompare(Greater) l3, l100
+    l101 = l102
+    branch l101, b62, b61
   b52:
     l87 = IntNeg l74
     l85 = l87
@@ -32206,12 +32110,12 @@ function f124 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l3 = l95
     return 0
   b61:
-    l110 = FloatNeg l107
-    l111 = FloatCompare(Less) l3, l110
-    l108 = l111
+    l103 = FloatNeg l100
+    l104 = FloatCompare(Less) l3, l103
+    l101 = l104
     goto b62
   b62:
-    branch l108, b63, b64
+    branch l101, b63, b64
   b63:
     return 2
   b64:
@@ -32657,7 +32561,7 @@ function f129 hexFloat(l0: Str, l1: Int): Float
   b27:
     l54 = IntAdd l35, 1
     l55 = l54
-    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
+    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(627)])
     l57 = call f122(l56)
     l58 = l57
     l59 = RecordTag l58
@@ -32674,11 +32578,11 @@ function f129 hexFloat(l0: Str, l1: Int): Float
   b29:
     l72 = IntAdd l35, 1
     l73 = l72
-    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
+    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(637)])
     l75 = call f99(l74)
     l76 = IntAdd l35, 1
     l77 = l76
-    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
+    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(637)])
     l79 = StrCompare(NotEqual) l75, l78
     branch l79, b40, b41
   b30:
@@ -38986,19 +38890,12 @@ function f84 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l96: Float
     local l97: Int
     local l98: Int
-    local l99: Int
-    local l100: Int // copy
-    local l101: Int
-    local l102: Int
-    local l103: Int
-    local l104: Byte // zero
-    local l105: Int
-    local l106: Float
-    local l107: Float // largest
-    local l108: Bool
-    local l109: Bool
-    local l110: Float
-    local l111: Bool
+    local l99: Float
+    local l100: Float // largest
+    local l101: Bool
+    local l102: Bool
+    local l103: Float
+    local l104: Bool
   b0:
     l4 = l1
     l5 = false
@@ -39210,23 +39107,14 @@ function f84 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l86 = IntCompare(Less) l74, 0
     branch l86, b52, b53
   b51:
-    l97 = IntSub l2, l1
-    l98 = IntAdd l97, 1
-    l99 = koji_unsafe_allocate([Value(Local(98))])
-    l100 = l99
-    l101 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
-    l102 = IntSub l2, l1
-    l103 = memcpy([Value(Local(100)), Value(Local(101)), Value(Local(102))])
-    l104 = 0
-    l105 = IntSub l2, l1
-    koji_unsafe_write_byte([Value(Local(100)), Value(Local(105)), Value(Local(104))])
-    l106 = strtod([Value(Local(100)), Value(Int(0))])
-    l3 = l106
-    koji_unsafe_free([Value(Local(100))])
-    l107 = 0x1.fffffffffffffp1023
-    l109 = FloatCompare(Greater) l3, l107
-    l108 = l109
-    branch l108, b62, b61
+    l97 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
+    l98 = IntSub l2, l1
+    l99 = koji_float_parse([Value(Local(97)), Value(Local(98))])
+    l3 = l99
+    l100 = 0x1.fffffffffffffp1023
+    l102 = FloatCompare(Greater) l3, l100
+    l101 = l102
+    branch l101, b62, b61
   b52:
     l87 = IntNeg l74
     l85 = l87
@@ -39261,12 +39149,12 @@ function f84 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l3 = l95
     return 0
   b61:
-    l110 = FloatNeg l107
-    l111 = FloatCompare(Less) l3, l110
-    l108 = l111
+    l103 = FloatNeg l100
+    l104 = FloatCompare(Less) l3, l103
+    l101 = l104
     goto b62
   b62:
-    branch l108, b63, b64
+    branch l101, b63, b64
   b63:
     return 2
   b64:
@@ -39712,7 +39600,7 @@ function f89 hexFloat(l0: Str, l1: Int): Float
   b27:
     l54 = IntAdd l35, 1
     l55 = l54
-    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
+    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(627)])
     l57 = call f82(l56)
     l58 = l57
     l59 = RecordTag l58
@@ -39729,11 +39617,11 @@ function f89 hexFloat(l0: Str, l1: Int): Float
   b29:
     l72 = IntAdd l35, 1
     l73 = l72
-    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
+    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(637)])
     l75 = call f59(l74)
     l76 = IntAdd l35, 1
     l77 = l76
-    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
+    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(637)])
     l79 = StrCompare(NotEqual) l75, l78
     branch l79, b40, b41
   b30:
@@ -41905,7 +41793,7 @@ function f25 absInt(l0: Int, l1: Int): Int
 function f26 absFloat(l0: Float, l1: Int): Float
     local l2: Float
   b0:
-    l2 = fabs([Value(Local(0))])
+    l2 = koji_float_abs([Value(Local(0))])
     return l2
 
 function f27 absDecimal(l0: Decimal, l1: Int): Decimal
@@ -41950,7 +41838,7 @@ function f29 sqrtFloat(l0: Float, l1: Int): Record(6)
     l5 = record variant 1 (l4)
     return l5
   b2:
-    l6 = sqrt([Value(Local(0))])
+    l6 = koji_float_sqrt([Value(Local(0))])
     l7 = record variant 0 (l6)
     return l7
 
@@ -42036,7 +41924,7 @@ function f31 powFloat(l0: Float, l1: Float, l2: Int): Record(6)
     l3 = l5
     branch l3, b1, b2
   b1:
-    l6 = floor([Value(Local(1))])
+    l6 = koji_float_floor([Value(Local(1))])
     l7 = FloatCompare(NotEqual) l6, l1
     l3 = l7
     goto b2
@@ -42063,7 +41951,7 @@ function f31 powFloat(l0: Float, l1: Float, l2: Int): Record(6)
     l16 = record variant 1 (l15)
     return l16
   b8:
-    l17 = pow([Value(Local(0)), Value(Local(1))])
+    l17 = koji_float_power([Value(Local(0)), Value(Local(1))])
     l18 = l17
     l20 = FloatCompare(Greater) l18, g9
     l19 = l20
@@ -42104,7 +41992,7 @@ function f35 floorFloat(l0: Float, l1: Int): Int
     local l2: Float
     local l3: Int
   b0:
-    l2 = floor([Value(Local(0))])
+    l2 = koji_float_floor([Value(Local(0))])
     l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
     return l3
 
@@ -42112,7 +42000,7 @@ function f36 ceilFloat(l0: Float, l1: Int): Int
     local l2: Float
     local l3: Int
   b0:
-    l2 = ceil([Value(Local(0))])
+    l2 = koji_float_ceil([Value(Local(0))])
     l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
     return l3
 
@@ -42120,7 +42008,7 @@ function f37 roundFloat(l0: Float, l1: Int): Int
     local l2: Float
     local l3: Int
   b0:
-    l2 = round([Value(Local(0))])
+    l2 = koji_float_round([Value(Local(0))])
     l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
     return l3
 
@@ -46414,19 +46302,12 @@ function f92 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l96: Float
     local l97: Int
     local l98: Int
-    local l99: Int
-    local l100: Int // copy
-    local l101: Int
-    local l102: Int
-    local l103: Int
-    local l104: Byte // zero
-    local l105: Int
-    local l106: Float
-    local l107: Float // largest
-    local l108: Bool
-    local l109: Bool
-    local l110: Float
-    local l111: Bool
+    local l99: Float
+    local l100: Float // largest
+    local l101: Bool
+    local l102: Bool
+    local l103: Float
+    local l104: Bool
   b0:
     l4 = l1
     l5 = false
@@ -46638,23 +46519,14 @@ function f92 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l86 = IntCompare(Less) l74, 0
     branch l86, b52, b53
   b51:
-    l97 = IntSub l2, l1
-    l98 = IntAdd l97, 1
-    l99 = koji_unsafe_allocate([Value(Local(98))])
-    l100 = l99
-    l101 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
-    l102 = IntSub l2, l1
-    l103 = memcpy([Value(Local(100)), Value(Local(101)), Value(Local(102))])
-    l104 = 0
-    l105 = IntSub l2, l1
-    koji_unsafe_write_byte([Value(Local(100)), Value(Local(105)), Value(Local(104))])
-    l106 = strtod([Value(Local(100)), Value(Int(0))])
-    l3 = l106
-    koji_unsafe_free([Value(Local(100))])
-    l107 = 0x1.fffffffffffffp1023
-    l109 = FloatCompare(Greater) l3, l107
-    l108 = l109
-    branch l108, b62, b61
+    l97 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
+    l98 = IntSub l2, l1
+    l99 = koji_float_parse([Value(Local(97)), Value(Local(98))])
+    l3 = l99
+    l100 = 0x1.fffffffffffffp1023
+    l102 = FloatCompare(Greater) l3, l100
+    l101 = l102
+    branch l101, b62, b61
   b52:
     l87 = IntNeg l74
     l85 = l87
@@ -46689,12 +46561,12 @@ function f92 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l3 = l95
     return 0
   b61:
-    l110 = FloatNeg l107
-    l111 = FloatCompare(Less) l3, l110
-    l108 = l111
+    l103 = FloatNeg l100
+    l104 = FloatCompare(Less) l3, l103
+    l101 = l104
     goto b62
   b62:
-    branch l108, b63, b64
+    branch l101, b63, b64
   b63:
     return 2
   b64:
@@ -47140,7 +47012,7 @@ function f97 hexFloat(l0: Str, l1: Int): Float
   b27:
     l54 = IntAdd l35, 1
     l55 = l54
-    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
+    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(627)])
     l57 = call f90(l56)
     l58 = l57
     l59 = RecordTag l58
@@ -47157,11 +47029,11 @@ function f97 hexFloat(l0: Str, l1: Int): Float
   b29:
     l72 = IntAdd l35, 1
     l73 = l72
-    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
+    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(637)])
     l75 = call f67(l74)
     l76 = IntAdd l35, 1
     l77 = l76
-    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
+    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(637)])
     l79 = StrCompare(NotEqual) l75, l78
     branch l79, b40, b41
   b30:
@@ -49396,19 +49268,12 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l96: Float
     local l97: Int
     local l98: Int
-    local l99: Int
-    local l100: Int // copy
-    local l101: Int
-    local l102: Int
-    local l103: Int
-    local l104: Byte // zero
-    local l105: Int
-    local l106: Float
-    local l107: Float // largest
-    local l108: Bool
-    local l109: Bool
-    local l110: Float
-    local l111: Bool
+    local l99: Float
+    local l100: Float // largest
+    local l101: Bool
+    local l102: Bool
+    local l103: Float
+    local l104: Bool
   b0:
     l4 = l1
     l5 = false
@@ -49620,23 +49485,14 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l86 = IntCompare(Less) l74, 0
     branch l86, b52, b53
   b51:
-    l97 = IntSub l2, l1
-    l98 = IntAdd l97, 1
-    l99 = koji_unsafe_allocate([Value(Local(98))])
-    l100 = l99
-    l101 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
-    l102 = IntSub l2, l1
-    l103 = memcpy([Value(Local(100)), Value(Local(101)), Value(Local(102))])
-    l104 = 0
-    l105 = IntSub l2, l1
-    koji_unsafe_write_byte([Value(Local(100)), Value(Local(105)), Value(Local(104))])
-    l106 = strtod([Value(Local(100)), Value(Int(0))])
-    l3 = l106
-    koji_unsafe_free([Value(Local(100))])
-    l107 = 0x1.fffffffffffffp1023
-    l109 = FloatCompare(Greater) l3, l107
-    l108 = l109
-    branch l108, b62, b61
+    l97 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
+    l98 = IntSub l2, l1
+    l99 = koji_float_parse([Value(Local(97)), Value(Local(98))])
+    l3 = l99
+    l100 = 0x1.fffffffffffffp1023
+    l102 = FloatCompare(Greater) l3, l100
+    l101 = l102
+    branch l101, b62, b61
   b52:
     l87 = IntNeg l74
     l85 = l87
@@ -49671,12 +49527,12 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l3 = l95
     return 0
   b61:
-    l110 = FloatNeg l107
-    l111 = FloatCompare(Less) l3, l110
-    l108 = l111
+    l103 = FloatNeg l100
+    l104 = FloatCompare(Less) l3, l103
+    l101 = l104
     goto b62
   b62:
-    branch l108, b63, b64
+    branch l101, b63, b64
   b63:
     return 2
   b64:
@@ -50122,7 +49978,7 @@ function f32 hexFloat(l0: Str, l1: Int): Float
   b27:
     l54 = IntAdd l35, 1
     l55 = l54
-    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
+    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(627)])
     l57 = call f25(l56)
     l58 = l57
     l59 = RecordTag l58
@@ -50139,11 +49995,11 @@ function f32 hexFloat(l0: Str, l1: Int): Float
   b29:
     l72 = IntAdd l35, 1
     l73 = l72
-    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
+    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(637)])
     l75 = call f2(l74)
     l76 = IntAdd l35, 1
     l77 = l76
-    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
+    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(637)])
     l79 = StrCompare(NotEqual) l75, l78
     branch l79, b40, b41
   b30:
@@ -52400,19 +52256,12 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l96: Float
     local l97: Int
     local l98: Int
-    local l99: Int
-    local l100: Int // copy
-    local l101: Int
-    local l102: Int
-    local l103: Int
-    local l104: Byte // zero
-    local l105: Int
-    local l106: Float
-    local l107: Float // largest
-    local l108: Bool
-    local l109: Bool
-    local l110: Float
-    local l111: Bool
+    local l99: Float
+    local l100: Float // largest
+    local l101: Bool
+    local l102: Bool
+    local l103: Float
+    local l104: Bool
   b0:
     l4 = l1
     l5 = false
@@ -52624,23 +52473,14 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l86 = IntCompare(Less) l74, 0
     branch l86, b52, b53
   b51:
-    l97 = IntSub l2, l1
-    l98 = IntAdd l97, 1
-    l99 = koji_unsafe_allocate([Value(Local(98))])
-    l100 = l99
-    l101 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
-    l102 = IntSub l2, l1
-    l103 = memcpy([Value(Local(100)), Value(Local(101)), Value(Local(102))])
-    l104 = 0
-    l105 = IntSub l2, l1
-    koji_unsafe_write_byte([Value(Local(100)), Value(Local(105)), Value(Local(104))])
-    l106 = strtod([Value(Local(100)), Value(Int(0))])
-    l3 = l106
-    koji_unsafe_free([Value(Local(100))])
-    l107 = 0x1.fffffffffffffp1023
-    l109 = FloatCompare(Greater) l3, l107
-    l108 = l109
-    branch l108, b62, b61
+    l97 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
+    l98 = IntSub l2, l1
+    l99 = koji_float_parse([Value(Local(97)), Value(Local(98))])
+    l3 = l99
+    l100 = 0x1.fffffffffffffp1023
+    l102 = FloatCompare(Greater) l3, l100
+    l101 = l102
+    branch l101, b62, b61
   b52:
     l87 = IntNeg l74
     l85 = l87
@@ -52675,12 +52515,12 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l3 = l95
     return 0
   b61:
-    l110 = FloatNeg l107
-    l111 = FloatCompare(Less) l3, l110
-    l108 = l111
+    l103 = FloatNeg l100
+    l104 = FloatCompare(Less) l3, l103
+    l101 = l104
     goto b62
   b62:
-    branch l108, b63, b64
+    branch l101, b63, b64
   b63:
     return 2
   b64:
@@ -53126,7 +52966,7 @@ function f32 hexFloat(l0: Str, l1: Int): Float
   b27:
     l54 = IntAdd l35, 1
     l55 = l54
-    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
+    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(627)])
     l57 = call f25(l56)
     l58 = l57
     l59 = RecordTag l58
@@ -53143,11 +52983,11 @@ function f32 hexFloat(l0: Str, l1: Int): Float
   b29:
     l72 = IntAdd l35, 1
     l73 = l72
-    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
+    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(637)])
     l75 = call f2(l74)
     l76 = IntAdd l35, 1
     l77 = l76
-    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
+    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(637)])
     l79 = StrCompare(NotEqual) l75, l78
     branch l79, b40, b41
   b30:
@@ -55360,19 +55200,12 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l96: Float
     local l97: Int
     local l98: Int
-    local l99: Int
-    local l100: Int // copy
-    local l101: Int
-    local l102: Int
-    local l103: Int
-    local l104: Byte // zero
-    local l105: Int
-    local l106: Float
-    local l107: Float // largest
-    local l108: Bool
-    local l109: Bool
-    local l110: Float
-    local l111: Bool
+    local l99: Float
+    local l100: Float // largest
+    local l101: Bool
+    local l102: Bool
+    local l103: Float
+    local l104: Bool
   b0:
     l4 = l1
     l5 = false
@@ -55584,23 +55417,14 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l86 = IntCompare(Less) l74, 0
     branch l86, b52, b53
   b51:
-    l97 = IntSub l2, l1
-    l98 = IntAdd l97, 1
-    l99 = koji_unsafe_allocate([Value(Local(98))])
-    l100 = l99
-    l101 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
-    l102 = IntSub l2, l1
-    l103 = memcpy([Value(Local(100)), Value(Local(101)), Value(Local(102))])
-    l104 = 0
-    l105 = IntSub l2, l1
-    koji_unsafe_write_byte([Value(Local(100)), Value(Local(105)), Value(Local(104))])
-    l106 = strtod([Value(Local(100)), Value(Int(0))])
-    l3 = l106
-    koji_unsafe_free([Value(Local(100))])
-    l107 = 0x1.fffffffffffffp1023
-    l109 = FloatCompare(Greater) l3, l107
-    l108 = l109
-    branch l108, b62, b61
+    l97 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
+    l98 = IntSub l2, l1
+    l99 = koji_float_parse([Value(Local(97)), Value(Local(98))])
+    l3 = l99
+    l100 = 0x1.fffffffffffffp1023
+    l102 = FloatCompare(Greater) l3, l100
+    l101 = l102
+    branch l101, b62, b61
   b52:
     l87 = IntNeg l74
     l85 = l87
@@ -55635,12 +55459,12 @@ function f27 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l3 = l95
     return 0
   b61:
-    l110 = FloatNeg l107
-    l111 = FloatCompare(Less) l3, l110
-    l108 = l111
+    l103 = FloatNeg l100
+    l104 = FloatCompare(Less) l3, l103
+    l101 = l104
     goto b62
   b62:
-    branch l108, b63, b64
+    branch l101, b63, b64
   b63:
     return 2
   b64:
@@ -56086,7 +55910,7 @@ function f32 hexFloat(l0: Str, l1: Int): Float
   b27:
     l54 = IntAdd l35, 1
     l55 = l54
-    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
+    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(627)])
     l57 = call f25(l56)
     l58 = l57
     l59 = RecordTag l58
@@ -56103,11 +55927,11 @@ function f32 hexFloat(l0: Str, l1: Int): Float
   b29:
     l72 = IntAdd l35, 1
     l73 = l72
-    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
+    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(637)])
     l75 = call f2(l74)
     l76 = IntAdd l35, 1
     l77 = l76
-    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
+    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(637)])
     l79 = StrCompare(NotEqual) l75, l78
     branch l79, b40, b41
   b30:
@@ -62530,19 +62354,12 @@ function f84 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l96: Float
     local l97: Int
     local l98: Int
-    local l99: Int
-    local l100: Int // copy
-    local l101: Int
-    local l102: Int
-    local l103: Int
-    local l104: Byte // zero
-    local l105: Int
-    local l106: Float
-    local l107: Float // largest
-    local l108: Bool
-    local l109: Bool
-    local l110: Float
-    local l111: Bool
+    local l99: Float
+    local l100: Float // largest
+    local l101: Bool
+    local l102: Bool
+    local l103: Float
+    local l104: Bool
   b0:
     l4 = l1
     l5 = false
@@ -62754,23 +62571,14 @@ function f84 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l86 = IntCompare(Less) l74, 0
     branch l86, b52, b53
   b51:
-    l97 = IntSub l2, l1
-    l98 = IntAdd l97, 1
-    l99 = koji_unsafe_allocate([Value(Local(98))])
-    l100 = l99
-    l101 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
-    l102 = IntSub l2, l1
-    l103 = memcpy([Value(Local(100)), Value(Local(101)), Value(Local(102))])
-    l104 = 0
-    l105 = IntSub l2, l1
-    koji_unsafe_write_byte([Value(Local(100)), Value(Local(105)), Value(Local(104))])
-    l106 = strtod([Value(Local(100)), Value(Int(0))])
-    l3 = l106
-    koji_unsafe_free([Value(Local(100))])
-    l107 = 0x1.fffffffffffffp1023
-    l109 = FloatCompare(Greater) l3, l107
-    l108 = l109
-    branch l108, b62, b61
+    l97 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
+    l98 = IntSub l2, l1
+    l99 = koji_float_parse([Value(Local(97)), Value(Local(98))])
+    l3 = l99
+    l100 = 0x1.fffffffffffffp1023
+    l102 = FloatCompare(Greater) l3, l100
+    l101 = l102
+    branch l101, b62, b61
   b52:
     l87 = IntNeg l74
     l85 = l87
@@ -62805,12 +62613,12 @@ function f84 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l3 = l95
     return 0
   b61:
-    l110 = FloatNeg l107
-    l111 = FloatCompare(Less) l3, l110
-    l108 = l111
+    l103 = FloatNeg l100
+    l104 = FloatCompare(Less) l3, l103
+    l101 = l104
     goto b62
   b62:
-    branch l108, b63, b64
+    branch l101, b63, b64
   b63:
     return 2
   b64:
@@ -63256,7 +63064,7 @@ function f89 hexFloat(l0: Str, l1: Int): Float
   b27:
     l54 = IntAdd l35, 1
     l55 = l54
-    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
+    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(627)])
     l57 = call f82(l56)
     l58 = l57
     l59 = RecordTag l58
@@ -63273,11 +63081,11 @@ function f89 hexFloat(l0: Str, l1: Int): Float
   b29:
     l72 = IntAdd l35, 1
     l73 = l72
-    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
+    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(637)])
     l75 = call f59(l74)
     l76 = IntAdd l35, 1
     l77 = l76
-    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
+    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(637)])
     l79 = StrCompare(NotEqual) l75, l78
     branch l79, b40, b41
   b30:
@@ -68034,19 +67842,12 @@ function f58 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     local l96: Float
     local l97: Int
     local l98: Int
-    local l99: Int
-    local l100: Int // copy
-    local l101: Int
-    local l102: Int
-    local l103: Int
-    local l104: Byte // zero
-    local l105: Int
-    local l106: Float
-    local l107: Float // largest
-    local l108: Bool
-    local l109: Bool
-    local l110: Float
-    local l111: Bool
+    local l99: Float
+    local l100: Float // largest
+    local l101: Bool
+    local l102: Bool
+    local l103: Float
+    local l104: Bool
   b0:
     l4 = l1
     l5 = false
@@ -68258,23 +68059,14 @@ function f58 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l86 = IntCompare(Less) l74, 0
     branch l86, b52, b53
   b51:
-    l97 = IntSub l2, l1
-    l98 = IntAdd l97, 1
-    l99 = koji_unsafe_allocate([Value(Local(98))])
-    l100 = l99
-    l101 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
-    l102 = IntSub l2, l1
-    l103 = memcpy([Value(Local(100)), Value(Local(101)), Value(Local(102))])
-    l104 = 0
-    l105 = IntSub l2, l1
-    koji_unsafe_write_byte([Value(Local(100)), Value(Local(105)), Value(Local(104))])
-    l106 = strtod([Value(Local(100)), Value(Int(0))])
-    l3 = l106
-    koji_unsafe_free([Value(Local(100))])
-    l107 = 0x1.fffffffffffffp1023
-    l109 = FloatCompare(Greater) l3, l107
-    l108 = l109
-    branch l108, b62, b61
+    l97 = koji_unsafe_offset([Value(Local(0)), Value(Local(1))])
+    l98 = IntSub l2, l1
+    l99 = koji_float_parse([Value(Local(97)), Value(Local(98))])
+    l3 = l99
+    l100 = 0x1.fffffffffffffp1023
+    l102 = FloatCompare(Greater) l3, l100
+    l101 = l102
+    branch l101, b62, b61
   b52:
     l87 = IntNeg l74
     l85 = l87
@@ -68309,12 +68101,12 @@ function f58 decimalFloat(l0: Int, l1: Int, l2: Int, l3: Float): Int
     l3 = l95
     return 0
   b61:
-    l110 = FloatNeg l107
-    l111 = FloatCompare(Less) l3, l110
-    l108 = l111
+    l103 = FloatNeg l100
+    l104 = FloatCompare(Less) l3, l103
+    l101 = l104
     goto b62
   b62:
-    branch l108, b63, b64
+    branch l101, b63, b64
   b63:
     return 2
   b64:
@@ -68760,7 +68552,7 @@ function f63 hexFloat(l0: Str, l1: Int): Float
   b27:
     l54 = IntAdd l35, 1
     l55 = l54
-    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(632)])
+    l56 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(55)), Mode(0), Value(Int(0)), Location(627)])
     l57 = call f56(l56)
     l58 = l57
     l59 = RecordTag l58
@@ -68777,11 +68569,11 @@ function f63 hexFloat(l0: Str, l1: Int): Float
   b29:
     l72 = IntAdd l35, 1
     l73 = l72
-    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(642)])
+    l74 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(73)), Mode(0), Value(Int(0)), Location(637)])
     l75 = call f33(l74)
     l76 = IntAdd l35, 1
     l77 = l76
-    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(642)])
+    l78 = koji_std_string_slice([Value(Local(0)), Mode(1), Value(Local(77)), Mode(0), Value(Int(0)), Location(637)])
     l79 = StrCompare(NotEqual) l75, l78
     branch l79, b40, b41
   b30:
@@ -69524,7 +69316,7 @@ function f3 absInt(l0: Int, l1: Int): Int
 function f4 absFloat(l0: Float, l1: Int): Float
     local l2: Float
   b0:
-    l2 = fabs([Value(Local(0))])
+    l2 = koji_float_abs([Value(Local(0))])
     return l2
 
 function f5 absDecimal(l0: Decimal, l1: Int): Decimal
@@ -69569,7 +69361,7 @@ function f7 sqrtFloat(l0: Float, l1: Int): Record(2)
     l5 = record variant 1 (l4)
     return l5
   b2:
-    l6 = sqrt([Value(Local(0))])
+    l6 = koji_float_sqrt([Value(Local(0))])
     l7 = record variant 0 (l6)
     return l7
 
@@ -69655,7 +69447,7 @@ function f9 powFloat(l0: Float, l1: Float, l2: Int): Record(2)
     l3 = l5
     branch l3, b1, b2
   b1:
-    l6 = floor([Value(Local(1))])
+    l6 = koji_float_floor([Value(Local(1))])
     l7 = FloatCompare(NotEqual) l6, l1
     l3 = l7
     goto b2
@@ -69682,7 +69474,7 @@ function f9 powFloat(l0: Float, l1: Float, l2: Int): Record(2)
     l16 = record variant 1 (l15)
     return l16
   b8:
-    l17 = pow([Value(Local(0)), Value(Local(1))])
+    l17 = koji_float_power([Value(Local(0)), Value(Local(1))])
     l18 = l17
     l20 = FloatCompare(Greater) l18, g5
     l19 = l20
@@ -69723,7 +69515,7 @@ function f13 floorFloat(l0: Float, l1: Int): Int
     local l2: Float
     local l3: Int
   b0:
-    l2 = floor([Value(Local(0))])
+    l2 = koji_float_floor([Value(Local(0))])
     l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
     return l3
 
@@ -69731,7 +69523,7 @@ function f14 ceilFloat(l0: Float, l1: Int): Int
     local l2: Float
     local l3: Int
   b0:
-    l2 = ceil([Value(Local(0))])
+    l2 = koji_float_ceil([Value(Local(0))])
     l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
     return l3
 
@@ -69739,7 +69531,7 @@ function f15 roundFloat(l0: Float, l1: Int): Int
     local l2: Float
     local l3: Int
   b0:
-    l2 = round([Value(Local(0))])
+    l2 = koji_float_round([Value(Local(0))])
     l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
     return l3
 

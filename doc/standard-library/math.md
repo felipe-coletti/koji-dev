@@ -1,6 +1,6 @@
 # math
 
-The `math` module provides mathematical functions and constants. It is written in Koji (`std/math.kj`): the floats with the C library, the decimals with the runtime.
+The `math` module provides mathematical functions and constants. It is written in Koji (`std/math.kj`), the functions of floats and decimals included (in the runtime, `std/koji/floats.kj` and `std/koji/decimal.kj`): the results are the same on every system.
 
 ## Functions
 
@@ -10,10 +10,10 @@ Every function takes an `int`, a `decimal` or a `float`. A `decimal` (or an `int
     Returns the absolute value of `x`, with the same type as `x`.
 
 -   `sqrt(x: decimal) -> Result[decimal, MathError]`, `sqrt(x: float) -> Result[float, MathError]`  
-    Returns the square root of `x` (for a decimal, correctly rounded to 34 digits; the root of an `int` is a decimal). Fails with `Complex` when `x` is negative.
+    Returns the square root of `x`, correctly rounded (for a decimal, to 34 digits; the root of an `int` is a decimal). Fails with `Complex` when `x` is negative.
 
 -   `pow(x: decimal, y: decimal) -> Result[decimal, MathError]`, `pow(x: float, y: float) -> Result[float, MathError]`  
-    Returns `x` raised to the power of `y`. For decimals, an `int` exponent gives the exact power rounded once, and another exponent is computed with 64 digits and rounded to 34. Fails with `Complex` when `x` is negative and `y` is not an integer (e.g. `pow(-8, 0.5)`), and with `Infinite` when `x` is `0` and `y` is negative (e.g. `pow(0, -1)`, which is `1 / 0`). `pow(0, 0)` is `1`: that is the value of the expression (only the limit form 0⁰ is indeterminate).
+    Returns `x` raised to the power of `y`. For decimals, an `int` exponent gives the exact power rounded once, and another exponent is computed with 64 digits and rounded to 34; for floats, the float nearest to the exact power. Fails with `Complex` when `x` is negative and `y` is not an integer (e.g. `pow(-8, 0.5)`), and with `Infinite` when `x` is `0` and `y` is negative (e.g. `pow(0, -1)`, which is `1 / 0`). `pow(0, 0)` is `1`: that is the value of the expression (only the limit form 0⁰ is indeterminate).
 
 -   `floor(x: decimal) -> int`  
     Returns the largest integer less than or equal to `x`.

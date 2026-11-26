@@ -58,7 +58,7 @@ Why Koji is the way it is. Each decision says what Koji does, why, and what was 
 
 -   **What is written is what is held.** A decimal read from text and written back gives the same text; a float only looks like `0.1` because its shortest decimal is shown.
 -   **Equality works.** `0.1 + 0.2 == 0.3`, so comparisons, the keys of a map and the cases of a `match` behave as people expect.
--   **The same result on every machine.** All the arithmetic of a decimal, `sqrt` and `pow` included, is in the runtime of Koji; the functions of a float come from the system's `libm`, whose results can differ between systems.
+-   **The same result on every machine.** All the arithmetic of a decimal, `sqrt` and `pow` included, is in the runtime of Koji, and so are the functions of a float (`math.sqrt`, `**`): the same code on every system, rather than the system's `libm`, whose results differ between systems.
 -   **Data stays as it came.** Numbers from JSON, a file or the user are kept exactly, and a program that reads and writes them back does not change them.
 -   **What some domains require.** Money, taxes and accounting round in base 10, often half to even, by rule.
 -   **Fewer traps.** A whole kind of bug, common for beginners, disappears, and each conversion to a float is written in the code, like the rest of what Koji does not hide.

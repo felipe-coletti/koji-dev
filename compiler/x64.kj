@@ -1230,7 +1230,12 @@ function Emitter.loadValue(mut self, register: int, value: MValue) {
         MImm(number) => self.moveConstant(register, number)
         MReg(id) => match (self.place(id)) {
             InRegister(source) => {
-                if (source != register) { self.moveRegister(register, source) }
+                // The bits of a float (`floatBits`): movq from its xmm register.
+                if (source >= xmm) {
+                    self.moveFloatRegister(register, source)
+                } else {
+                    if (source != register) { self.moveRegister(register, source) }
+                }
             }
             InFrame(offset) => self.loadFrame(register, offset)
         }

@@ -1889,6 +1889,32 @@ import { abs, sqrt, pow } from 'math'
 print(abs(float(-2.5)), sqrt(16), sqrt(float(-1)), pow(2, 10))
 ---- output
 0x1.4p1 Ok(4) Err(Complex) Ok(1024)
+==== floats_without_the_c_library
+---- source
+import math
+
+// The functions of floats are Koji's own (std/koji/floats.kj): exact, or within 1 ulp.
+print(math.sqrt(float(2)), math.sqrt(0x1p-1074), math.sqrt(0x1.fffffffffffffp1023))
+print(math.pow(float(2), float(0.5)), math.pow(float(10), float(-320)), math.pow(float(-2), float(-3)))
+print(float(1.0001) ** float(10000), float(2) ** float(1023), float(0.5) ** float(1074))
+print(math.floor(float(-2.5)), math.ceil(float(-2.5)), math.round(float(-2.5)), math.round(float(0.49999999999999994)))
+print(int(float(-3.99)), math.abs(float(-0x1p-1074)))
+print(float('2.2250738585072011e-308'), float('4.9406564584124654e-324'), float('2.4703282292062328e-324'))
+print(float('1.7976931348623157e308'), float('1.7976931348623159e308'), float('9007199254740993'))
+print(float('0.30000000000000000000000000000000000000000000000000000000000000000000000000001'), float('1e23'))
+print(float(1.234567890123456789012345678901234e-300), math.pow(2, 0.5), math.sqrt(2))
+print(float(-5.5) % float(2), 0x1.fffffffffffffp1023 % 0x1p-1074, float(1e300) % float(3e-300), float(10) % float(0.1))
+---- output
+Ok(0x1.6a09e667f3bcdp0) Ok(0x1p-537) Ok(0x1.fffffffffffffp511)
+Ok(0x1.6a09e667f3bcdp0) Ok(0x0.00000000007e8p-1022) Ok(-0x1p-3)
+0x1.5bec34aabbfd3p1 0x1p1023 0x0.0000000000001p-1022
+-3 -2 -3 0
+-3 0x0.0000000000001p-1022
+Ok(0x0.fffffffffffffp-1022) Ok(0x0.0000000000001p-1022) Ok(0x0.0000000000001p-1022)
+Ok(0x1.fffffffffffffp1023) Err(OutOfRange('1.7976931348623159e308')) Ok(0x1p53)
+Ok(0x1.3333333333333p-2) Ok(0x1.52d02c7e14af6p76)
+0x1.a74fe1c1e8908p-997 Ok(1.414213562373095048801688724209698) Ok(1.414213562373095048801688724209698)
+-0x1.8p0 0x0p0 0x1.4a11e087dfeacp-997 0x1.9999999999972p-4
 ==== floats_have_no_nan_or_infinity #1
 ---- source (no line break at the end)
 immut x = float(1e308) * float(10)

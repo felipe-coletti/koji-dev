@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+-   The functions of floats are Koji's own, no longer those of the system's C library (`libm`), and
+    they give the same results on every system, correctly rounded: `math.sqrt`, `**`,
+    `math.pow`, `%`, `math.floor`, `math.ceil` and `math.round`. `float('...')` reads a float
+    correctly rounded without `strtod`. Programs on Linux no longer link `libm`.
+
 ## 0.2.0 (preview)
 
 The second preview of Koji: methods of lists that take functions, look-around in regular
