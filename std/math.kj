@@ -3,10 +3,9 @@
 // checks their arguments and calls the function below for their type (`math.abs(-2)` is
 // `absInt(-2, here)`), with the place of the call, where their panics are.
 
-import { CInt, Location, panicAt } from 'koji:unsafe'
+import { CInt, Location, floatBits, floatOfBits, panicAt, truncate } from 'koji:unsafe'
 
 // The functions of floats, written in Koji (std/koji/floats.kj).
-extern function koji_float_abs(x: float): float
 extern function koji_float_sqrt(x: float): float
 extern function koji_float_power(base: float, exponent: float): float
 extern function koji_float_floor(x: float): float
@@ -53,8 +52,9 @@ function absInt(value: int, here: Location): int {
     return -value
 }
 
+// The sign bit cleared.
 function absFloat(value: float, here: Location): float {
-    return koji_float_abs(value)
+    return floatOfBits(floatBits(value) & 0x7FFFFFFFFFFFFFFF)
 }
 
 function absDecimal(value: decimal, here: Location): decimal {
@@ -108,15 +108,40 @@ function roundDecimal(value: decimal, here: Location): int {
     return koji_decimal_to_int(value, 2, here)
 }
 
+// Within the ints, from the int part (`truncate`, an instruction that rounds toward 0, exact
+// there): floor is it, or 1 less below it; ceil 1 more above it; round 1 more or less when the
+// rest, x - its int part (exact: they are within 1 of each other), is half or more. Beyond the
+// ints, the functions of the runtime, which panic.
 function floorFloat(value: float, here: Location): int {
+    if (value < float(9.2e18) and value > float(-9.2e18)) {
+        immut whole = truncate(value)
+        return if (value < float(whole)) { whole - 1 } else { whole }
+    }
+
     return koji_std_float_to_int(koji_float_floor(value), here)
 }
 
 function ceilFloat(value: float, here: Location): int {
+    if (value < float(9.2e18) and value > float(-9.2e18)) {
+        immut whole = truncate(value)
+        return if (value > float(whole)) { whole + 1 } else { whole }
+    }
+
     return koji_std_float_to_int(koji_float_ceil(value), here)
 }
 
 function roundFloat(value: float, here: Location): int {
+    if (value < float(9.2e18) and value > float(-9.2e18)) {
+        immut whole = truncate(value)
+        immut rest = value - float(whole)
+
+        if (rest >= float(0.5)) { return whole + 1 }
+
+        if (rest <= float(-0.5)) { return whole - 1 }
+
+        return whole
+    }
+
     return koji_std_float_to_int(koji_float_round(value), here)
 }
 

@@ -12,6 +12,9 @@
 -   `math.sqrt` of a float is the instruction of the processor (some 6 ns, from 365), and
     `float('...')` reads 17 digits and more without big integers, by the tables of Ryu (under
     1 µs, from 27): both still correctly rounded.
+-   `math.floor`, `math.ceil`, `math.round` and `int(f)` of a float are computed from its int part
+    in the program itself, some 3 ns rather than 10 to 18. `float(-2.5)` and the like are floats
+    found while compiling, as `float(2.5)` was.
 
 ## 0.2.1 (preview)
 

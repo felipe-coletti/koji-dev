@@ -3311,10 +3311,14 @@ function f4 absInt(l0: Int, l1: Int): Int
     return l5
 
 function f5 absFloat(l0: Float, l1: Int): Float
-    local l2: Float
+    local l2: Int
+    local l3: Int
+    local l4: Float
   b0:
-    l2 = koji_float_abs([Value(Local(0))])
-    return l2
+    l2 = koji_unsafe_float_bits([Value(Local(0))])
+    l3 = BitAnd l2, 9223372036854775807
+    l4 = koji_unsafe_float_of_bits([Value(Local(3))])
+    return l4
 
 function f6 absDecimal(l0: Decimal, l1: Int): Decimal
     local l2: Decimal
@@ -3509,28 +3513,145 @@ function f13 roundDecimal(l0: Decimal, l1: Int): Int
     return l2
 
 function f14 floorFloat(l0: Float, l1: Int): Int
-    local l2: Float
-    local l3: Int
+    local l2: Bool
+    local l3: Bool
+    local l4: Decimal
+    local l5: Bool
+    local l6: Int
+    local l7: Int // whole
+    local l8: Int
+    local l9: Float
+    local l10: Bool
+    local l11: Int
+    local l12: Float
+    local l13: Int
   b0:
-    l2 = koji_float_floor([Value(Local(0))])
-    l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
-    return l3
+    l3 = FloatCompare(Less) l0, 0x1.feb3dd06766p62
+    l2 = l3
+    branch l2, b1, b2
+  b1:
+    l4 = DecimalNeg 92e17
+    l5 = FloatCompare(Greater) l0, -0x1.feb3dd06766p62
+    l2 = l5
+    goto b2
+  b2:
+    branch l2, b3, b4
+  b3:
+    l6 = FloatTruncate l0
+    l7 = l6
+    l9 = IntToFloat l7
+    l10 = FloatCompare(Less) l0, l9
+    branch l10, b5, b6
+  b4:
+    l12 = koji_float_floor([Value(Local(0))])
+    l13 = koji_std_float_to_int([Value(Local(12)), Value(Local(1))])
+    return l13
+  b5:
+    l11 = IntSub l7, 1
+    l8 = l11
+    goto b7
+  b6:
+    l8 = l7
+    goto b7
+  b7:
+    return l8
 
 function f15 ceilFloat(l0: Float, l1: Int): Int
-    local l2: Float
-    local l3: Int
+    local l2: Bool
+    local l3: Bool
+    local l4: Decimal
+    local l5: Bool
+    local l6: Int
+    local l7: Int // whole
+    local l8: Int
+    local l9: Float
+    local l10: Bool
+    local l11: Int
+    local l12: Float
+    local l13: Int
   b0:
-    l2 = koji_float_ceil([Value(Local(0))])
-    l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
-    return l3
+    l3 = FloatCompare(Less) l0, 0x1.feb3dd06766p62
+    l2 = l3
+    branch l2, b1, b2
+  b1:
+    l4 = DecimalNeg 92e17
+    l5 = FloatCompare(Greater) l0, -0x1.feb3dd06766p62
+    l2 = l5
+    goto b2
+  b2:
+    branch l2, b3, b4
+  b3:
+    l6 = FloatTruncate l0
+    l7 = l6
+    l9 = IntToFloat l7
+    l10 = FloatCompare(Greater) l0, l9
+    branch l10, b5, b6
+  b4:
+    l12 = koji_float_ceil([Value(Local(0))])
+    l13 = koji_std_float_to_int([Value(Local(12)), Value(Local(1))])
+    return l13
+  b5:
+    l11 = IntAdd l7, 1
+    l8 = l11
+    goto b7
+  b6:
+    l8 = l7
+    goto b7
+  b7:
+    return l8
 
 function f16 roundFloat(l0: Float, l1: Int): Int
-    local l2: Float
-    local l3: Int
+    local l2: Bool
+    local l3: Bool
+    local l4: Decimal
+    local l5: Bool
+    local l6: Int
+    local l7: Int // whole
+    local l8: Float
+    local l9: Float
+    local l10: Float // rest
+    local l11: Bool
+    local l12: Int
+    local l13: Decimal
+    local l14: Bool
+    local l15: Int
+    local l16: Float
+    local l17: Int
   b0:
-    l2 = koji_float_round([Value(Local(0))])
-    l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
-    return l3
+    l3 = FloatCompare(Less) l0, 0x1.feb3dd06766p62
+    l2 = l3
+    branch l2, b1, b2
+  b1:
+    l4 = DecimalNeg 92e17
+    l5 = FloatCompare(Greater) l0, -0x1.feb3dd06766p62
+    l2 = l5
+    goto b2
+  b2:
+    branch l2, b3, b4
+  b3:
+    l6 = FloatTruncate l0
+    l7 = l6
+    l8 = IntToFloat l7
+    l9 = FloatSub l0, l8
+    l10 = l9
+    l11 = FloatCompare(GreaterEqual) l10, 0x1p-1
+    branch l11, b5, b6
+  b4:
+    l16 = koji_float_round([Value(Local(0))])
+    l17 = koji_std_float_to_int([Value(Local(16)), Value(Local(1))])
+    return l17
+  b5:
+    l12 = IntAdd l7, 1
+    return l12
+  b6:
+    l13 = DecimalNeg 5e-1
+    l14 = FloatCompare(LessEqual) l10, -0x1p-1
+    branch l14, b7, b8
+  b7:
+    l15 = IntSub l7, 1
+    return l15
+  b8:
+    return l7
 
 function f17 isInt(l0: Decimal): Bool
     local l1: Bool
@@ -13389,10 +13510,14 @@ function f7 absInt(l0: Int, l1: Int): Int
     return l5
 
 function f8 absFloat(l0: Float, l1: Int): Float
-    local l2: Float
+    local l2: Int
+    local l3: Int
+    local l4: Float
   b0:
-    l2 = koji_float_abs([Value(Local(0))])
-    return l2
+    l2 = koji_unsafe_float_bits([Value(Local(0))])
+    l3 = BitAnd l2, 9223372036854775807
+    l4 = koji_unsafe_float_of_bits([Value(Local(3))])
+    return l4
 
 function f9 absDecimal(l0: Decimal, l1: Int): Decimal
     local l2: Decimal
@@ -13587,28 +13712,145 @@ function f16 roundDecimal(l0: Decimal, l1: Int): Int
     return l2
 
 function f17 floorFloat(l0: Float, l1: Int): Int
-    local l2: Float
-    local l3: Int
+    local l2: Bool
+    local l3: Bool
+    local l4: Decimal
+    local l5: Bool
+    local l6: Int
+    local l7: Int // whole
+    local l8: Int
+    local l9: Float
+    local l10: Bool
+    local l11: Int
+    local l12: Float
+    local l13: Int
   b0:
-    l2 = koji_float_floor([Value(Local(0))])
-    l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
-    return l3
+    l3 = FloatCompare(Less) l0, 0x1.feb3dd06766p62
+    l2 = l3
+    branch l2, b1, b2
+  b1:
+    l4 = DecimalNeg 92e17
+    l5 = FloatCompare(Greater) l0, -0x1.feb3dd06766p62
+    l2 = l5
+    goto b2
+  b2:
+    branch l2, b3, b4
+  b3:
+    l6 = FloatTruncate l0
+    l7 = l6
+    l9 = IntToFloat l7
+    l10 = FloatCompare(Less) l0, l9
+    branch l10, b5, b6
+  b4:
+    l12 = koji_float_floor([Value(Local(0))])
+    l13 = koji_std_float_to_int([Value(Local(12)), Value(Local(1))])
+    return l13
+  b5:
+    l11 = IntSub l7, 1
+    l8 = l11
+    goto b7
+  b6:
+    l8 = l7
+    goto b7
+  b7:
+    return l8
 
 function f18 ceilFloat(l0: Float, l1: Int): Int
-    local l2: Float
-    local l3: Int
+    local l2: Bool
+    local l3: Bool
+    local l4: Decimal
+    local l5: Bool
+    local l6: Int
+    local l7: Int // whole
+    local l8: Int
+    local l9: Float
+    local l10: Bool
+    local l11: Int
+    local l12: Float
+    local l13: Int
   b0:
-    l2 = koji_float_ceil([Value(Local(0))])
-    l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
-    return l3
+    l3 = FloatCompare(Less) l0, 0x1.feb3dd06766p62
+    l2 = l3
+    branch l2, b1, b2
+  b1:
+    l4 = DecimalNeg 92e17
+    l5 = FloatCompare(Greater) l0, -0x1.feb3dd06766p62
+    l2 = l5
+    goto b2
+  b2:
+    branch l2, b3, b4
+  b3:
+    l6 = FloatTruncate l0
+    l7 = l6
+    l9 = IntToFloat l7
+    l10 = FloatCompare(Greater) l0, l9
+    branch l10, b5, b6
+  b4:
+    l12 = koji_float_ceil([Value(Local(0))])
+    l13 = koji_std_float_to_int([Value(Local(12)), Value(Local(1))])
+    return l13
+  b5:
+    l11 = IntAdd l7, 1
+    l8 = l11
+    goto b7
+  b6:
+    l8 = l7
+    goto b7
+  b7:
+    return l8
 
 function f19 roundFloat(l0: Float, l1: Int): Int
-    local l2: Float
-    local l3: Int
+    local l2: Bool
+    local l3: Bool
+    local l4: Decimal
+    local l5: Bool
+    local l6: Int
+    local l7: Int // whole
+    local l8: Float
+    local l9: Float
+    local l10: Float // rest
+    local l11: Bool
+    local l12: Int
+    local l13: Decimal
+    local l14: Bool
+    local l15: Int
+    local l16: Float
+    local l17: Int
   b0:
-    l2 = koji_float_round([Value(Local(0))])
-    l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
-    return l3
+    l3 = FloatCompare(Less) l0, 0x1.feb3dd06766p62
+    l2 = l3
+    branch l2, b1, b2
+  b1:
+    l4 = DecimalNeg 92e17
+    l5 = FloatCompare(Greater) l0, -0x1.feb3dd06766p62
+    l2 = l5
+    goto b2
+  b2:
+    branch l2, b3, b4
+  b3:
+    l6 = FloatTruncate l0
+    l7 = l6
+    l8 = IntToFloat l7
+    l9 = FloatSub l0, l8
+    l10 = l9
+    l11 = FloatCompare(GreaterEqual) l10, 0x1p-1
+    branch l11, b5, b6
+  b4:
+    l16 = koji_float_round([Value(Local(0))])
+    l17 = koji_std_float_to_int([Value(Local(16)), Value(Local(1))])
+    return l17
+  b5:
+    l12 = IntAdd l7, 1
+    return l12
+  b6:
+    l13 = DecimalNeg 5e-1
+    l14 = FloatCompare(LessEqual) l10, -0x1p-1
+    branch l14, b7, b8
+  b7:
+    l15 = IntSub l7, 1
+    return l15
+  b8:
+    return l7
 
 function f20 isInt(l0: Decimal): Bool
     local l1: Bool
@@ -41791,10 +42033,14 @@ function f25 absInt(l0: Int, l1: Int): Int
     return l5
 
 function f26 absFloat(l0: Float, l1: Int): Float
-    local l2: Float
+    local l2: Int
+    local l3: Int
+    local l4: Float
   b0:
-    l2 = koji_float_abs([Value(Local(0))])
-    return l2
+    l2 = koji_unsafe_float_bits([Value(Local(0))])
+    l3 = BitAnd l2, 9223372036854775807
+    l4 = koji_unsafe_float_of_bits([Value(Local(3))])
+    return l4
 
 function f27 absDecimal(l0: Decimal, l1: Int): Decimal
     local l2: Decimal
@@ -41989,28 +42235,145 @@ function f34 roundDecimal(l0: Decimal, l1: Int): Int
     return l2
 
 function f35 floorFloat(l0: Float, l1: Int): Int
-    local l2: Float
-    local l3: Int
+    local l2: Bool
+    local l3: Bool
+    local l4: Decimal
+    local l5: Bool
+    local l6: Int
+    local l7: Int // whole
+    local l8: Int
+    local l9: Float
+    local l10: Bool
+    local l11: Int
+    local l12: Float
+    local l13: Int
   b0:
-    l2 = koji_float_floor([Value(Local(0))])
-    l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
-    return l3
+    l3 = FloatCompare(Less) l0, 0x1.feb3dd06766p62
+    l2 = l3
+    branch l2, b1, b2
+  b1:
+    l4 = DecimalNeg 92e17
+    l5 = FloatCompare(Greater) l0, -0x1.feb3dd06766p62
+    l2 = l5
+    goto b2
+  b2:
+    branch l2, b3, b4
+  b3:
+    l6 = FloatTruncate l0
+    l7 = l6
+    l9 = IntToFloat l7
+    l10 = FloatCompare(Less) l0, l9
+    branch l10, b5, b6
+  b4:
+    l12 = koji_float_floor([Value(Local(0))])
+    l13 = koji_std_float_to_int([Value(Local(12)), Value(Local(1))])
+    return l13
+  b5:
+    l11 = IntSub l7, 1
+    l8 = l11
+    goto b7
+  b6:
+    l8 = l7
+    goto b7
+  b7:
+    return l8
 
 function f36 ceilFloat(l0: Float, l1: Int): Int
-    local l2: Float
-    local l3: Int
+    local l2: Bool
+    local l3: Bool
+    local l4: Decimal
+    local l5: Bool
+    local l6: Int
+    local l7: Int // whole
+    local l8: Int
+    local l9: Float
+    local l10: Bool
+    local l11: Int
+    local l12: Float
+    local l13: Int
   b0:
-    l2 = koji_float_ceil([Value(Local(0))])
-    l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
-    return l3
+    l3 = FloatCompare(Less) l0, 0x1.feb3dd06766p62
+    l2 = l3
+    branch l2, b1, b2
+  b1:
+    l4 = DecimalNeg 92e17
+    l5 = FloatCompare(Greater) l0, -0x1.feb3dd06766p62
+    l2 = l5
+    goto b2
+  b2:
+    branch l2, b3, b4
+  b3:
+    l6 = FloatTruncate l0
+    l7 = l6
+    l9 = IntToFloat l7
+    l10 = FloatCompare(Greater) l0, l9
+    branch l10, b5, b6
+  b4:
+    l12 = koji_float_ceil([Value(Local(0))])
+    l13 = koji_std_float_to_int([Value(Local(12)), Value(Local(1))])
+    return l13
+  b5:
+    l11 = IntAdd l7, 1
+    l8 = l11
+    goto b7
+  b6:
+    l8 = l7
+    goto b7
+  b7:
+    return l8
 
 function f37 roundFloat(l0: Float, l1: Int): Int
-    local l2: Float
-    local l3: Int
+    local l2: Bool
+    local l3: Bool
+    local l4: Decimal
+    local l5: Bool
+    local l6: Int
+    local l7: Int // whole
+    local l8: Float
+    local l9: Float
+    local l10: Float // rest
+    local l11: Bool
+    local l12: Int
+    local l13: Decimal
+    local l14: Bool
+    local l15: Int
+    local l16: Float
+    local l17: Int
   b0:
-    l2 = koji_float_round([Value(Local(0))])
-    l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
-    return l3
+    l3 = FloatCompare(Less) l0, 0x1.feb3dd06766p62
+    l2 = l3
+    branch l2, b1, b2
+  b1:
+    l4 = DecimalNeg 92e17
+    l5 = FloatCompare(Greater) l0, -0x1.feb3dd06766p62
+    l2 = l5
+    goto b2
+  b2:
+    branch l2, b3, b4
+  b3:
+    l6 = FloatTruncate l0
+    l7 = l6
+    l8 = IntToFloat l7
+    l9 = FloatSub l0, l8
+    l10 = l9
+    l11 = FloatCompare(GreaterEqual) l10, 0x1p-1
+    branch l11, b5, b6
+  b4:
+    l16 = koji_float_round([Value(Local(0))])
+    l17 = koji_std_float_to_int([Value(Local(16)), Value(Local(1))])
+    return l17
+  b5:
+    l12 = IntAdd l7, 1
+    return l12
+  b6:
+    l13 = DecimalNeg 5e-1
+    l14 = FloatCompare(LessEqual) l10, -0x1p-1
+    branch l14, b7, b8
+  b7:
+    l15 = IntSub l7, 1
+    return l15
+  b8:
+    return l7
 
 function f38 isInt(l0: Decimal): Bool
     local l1: Bool
@@ -69314,10 +69677,14 @@ function f3 absInt(l0: Int, l1: Int): Int
     return l5
 
 function f4 absFloat(l0: Float, l1: Int): Float
-    local l2: Float
+    local l2: Int
+    local l3: Int
+    local l4: Float
   b0:
-    l2 = koji_float_abs([Value(Local(0))])
-    return l2
+    l2 = koji_unsafe_float_bits([Value(Local(0))])
+    l3 = BitAnd l2, 9223372036854775807
+    l4 = koji_unsafe_float_of_bits([Value(Local(3))])
+    return l4
 
 function f5 absDecimal(l0: Decimal, l1: Int): Decimal
     local l2: Decimal
@@ -69512,28 +69879,145 @@ function f12 roundDecimal(l0: Decimal, l1: Int): Int
     return l2
 
 function f13 floorFloat(l0: Float, l1: Int): Int
-    local l2: Float
-    local l3: Int
+    local l2: Bool
+    local l3: Bool
+    local l4: Decimal
+    local l5: Bool
+    local l6: Int
+    local l7: Int // whole
+    local l8: Int
+    local l9: Float
+    local l10: Bool
+    local l11: Int
+    local l12: Float
+    local l13: Int
   b0:
-    l2 = koji_float_floor([Value(Local(0))])
-    l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
-    return l3
+    l3 = FloatCompare(Less) l0, 0x1.feb3dd06766p62
+    l2 = l3
+    branch l2, b1, b2
+  b1:
+    l4 = DecimalNeg 92e17
+    l5 = FloatCompare(Greater) l0, -0x1.feb3dd06766p62
+    l2 = l5
+    goto b2
+  b2:
+    branch l2, b3, b4
+  b3:
+    l6 = FloatTruncate l0
+    l7 = l6
+    l9 = IntToFloat l7
+    l10 = FloatCompare(Less) l0, l9
+    branch l10, b5, b6
+  b4:
+    l12 = koji_float_floor([Value(Local(0))])
+    l13 = koji_std_float_to_int([Value(Local(12)), Value(Local(1))])
+    return l13
+  b5:
+    l11 = IntSub l7, 1
+    l8 = l11
+    goto b7
+  b6:
+    l8 = l7
+    goto b7
+  b7:
+    return l8
 
 function f14 ceilFloat(l0: Float, l1: Int): Int
-    local l2: Float
-    local l3: Int
+    local l2: Bool
+    local l3: Bool
+    local l4: Decimal
+    local l5: Bool
+    local l6: Int
+    local l7: Int // whole
+    local l8: Int
+    local l9: Float
+    local l10: Bool
+    local l11: Int
+    local l12: Float
+    local l13: Int
   b0:
-    l2 = koji_float_ceil([Value(Local(0))])
-    l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
-    return l3
+    l3 = FloatCompare(Less) l0, 0x1.feb3dd06766p62
+    l2 = l3
+    branch l2, b1, b2
+  b1:
+    l4 = DecimalNeg 92e17
+    l5 = FloatCompare(Greater) l0, -0x1.feb3dd06766p62
+    l2 = l5
+    goto b2
+  b2:
+    branch l2, b3, b4
+  b3:
+    l6 = FloatTruncate l0
+    l7 = l6
+    l9 = IntToFloat l7
+    l10 = FloatCompare(Greater) l0, l9
+    branch l10, b5, b6
+  b4:
+    l12 = koji_float_ceil([Value(Local(0))])
+    l13 = koji_std_float_to_int([Value(Local(12)), Value(Local(1))])
+    return l13
+  b5:
+    l11 = IntAdd l7, 1
+    l8 = l11
+    goto b7
+  b6:
+    l8 = l7
+    goto b7
+  b7:
+    return l8
 
 function f15 roundFloat(l0: Float, l1: Int): Int
-    local l2: Float
-    local l3: Int
+    local l2: Bool
+    local l3: Bool
+    local l4: Decimal
+    local l5: Bool
+    local l6: Int
+    local l7: Int // whole
+    local l8: Float
+    local l9: Float
+    local l10: Float // rest
+    local l11: Bool
+    local l12: Int
+    local l13: Decimal
+    local l14: Bool
+    local l15: Int
+    local l16: Float
+    local l17: Int
   b0:
-    l2 = koji_float_round([Value(Local(0))])
-    l3 = koji_std_float_to_int([Value(Local(2)), Value(Local(1))])
-    return l3
+    l3 = FloatCompare(Less) l0, 0x1.feb3dd06766p62
+    l2 = l3
+    branch l2, b1, b2
+  b1:
+    l4 = DecimalNeg 92e17
+    l5 = FloatCompare(Greater) l0, -0x1.feb3dd06766p62
+    l2 = l5
+    goto b2
+  b2:
+    branch l2, b3, b4
+  b3:
+    l6 = FloatTruncate l0
+    l7 = l6
+    l8 = IntToFloat l7
+    l9 = FloatSub l0, l8
+    l10 = l9
+    l11 = FloatCompare(GreaterEqual) l10, 0x1p-1
+    branch l11, b5, b6
+  b4:
+    l16 = koji_float_round([Value(Local(0))])
+    l17 = koji_std_float_to_int([Value(Local(16)), Value(Local(1))])
+    return l17
+  b5:
+    l12 = IntAdd l7, 1
+    return l12
+  b6:
+    l13 = DecimalNeg 5e-1
+    l14 = FloatCompare(LessEqual) l10, -0x1p-1
+    branch l14, b7, b8
+  b7:
+    l15 = IntSub l7, 1
+    return l15
+  b8:
+    return l7
 
 function f16 isInt(l0: Decimal): Bool
     local l1: Bool

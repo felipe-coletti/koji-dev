@@ -1923,6 +1923,29 @@ Ok(0x1.3333333333333p-2) Ok(0x1.52d02c7e14af6p76)
 0x1.eb3f830346443p-119 0x1.58c598005ec09p-1019 0x1.b1e9e16801cb3p1023
 0x0.0000000000003p-1022 0x0.0000000000001p-1022 0x0.88facca6e0f85p-1022
 0x1.fffe80006p53 0x1.fffe80006p53 0x1.fffe80005ffffp53
+==== floor_ceil_and_round_of_floats_at_their_edges
+---- source
+import math
+
+// From the int part, exact: halves, the largest float below 1/2, past 2^52, near the ends of int.
+immut xs = [float(2.5), float(-2.5), 0x1.fffffffffffffp-2, -0x1.fffffffffffffp-2, 0x1.fffffffffffffp51, float(-4503599627370495.5), 0x1.feb3dd0676p62, float(-9.1e18), float(-0.0)]
+
+for x in xs {
+    print(math.floor(x), math.ceil(x), math.round(x), int(x))
+}
+
+print(float(-9.2e18), float(-0.5), float(-0.0))
+---- output
+2 3 3 2
+-3 -2 -3 -2
+0 1 0 0
+-1 0 0 0
+4503599627370495 4503599627370496 4503599627370496 4503599627370495
+-4503599627370496 -4503599627370495 -4503599627370496 -4503599627370495
+9199999999998427136 9199999999998427136 9199999999998427136 9199999999998427136
+-9100000000000000000 -9100000000000000000 -9100000000000000000 -9100000000000000000
+0 0 0 0
+-0x1.feb3dd06766p62 -0x1p-1 0x0p0
 ==== floats_have_no_nan_or_infinity #1
 ---- source (no line break at the end)
 immut x = float(1e308) * float(10)

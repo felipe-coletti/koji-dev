@@ -4117,6 +4117,18 @@ function Lowerer.call(mut self, mut builder: Builder, call: Node, name: string, 
                             Err(_) => {}
                         }
                     }
+                    // `float(-9.2e18)` too (not -0: the decimal 0 has no sign).
+                    Unary(op, operand) if (op == '-') => {
+                        match (unlocated(operand).kind) {
+                            DecimalLiteral(text) => {
+                                match (float(`-${text}`)) {
+                                    Ok(number) if (number != float(0)) => return Ok(Some(FloatOp(number)))
+                                    _ => {}
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                     _ => {}
                 }
 

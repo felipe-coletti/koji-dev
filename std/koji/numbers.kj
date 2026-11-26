@@ -125,11 +125,10 @@ extern function koji_float_pow(base: float, exponent: float, here: Location): fl
 
 // `int(f)`: the int part of a float, or a panic when it does not fit.
 extern function koji_std_float_to_int(value: float, here: Location): int {
-    immut whole = koji_float_trunc(value)
+    // `truncate` rounds toward 0, as the int part does.
+    if (value < float(9.2e18) and value > float(-9.2e18)) { return truncate(value) }
 
-    if (whole < float(9.2e18) and whole > float(-9.2e18)) { return truncate(whole) }
-
-    panicAt(here, `integer overflow: ${plainText(whole)} does not fit in an int`)
+    panicAt(here, `integer overflow: ${plainText(koji_float_trunc(value))} does not fit in an int`)
 }
 
 // A float that is an integer, in full: its shortest digits, then zeros (as Rust shows floats).
