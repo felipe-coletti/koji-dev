@@ -2,11 +2,12 @@
 // text of a float, in the library of the runtime written in Koji (C calls these functions by
 // their names).
 
-import { Location, U128, allocate, decimalHigh, decimalLow, free, lowWord, panicAt, read, truncate, wide, wordProduct, write } from 'koji:unsafe'
+import { Location, U128, decimalHigh, decimalLow, floatBits, lowWord, panicAt, truncate, wide, wordProduct } from 'koji:unsafe'
 
-extern function pow(base: float, exponent: float): float
-extern function floor(x: float): float
-extern function trunc(x: float): float
+// The functions of floats (std/koji/floats.kj).
+extern function koji_float_power(base: float, exponent: float): float
+extern function koji_float_floor(x: float): float
+extern function koji_float_trunc(x: float): float
 // The shortest decimal of a float (std/koji/decimal.kj).
 extern function koji_decimal_from_float(value: float): decimal
 
@@ -51,11 +52,7 @@ function hexDigit(n: int): string {
 
 // The 64 bits of a float, as an int.
 function bitsOf(value: float): int {
-    immut place = allocate(8)
-    write(place, 0, value)
-    immut bits: int = read(place, 0)
-    free(place)
-    return bits
+    return floatBits(value)
 }
 
 // `base ** exponent` for ints; panics at `here` when there is no int result.
@@ -112,13 +109,13 @@ function multiplied(a: int, b: int, mut fits: boolean): int {
 // `base ** exponent` for floats, with real numbers only (`0 ** 0` is 1); panics at `here` when
 // there is no real result.
 extern function koji_float_pow(base: float, exponent: float, here: Location): float {
-    if (base < 0 and floor(exponent) != exponent) {
+    if (base < 0 and koji_float_floor(exponent) != exponent) {
         panicAt(here, `${koji_string_from_float(base)} ** ${koji_string_from_float(exponent)} is not a real number (use math.pow to handle it)`)
     }
 
     if (base == 0 and exponent < 0) { panicAt(here, 'division by zero') }
 
-    immut result = pow(base, exponent)
+    immut result = koji_float_power(base, exponent)
     immut largest = float(1.7976931348623157e308)
 
     if (result > largest or result < -largest) { panicAt(here, 'float overflow') }
@@ -128,7 +125,7 @@ extern function koji_float_pow(base: float, exponent: float, here: Location): fl
 
 // `int(f)`: the int part of a float, or a panic when it does not fit.
 extern function koji_std_float_to_int(value: float, here: Location): int {
-    immut whole = trunc(value)
+    immut whole = koji_float_trunc(value)
 
     if (whole < float(9.2e18) and whole > float(-9.2e18)) { return truncate(whole) }
 

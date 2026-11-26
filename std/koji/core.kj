@@ -11,7 +11,8 @@ extern function memcmp(a: Address, b: Address, size: CSize): CInt
 // `memmem`, by the library (koji:windows: Windows has none).
 extern function koji_find_bytes(haystack: Address, haystackSize: CSize, needle: Address, needleSize: CSize): Address
 extern function strlen(text: Address): CSize
-extern function strtod(text: Address, end: Address): float
+// The float of a decimal text, correctly rounded (std/koji/floats.kj).
+extern function koji_float_parse(text: Address, size: int): float
 extern function memcpy(target: Address, source: Address, size: CSize): Address
 // A line of the standard input, from the library (std/koji/output.kj).
 extern function koji_read_line(prompt: string, here: Location, status: Address): string
@@ -475,7 +476,7 @@ function floatOf(text: string): Result[float, ParseError] {
 }
 
 // The float of the bytes from `start` to `end` in decimal notation: 0, or 1 when they are not in
-// it, or 2 when it is beyond a float. Exact without `strtod` when the digits fit in 2^53 and the
+// it, or 2 when it is beyond a float. Exact without big numbers when the digits fit in 2^53 and the
 // power of 10 is a float too (Clinger's fast path).
 function decimalFloat(bytes: Address, start: int, end: int, mut value: float): int {
     mut at = start
@@ -548,13 +549,7 @@ function decimalFloat(bytes: Address, start: int, end: int, mut value: float): i
         return 0
     }
 
-    // `strtod` reads a string of C: a copy, with a 0 at its end.
-    immut copy = allocate(end - start + 1)
-    memcpy(copy, offset(bytes, start), end - start)
-    immut zero: byte = 0
-    write(copy, end - start, zero)
-    value = strtod(copy, nullAddress())
-    free(copy)
+    value = koji_float_parse(offset(bytes, start), end - start)
     immut largest = float(1.7976931348623157e308)
 
     if (value > largest or value < -largest) { return 2 }

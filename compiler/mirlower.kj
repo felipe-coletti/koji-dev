@@ -312,7 +312,7 @@ immut memoryWidths: Map[string, int] = ['koji_unsafe_read_int': 8, 'koji_unsafe_
 immut machineInstructions: Map[string, string] = ['koji_unsafe_reverse_bytes': 'bswap', 'koji_aes_available': 'aesAvailable', 'koji_unsafe_aes_round': 'aesRound', 'koji_unsafe_aes_last_round': 'aesLastRound', 'koji_unsafe_carryless_product': 'carryless', 'koji_unsafe_float_control': 'floatControl', 'koji_unsafe_valgrind': 'valgrind']
 
 // The functions of `koji:unsafe` and of the pool the machine IR writes itself (see `libraryCall`).
-immut inlineLibrary = ['koji_unsafe_switch_stacks', 'koji_unsafe_task_entry', 'koji_unsafe_wide', 'koji_unsafe_low_word', 'koji_unsafe_high_word', 'koji_unsafe_word_product', 'koji_unsafe_decimal_low', 'koji_unsafe_decimal_high', 'koji_unsafe_decimal_of', 'koji_unsafe_leading_zeros', 'koji_unsafe_offset', 'koji_unsafe_distance', 'koji_unsafe_allocate', 'koji_unsafe_free', 'koji_unsafe_new_string', 'koji_unsafe_blank_string', 'koji_unsafe_set_string_size', 'koji_unsafe_set_list_length', 'koji_pool_heads', 'koji_pool_is_off', 'koji_memory_take', 'koji_pool_take', 'koji_memory_give', 'koji_pool_give', 'koji_record_field_count', 'koji_record_field_type', 'koji_record_field_slot', 'koji_record_get', 'koji_element_counted', 'koji_element_retain', 'koji_element_release']
+immut inlineLibrary = ['koji_unsafe_switch_stacks', 'koji_unsafe_task_entry', 'koji_unsafe_wide', 'koji_unsafe_float_bits', 'koji_unsafe_float_of_bits', 'koji_unsafe_low_word', 'koji_unsafe_high_word', 'koji_unsafe_word_product', 'koji_unsafe_decimal_low', 'koji_unsafe_decimal_high', 'koji_unsafe_decimal_of', 'koji_unsafe_leading_zeros', 'koji_unsafe_offset', 'koji_unsafe_distance', 'koji_unsafe_allocate', 'koji_unsafe_free', 'koji_unsafe_new_string', 'koji_unsafe_blank_string', 'koji_unsafe_set_string_size', 'koji_unsafe_set_list_length', 'koji_pool_heads', 'koji_pool_is_off', 'koji_memory_take', 'koji_pool_take', 'koji_memory_give', 'koji_pool_give', 'koji_record_field_count', 'koji_record_field_type', 'koji_record_field_slot', 'koji_record_get', 'koji_element_counted', 'koji_element_retain', 'koji_element_release']
 
 function lowered(program: IrProgram, instruction: Instruction): boolean {
     return match (instruction) {
@@ -2688,9 +2688,9 @@ function Lowering.instruction(mut self, instruction: Instruction) {
                     if (other == 'FloatDiv') {
                         self.current.push(MBinary(dest, 'fdiv', first, second, overflow))
                     } else {
-                        // fmod of the library of C.
+                        // koji_float_remainder of the library (std/koji/floats.kj).
                         immut remainder = self.floatTemporary()
-                        self.current.push(MCall(cCallee('fmod', 2), [first, second], [remainder]))
+                        self.current.push(MCall(MExternal('koji_float_remainder'), [first, second], [remainder]))
                         self.current.push(MUnary(dest, 'fcheck', MReg(remainder), overflow))
                     }
                 }
@@ -3328,8 +3328,8 @@ function Lowering.libraryCall(mut self, dest: Option[int], name: string, args: S
 // The functions of `koji:unsafe` and of the pool written inline (see `inlineLibrary`).
 function Lowering.inlineLibrary(mut self, dest: Option[int], name: string, values: MValue[]) {
     // The words of a U128 or a decimal: made of two, one of them, the product of two low words,
-    // the zeros before the first bit set.
-    if (name in ['koji_unsafe_wide', 'koji_unsafe_decimal_of', 'koji_unsafe_low_word', 'koji_unsafe_high_word', 'koji_unsafe_decimal_low', 'koji_unsafe_decimal_high', 'koji_unsafe_word_product', 'koji_unsafe_leading_zeros']) {
+    // the zeros before the first bit set; the bits of a float and back, a move between classes.
+    if (name in ['koji_unsafe_wide', 'koji_unsafe_decimal_of', 'koji_unsafe_low_word', 'koji_unsafe_high_word', 'koji_unsafe_decimal_low', 'koji_unsafe_decimal_high', 'koji_unsafe_word_product', 'koji_unsafe_leading_zeros', 'koji_unsafe_float_bits', 'koji_unsafe_float_of_bits']) {
         immut local = match (dest) {
             Some(found) => found
             None => return
@@ -3337,7 +3337,7 @@ function Lowering.inlineLibrary(mut self, dest: Option[int], name: string, value
 
         match (name) {
             other if (other == 'koji_unsafe_wide' or other == 'koji_unsafe_decimal_of') => self.setWords(local, [values[0], values[1]])
-            other if (other == 'koji_unsafe_low_word' or other == 'koji_unsafe_decimal_low') => self.current.push(MMove(local, values[0]))
+            other if (other == 'koji_unsafe_low_word' or other == 'koji_unsafe_decimal_low' or other == 'koji_unsafe_float_bits' or other == 'koji_unsafe_float_of_bits') => self.current.push(MMove(local, values[0]))
             other if (other == 'koji_unsafe_high_word' or other == 'koji_unsafe_decimal_high') => self.current.push(MMove(local, values[1]))
             'koji_unsafe_word_product' => self.current.push(MWide(self.registersOf(local), 'product', [values[0]], [values[2]]))
             _ => self.current.push(MWide([local], 'zeros', values, []))

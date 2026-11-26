@@ -5,13 +5,13 @@
 
 import { CInt, Location, panicAt } from 'koji:unsafe'
 
-// The functions of C (`libm`) for floats.
-extern function fabs(x: float): float
-extern function sqrt(x: float): float
-extern function pow(base: float, exponent: float): float
-extern function floor(x: float): float
-extern function ceil(x: float): float
-extern function round(x: float): float
+// The functions of floats, written in Koji (std/koji/floats.kj).
+extern function koji_float_abs(x: float): float
+extern function koji_float_sqrt(x: float): float
+extern function koji_float_power(base: float, exponent: float): float
+extern function koji_float_floor(x: float): float
+extern function koji_float_ceil(x: float): float
+extern function koji_float_round(x: float): float
 
 // The decimals of the runtime, and the conversions to an int that panic at `here`: `mode` is 0 to
 // round down, 1 up and 2 to the nearest.
@@ -54,7 +54,7 @@ function absInt(value: int, here: Location): int {
 }
 
 function absFloat(value: float, here: Location): float {
-    return fabs(value)
+    return koji_float_abs(value)
 }
 
 function absDecimal(value: decimal, here: Location): decimal {
@@ -71,7 +71,7 @@ function sqrtDecimal(value: decimal, here: Location): Result[decimal, MathError]
 function sqrtFloat(value: float, here: Location): Result[float, MathError] {
     if (value < 0) { return Err(Complex) }
 
-    return Ok(sqrt(value))
+    return Ok(koji_float_sqrt(value))
 }
 
 // `pow(0, 0)` is 1, the value of the expression (only the limit form is indeterminate).
@@ -84,11 +84,11 @@ function powDecimal(base: decimal, exponent: decimal, here: Location): Result[de
 }
 
 function powFloat(base: float, exponent: float, here: Location): Result[float, MathError] {
-    if (base < 0 and floor(exponent) != exponent) { return Err(Complex) }
+    if (base < 0 and koji_float_floor(exponent) != exponent) { return Err(Complex) }
 
     if (base == 0 and exponent < 0) { return Err(Infinite) }
 
-    immut power = pow(base, exponent)
+    immut power = koji_float_power(base, exponent)
 
     if (power > largestFloat or power < -largestFloat) { panicAt(here, 'float overflow') }
 
@@ -109,15 +109,15 @@ function roundDecimal(value: decimal, here: Location): int {
 }
 
 function floorFloat(value: float, here: Location): int {
-    return koji_std_float_to_int(floor(value), here)
+    return koji_std_float_to_int(koji_float_floor(value), here)
 }
 
 function ceilFloat(value: float, here: Location): int {
-    return koji_std_float_to_int(ceil(value), here)
+    return koji_std_float_to_int(koji_float_ceil(value), here)
 }
 
 function roundFloat(value: float, here: Location): int {
-    return koji_std_float_to_int(round(value), here)
+    return koji_std_float_to_int(koji_float_round(value), here)
 }
 
 // Whether `value` is an int (an exponent that a negative base can take).

@@ -11,18 +11,19 @@
 //
 // Numbers of 256 bits (products, dividends) are two `U128`: `high` and `low`.
 
-import { Address, CInt, CSize, Location, U128, allocate, decimalHigh, decimalLow, decimalOf, free, highWord, isNull, leadingZeros, listItems, lowWord, nullAddress, offset, panicAt, read, reserve, setListLength, stringBytes, stringSize, wide, wideToFloat, wordProduct, write } from 'koji:unsafe'
-import { cString, trim } from 'koji:core'
+import { Address, CInt, CSize, Location, U128, allocate, decimalHigh, decimalLow, decimalOf, floatBits, free, highWord, isNull, leadingZeros, listItems, lowWord, nullAddress, offset, panicAt, read, reserve, setListLength, stringBytes, stringSize, wide, wideToFloat, wordProduct, write } from 'koji:unsafe'
+import { trim } from 'koji:core'
 import { inversePowersOfFive, powersOfFive } from 'koji:ryu'
 
-// The C library: floats, and `strtod`, which reads a float from text correctly rounded.
-extern function sqrt(x: float): float
+// The C library, for memory.
 extern function memcpy(target: Address, source: Address, size: CSize): Address
 extern function memset(target: Address, value: CInt, size: CSize): Address
-extern function log(x: float): float
-extern function log10(x: float): float
-extern function floor(x: float): float
-extern function strtod(text: Address, end: Address): float
+// The functions of floats (std/koji/floats.kj), and the float of a decimal text, correctly rounded.
+extern function koji_float_sqrt(x: float): float
+extern function koji_float_log(x: float): float
+extern function koji_float_log10(x: float): float
+extern function koji_float_floor(x: float): float
+extern function koji_float_parse(text: Address, size: int): float
 
 immut digitCount = 34
 // The zeros after the point, before the first digit, from which a fraction is shown in scientific
@@ -815,7 +816,7 @@ extern function koji_decimal_sqrt(value: decimal): decimal {
     immut low = scaled(coefficient, shift, mut high)
     // Newton's method from just above the root of a float (53 correct bits): it goes down to the
     // floor of the root.
-    immut estimate = floatToU128(sqrt(hugeToFloat(high, low)))
+    immut estimate = floatToU128(koji_float_sqrt(hugeToFloat(high, low)))
     mut root = estimate + (estimate >> 40) + 2
 
     while (true) {
@@ -1049,10 +1050,7 @@ mut inverseFives = nullAddress()
 // interval of the numbers that read back as the float, and the float, times a power of 5 of 128
 // bits (std/koji/ryu.kj), then the digits removed while the ends differ.
 extern function koji_decimal_from_float(value: float): decimal {
-    immut place = allocate(8)
-    write(place, 0, value)
-    immut bits: int = read(place, 0)
-    free(place)
+    immut bits = floatBits(value)
     immut fraction = bits & ((1 << 52) - 1)
     immut exponentBits = (bits >> 52) & 0x7FF
 
@@ -1241,12 +1239,9 @@ function factorsOf5(value: int): int {
     return count
 }
 
-// The float of a text, correctly rounded (`strtod`): an infinity when it is too large.
+// The float of a text, correctly rounded: an infinity when it is too large.
 function readFloat(text: string): float {
-    immut cText = cString(text)
-    immut value = strtod(cText, nullAddress())
-    free(cText)
-    return value
+    return koji_float_parse(stringBytes(text), stringSize(text))
 }
 
 // 10^0 to 10^22, the powers of ten that are floats exactly (`exactTens`).
@@ -1282,7 +1277,7 @@ function decimalToFloat(value: decimal): float {
         return if (isNegative(value)) { -result } else { result }
     }
 
-    // `strtod` of `-<coefficient>e<exponent>`, written as bytes of C.
+    // The float of `-<coefficient>e<exponent>`, written as bytes.
     immut text = allocate(64)
     mut at = 0
 
@@ -1294,8 +1289,7 @@ function decimalToFloat(value: decimal): float {
     if (exponent < 0) { at = putByte(text, at, 45) }
 
     at = putDigits(text, at, u128(if (exponent < 0) { -exponent } else { exponent }))
-    putByte(text, at, 0)
-    immut result = strtod(text, nullAddress())
+    immut result = koji_float_parse(text, at)
     free(text)
     return result
 }
@@ -1974,7 +1968,7 @@ function expSeriesLists(x: Fixed): Fixed {
 mut ln10Known: Fixed[] = []
 
 function ln10(): Fixed {
-    if (ln10Known.length() == 0) { ln10Known.push(newtonLn(fixedFromInt(10), log(float(10)))) }
+    if (ln10Known.length() == 0) { ln10Known.push(newtonLn(fixedFromInt(10), koji_float_log(float(10)))) }
 
     return ln10Known[0]
 }
@@ -2008,7 +2002,7 @@ function realPower(x: decimal, y: decimal, here: Location): decimal {
 
     if (not isFinite(exponentFloat)) { exponentFloat = float(1.7976931348623157e308) }
 
-    immut logarithm = log10(mantissa) + float(k)
+    immut logarithm = koji_float_log10(mantissa) + float(k)
 
     if (outOfRange(exponentFloat, logarithm, true)) { panicAt(here, 'decimal overflow') }
 
@@ -2016,11 +2010,11 @@ function realPower(x: decimal, y: decimal, here: Location): decimal {
 
     // ln x = ln(m) + k ln 10, with m from 1 to 10.
     immut m = fixedFromDecimal(make(false, coefficient, 1 - count))
-    immut lnM = newtonLn(m, log(fixedToFloat(m)))
+    immut lnM = newtonLn(m, koji_float_log(fixedToFloat(m)))
     immut lnX = fixedAdd(lnM, fixedMultiply(fixedFromInt(k), ln10()))
     immut t = fixedMultiply(fixedFromDecimal(y), lnX)
     // e^t = 10^n e^r, with r from 0 to ln 10.
-    mut n = int(floor(fixedToFloat(t) / float(2.302585092994045684017991454684364)))
+    mut n = int(koji_float_floor(fixedToFloat(t) / float(2.302585092994045684017991454684364)))
     mut r = fixedSubtract(t, fixedMultiply(fixedFromInt(n), ln10()))
 
     while (r.negative) {
