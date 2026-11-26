@@ -12,7 +12,7 @@ body:
     attributes:
       label: Version
       description: What `kojic version` prints.
-      placeholder: kojic 0.2.0
+      placeholder: kojic 0.2.1
     validations:
       required: true
   - type: dropdown

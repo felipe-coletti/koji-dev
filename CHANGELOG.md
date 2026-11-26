@@ -1,11 +1,46 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 (preview)
 
--   The functions of floats are Koji's own, no longer those of the system's C library (`libm`), and
-    they give the same results on every system, correctly rounded: `math.sqrt`, `**`,
-    `math.pow`, `%`, `math.floor`, `math.ceil` and `math.round`. `float('...')` reads a float
-    correctly rounded without `strtod`. Programs on Linux no longer link `libm`.
+A preview of Koji with the mathematics of floats in Koji itself: the functions of floats no longer
+come from the system's C library (`libm`), and they give the same results on every system, the
+float nearest to the exact result. Expect breaking changes before 1.0.
+
+```koji
+print(float(2) ** float(0.5), float(1.0001) ** float(10000)) // 0x1.6a09e667f3bcdp0 0x1.5bec34aabbfd3p1
+print(float('2.2250738585072011e-308'), float(-5.5) % float(2)) // Ok(0x0.fffffffffffffp-1022) -0x1.8p0
+```
+
+### Getting it
+
+Download the package of your platform below, unpack it and put its directory on your `PATH`:
+
+| Platform | Package |
+| --- | --- |
+| Linux, x86-64 | `koji-0.2.1-linux-x64.tar.gz` |
+| Linux, arm64 | `koji-0.2.1-linux-arm64.tar.gz` |
+| macOS, Apple silicon | `koji-0.2.1-macos-arm64.tar.gz` |
+| macOS, Intel | `koji-0.2.1-macos-x64.tar.gz` |
+| Windows, x86-64 | `koji-0.2.1-windows-x64.zip` |
+
+`SHA256SUMS` has the checksums of the packages. For VS Code, the extension
+[Koji](https://marketplace.visualstudio.com/items?itemName=koji-language.koji) (also on
+[Open VSX](https://open-vsx.org/extension/koji-language/koji)) colors the code and runs the
+language server of `kojic`.
+
+### The runtime
+
+-   `math.sqrt`, `**`, `math.pow`, `%`, `math.floor`, `math.ceil` and `math.round` of floats are
+    written in Koji, correctly rounded, and the same on every system: the last digit of a float is
+    never a matter of the system's library. A power takes longer than in C (about 0.4 µs).
+-   `float('...')`, the literals of floats and the conversion of decimals to floats read the float
+    correctly rounded, from any number of digits, without `strtod`.
+-   Programs on Linux no longer link `libm`: the runtime needs the C library only for the
+    operating system.
+
+### Feedback
+
+Issues and ideas are welcome at https://github.com/koji-language/koji/issues.
 
 ## 0.2.0 (preview)
 
