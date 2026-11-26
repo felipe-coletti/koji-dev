@@ -1,0 +1,54 @@
+// `koji:posix`: what the systems of POSIX (Linux, macOS, the BSDs) share in the runtime, in the
+// library of the runtime written in Koji: the stacks of tasks mapped from the system, its clocks
+// and its sleeps. What differs between them is in their own modules (koji:linux, koji:bsd), given
+// to these functions; Windows has koji:windows.
+
+import { Address, CInt, CSize, distance, nullAddress, offset, read, valgrind, write } from 'koji:unsafe'
+
+extern function mmap(address: Address, size: CSize, protection: CInt, flags: CInt, fd: CInt, at: int): Address
+extern function munmap(address: Address, size: CSize): CInt
+extern function mprotect(address: Address, size: CSize, protection: CInt): CInt
+extern function clock_gettime(clock: CInt, time: Address): CInt
+extern function nanosleep(request: Address, remaining: Address): CInt
+
+// A stack of `size` bytes above a guard of `guard` that the program cannot touch (PROT_NONE),
+// readable and writable (PROT_READ | PROT_WRITE), with the flags of the mapping of the system: its
+// memory given as it is first used. Valgrind is told of it (VG_USERREQ__STACK_REGISTER), which
+// keeps the number it gives in the last word of the stack.
+export function posixStackNew(size: int, guard: int, flags: int): Address {
+    immut block = mmap(nullAddress(), size + guard, 3, flags, -1, 0)
+
+    if (distance(nullAddress(), block) == -1) { return nullAddress() }
+
+    if (mprotect(block, guard, 0) != 0) {
+        munmap(block, size + guard)
+        return nullAddress()
+    }
+
+    immut stack = offset(block, guard)
+    immut low = distance(nullAddress(), stack)
+    write(stack, size - 8, valgrind(0x1501, low, low + size, 0))
+    return stack
+}
+
+export function posixStackFree(stack: Address, size: int, guard: int) {
+    immut registered: int = read(stack, size - 8)
+    valgrind(0x1502, registered, 0, 0)
+    munmap(offset(stack, -guard), size + guard)
+}
+
+// The nanoseconds of the clock `clock` of the system, from a `struct timespec` (seconds,
+// nanoseconds) at `words`.
+export function posixNanoseconds(clock: int, words: Address): int {
+    clock_gettime(clock, words)
+    immut seconds: int = read(words, 0)
+    immut nanoseconds: int = read(words, 8)
+    return seconds * 1000000000 + nanoseconds
+}
+
+// Sleeps `nanoseconds` (a signal may end it early), with a `struct timespec` at `words`.
+export function posixSleep(nanoseconds: int, words: Address) {
+    write(words, 0, nanoseconds / 1000000000)
+    write(words, 8, nanoseconds % 1000000000)
+    nanosleep(words, nullAddress())
+}

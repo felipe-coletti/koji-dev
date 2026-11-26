@@ -1,0 +1,75 @@
+// `koji:bsd`: what macOS and the other BSDs (FreeBSD, OpenBSD: `Other(name)`) ask of the runtime,
+// in the library of the runtime written in Koji: their constants, and their poller (kqueue). The
+// rest they share with Linux (koji:posix). `name` is that of another BSD ('freebsd'), '' for macOS.
+
+import { Address, CInt, nullAddress, read, write } from 'koji:unsafe'
+
+extern function kqueue(): CInt
+extern function kevent(poller: CInt, changes: Address, changeCount: CInt, events: Address, capacity: CInt, timeout: Address): CInt
+extern function koji_system_errno(): CInt
+
+// The flags of the mapping of a stack: MAP_PRIVATE | MAP_ANONYMOUS (MAP_ANON).
+export function bsdStackFlags(): int {
+    return 2 | 0x1000
+}
+
+// CLOCK_MONOTONIC: 6 on macOS, 4 on the BSDs.
+export function bsdMonotonicClock(name: string): int {
+    return if (name == '') { 6 } else { 4 }
+}
+
+// The size of a `struct kevent` (FreeBSD has 4 more words), 0 for a system without kqueue.
+function keventSize(name: string): int {
+    return match (name) {
+        '' => 32
+        'freebsd' => 64
+        'openbsd' => 32
+        _ => 0
+    }
+}
+
+// The poller: kqueue, -1 where there is none (tasks cannot wait for sockets while others run).
+export function bsdPollerNew(name: string): int {
+    return if (keventSize(name) > 0) { kqueue() } else { -1 }
+}
+
+// Watches `fd` until it is ready to read (or to write), with a `struct kevent` at `words`: ident,
+// filter (EVFILT_READ -1, EVFILT_WRITE -2) and flags (EV_ADD | EV_ONESHOT) of 16 bits each,
+// fflags, data, udata. 0, or -1 (errno says why).
+export function bsdPollerWatch(poller: int, fd: int, writing: boolean, name: string, words: Address): int {
+    if (keventSize(name) == 0) { return -1 }
+
+    write(words, 0, fd)
+    write(words, 8, ((if (writing) { -2 } else { -1 }) & 0xFFFF) | 0x11 << 16)
+    write(words, 16, 0)
+    write(words, 24, 0)
+
+    for word in range(4, 8) {
+        write(words, 8 * word, 0)
+    }
+
+    return if (kevent(poller, words, 1, nullAddress(), 0, nullAddress()) == 0) { 0 } else { -1 }
+}
+
+// Waits at most `milliseconds` (-1: as long as it takes) for at most `most` sockets, their events
+// at `events` (a `struct timespec` for the limit at `words`): how many are ready (0 for a signal,
+// EINTR), their numbers at `ready`, or -1.
+export function bsdPollerWait(poller: int, milliseconds: int, ready: Address, most: int, events: Address, name: string, words: Address): int {
+    immut size = keventSize(name)
+
+    if (size == 0) { return -1 }
+
+    write(words, 0, milliseconds / 1000)
+    write(words, 8, milliseconds % 1000 * 1000000)
+    immut limit = if (milliseconds < 0) { nullAddress() } else { words }
+    immut count = kevent(poller, nullAddress(), 0, events, most, limit)
+
+    if (count < 0) { return if (koji_system_errno() == 4) { 0 } else { -1 } }
+
+    for i in range(count) {
+        immut fd: int = read(events, i * size)
+        write(ready, 8 * i, fd)
+    }
+
+    return count
+}

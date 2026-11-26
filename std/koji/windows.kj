@@ -5,7 +5,7 @@
 // (their branches of Windows are not compiled), so that they need none of these functions.
 
 import system
-import { Address, CInt, CSize, allocate, distance, free, isNull, nullAddress, offset, read, write } from 'koji:unsafe'
+import { Address, CInt, CSize, allocate, distance, floatControl, free, isNull, nullAddress, offset, read, taskEntry, write } from 'koji:unsafe'
 
 // The C library of Windows (ucrtbase).
 extern function windowsWrite(fd: CInt, bytes: Address, size: CInt): CInt from '_write'
@@ -195,4 +195,168 @@ extern function koji_windows_waitpid(pid: int, status: Address, options: CInt): 
     CloseHandle(process)
     write(status, 0, (exit & 0xFF) << 8)
     return pid
+}
+
+// The tasks (koji:task): their stacks, the clock, sleeps and the sockets they wait for.
+
+extern function VirtualAlloc(address: Address, size: CSize, kind: CInt, protection: CInt): Address
+extern function VirtualProtect(address: Address, size: CSize, protection: CInt, old: Address): CInt
+extern function VirtualFree(address: Address, size: CSize, kind: CInt): CInt
+extern function QueryPerformanceCounter(count: Address): CInt
+extern function QueryPerformanceFrequency(frequency: Address): CInt
+extern function Sleep(milliseconds: CInt)
+extern function WSAPoll(fds: Address, count: CInt, milliseconds: CInt): CInt
+extern function PeekNamedPipe(pipe: Address, buffer: Address, size: CInt, read: Address, available: Address, left: Address): CInt
+extern function windowsHandle(fd: CInt): Address from '_get_osfhandle'
+extern function koji_monotonic_nanoseconds(): int
+
+// A stack of `size` bytes above a guard of `guard`: its memory given at once (MEM_COMMIT |
+// MEM_RESERVE, PAGE_READWRITE), the guard PAGE_NOACCESS.
+export function windowsStackNew(size: int, guard: int): Address {
+    immut reserved = VirtualAlloc(nullAddress(), size + guard, 0x3000, 4)
+
+    if (isNull(reserved)) { return nullAddress() }
+
+    immut old = allocate(8)
+    immut guarded = VirtualProtect(reserved, guard, 1, old) != 0
+    free(old)
+
+    if (not guarded) {
+        VirtualFree(reserved, 0, 0x8000)
+        return nullAddress()
+    }
+
+    return offset(reserved, guard)
+}
+
+// MEM_RELEASE.
+export function windowsStackFree(stack: Address, guard: int) {
+    VirtualFree(offset(stack, -guard), 0, 0x8000)
+}
+
+// The top of a new stack (x86-64) for `switchStacks`: as on the others, with the limits of the
+// stack in the block of the thread too (NT_TIB: StackLimit, StackBase), which the functions of the
+// system check.
+export function windowsStackStart(stack: Address, size: int, task: int): Address {
+    immut sp = offset(stack, size - 16 - 88)
+
+    for word in range(11) {
+        write(sp, 8 * word, 0)
+    }
+
+    write(sp, 0, floatControl())
+    write(sp, 8, stack)
+    write(sp, 16, offset(stack, size))
+    write(sp, 56, task)
+    write(sp, 72, taskEntry())
+    return sp
+}
+
+// The nanoseconds of the counter of performance and its frequency, at `words`.
+export function windowsNanoseconds(words: Address): int {
+    QueryPerformanceCounter(words)
+    QueryPerformanceFrequency(offset(words, 8))
+    immut count: int = read(words, 0)
+    immut frequency: int = read(words, 8)
+    return count / frequency * 1000000000 + count % frequency * 1000000000 / frequency
+}
+
+// Sleeps at least `nanoseconds` (Sleep counts milliseconds).
+export function windowsSleep(nanoseconds: int) {
+    Sleep((nanoseconds + 999999) / 1000000)
+}
+
+// The sockets watched (twice their numbers, and 1 for those to write), until ready: one poller,
+// no handle.
+mut windowsWatched: int[] = []
+
+export function windowsPollerWatch(fd: int, writing: boolean): int {
+    immut entry = fd * 2 + (if (writing) { 1 } else { 0 })
+
+    if (not (entry in windowsWatched)) { windowsWatched.push(entry) }
+
+    return 0
+}
+
+// WSAPoll of the sockets watched (a WSAPOLLFD each: the socket, the events POLLRDNORM or
+// POLLWRNORM, those that came): how many are ready, their numbers at `ready`, which are watched no
+// more. The pipe of the jobs done (`jobsDone`, -1 before there is one) is no socket: it is looked
+// at (PeekNamedPipe) between waits of 10 ms at most; with nothing else to wait for, a sleep.
+export function windowsPollerWait(milliseconds: int, ready: Address, most: int, jobsDone: int): int {
+    immut deadline = if (milliseconds < 0) { -1 } else { koji_monotonic_nanoseconds() + milliseconds * 1000000 }
+    immut pipeEntry = jobsDone * 2
+
+    while (true) {
+        mut found = 0
+        mut kept: int[] = []
+        mut sockets: int[] = []
+
+        for entry in windowsWatched {
+            if (jobsDone >= 0 and entry == pipeEntry) {
+                if (pipeWaiting(jobsDone) and found < most) {
+                    write(ready, 8 * found, jobsDone)
+                    found += 1
+                } else {
+                    kept.push(entry)
+                }
+            } else {
+                sockets.push(entry)
+            }
+        }
+
+        immut left = if (deadline < 0) { -1 } else { (deadline - koji_monotonic_nanoseconds() + 999999) / 1000000 }
+        immut piped = kept.length() > 0
+        immut span = if (found > 0) { 0 } else { if (piped and (left < 0 or left > 10)) { 10 } else { if (left < 0) { -1 } else { left } } }
+
+        if (sockets.length() > 0) {
+            immut fds = allocate(16 * sockets.length())
+
+            for i in range(sockets.length()) {
+                write(fds, 16 * i, sockets[i] / 2)
+                write(fds, 16 * i + 8, if (sockets[i] % 2 == 1) { 0x10 } else { 0x100 })
+            }
+
+            immut answer = WSAPoll(fds, sockets.length(), span)
+
+            if (answer < 0) {
+                free(fds)
+                return -1
+            }
+
+            for i in range(sockets.length()) {
+                immut events: int = read(fds, 16 * i + 8)
+
+                if ((events >> 16) & 0xFFFF != 0 and found < most) {
+                    write(ready, 8 * found, sockets[i] / 2)
+                    found += 1
+                } else {
+                    kept.push(sockets[i])
+                }
+            }
+
+            free(fds)
+        } else {
+            if (span > 0) { Sleep(span) }
+        }
+
+        windowsWatched = kept
+
+        if (found > 0 or span == 0 and not piped) { return found }
+
+        if (deadline >= 0 and koji_monotonic_nanoseconds() >= deadline) { return 0 }
+
+        if (span < 0) { return 0 }
+    }
+
+    return 0
+}
+
+// Whether bytes wait in a pipe of the C library of Windows.
+function pipeWaiting(fd: int): boolean {
+    immut waiting = allocate(8)
+    write(waiting, 0, 0)
+    PeekNamedPipe(windowsHandle(fd), nullAddress(), 0, nullAddress(), waiting, nullAddress())
+    immut available: int = read(waiting, 0)
+    free(waiting)
+    return available & 0xFFFFFFFF > 0
 }
