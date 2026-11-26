@@ -6,10 +6,7 @@
 import { Address, CInt, CSize, Location, Never, allocate, free, isNull, locationAddress, newString, nullAddress, offset, read, stringBytes, stringSize, write } from 'koji:unsafe'
 import { cString, cText, isUtf8 } from 'koji:core'
 import system
-import { posixStream, posixWritev } from 'koji:posix'
-import { linuxErrno } from 'koji:linux'
-import { bsdErrno } from 'koji:bsd'
-import { windowsErrno, windowsStream } from 'koji:windows'
+import { errnoPlace, inputStream, writevNow } from 'koji:os'
 
 extern function strerror(code: CInt): Address
 extern function exit(code: CInt): Never
@@ -19,7 +16,6 @@ extern function koji_blocking_fread(target: Address, size: CSize, count: CSize, 
 extern function clearerr(stream: Address)
 // The place of errno (under names of their own: <errno.h> declares them otherwise).
 // Windows (ucrtbase), and the library there (koji:windows).
-extern function koji_windows_writev(fd: CInt, buffers: Address, count: CInt): int
 // With other tasks alive (koji:task), a write that could wait is made by a thread that helps.
 extern function koji_task_alone(): boolean
 extern function koji_task_current(): int
@@ -131,26 +127,6 @@ function written(fd: int, text: string, ending: boolean): int {
     return code
 }
 
-// `writev` of the buffers, by the system (on Windows, a write each).
-function writevNow(fd: int, count: int): int {
-    return match (system.os) {
-        Linux => posixWritev(fd, buffers, count)
-        MacOS => posixWritev(fd, buffers, count)
-        Windows => koji_windows_writev(fd, buffers, count)
-        Other(_) => posixWritev(fd, buffers, count)
-    }
-}
-
-// The standard input as a stream of C.
-function inputStream(): Address {
-    return match (system.os) {
-        Linux => posixStream(0, readMode)
-        MacOS => posixStream(0, readMode)
-        Windows => windowsStream(0, readMode)
-        Other(_) => posixStream(0, readMode)
-    }
-}
-
 function writtenNow(fd: int, text: string, ending: boolean): int {
     mut at = stringBytes(text)
     mut size = stringSize(text)
@@ -172,7 +148,7 @@ function writtenNow(fd: int, text: string, ending: boolean): int {
         }
 
         immut alone = koji_task_alone()
-        immut done = if (alone or (size + breakSize <= atomicWrite and koji_output_ready(fd))) { writevNow(fd, count) } else { koji_blocking_writev(fd, buffers, count) }
+        immut done = if (alone or (size + breakSize <= atomicWrite and koji_output_ready(fd))) { writevNow(fd, buffers, count) } else { koji_blocking_writev(fd, buffers, count) }
 
         if (done < 0) {
             immut code = koji_system_errno()
@@ -217,7 +193,7 @@ extern function koji_read_line(prompt: string, here: Location, status: Address):
         if (code != 0) { end('panic', here, `cannot write output: ${message(code)}`) }
     }
 
-    if (isNull(input)) { input = inputStream() }
+    if (isNull(input)) { input = inputStream(0, readMode) }
 
     // A standard input that is closed is empty, as in Rust.
     if (isNull(input)) {
@@ -254,7 +230,7 @@ extern function koji_read_line(prompt: string, here: Location, status: Address):
 // buffer `input` reads too, as a text (bytes that are not UTF-8 become U+FFFD); `status` becomes 1
 // when nothing is left.
 extern function koji_read_bytes(count: int, here: Location, status: Address): string {
-    if (isNull(input)) { input = inputStream() }
+    if (isNull(input)) { input = inputStream(0, readMode) }
 
     if (isNull(input) or count <= 0) {
         write(status, 0, if (count <= 0) { 0 } else { 1 })
@@ -300,12 +276,7 @@ function isLineEnd(bytes: Address, at: int): boolean {
 // errno, the error of the last call of the system that failed (for every module: C calls it by its
 // name): the int of C at the place each system gives.
 extern function koji_system_errno(): CInt {
-    immut place = match (system.os) {
-        Linux => linuxErrno()
-        MacOS => bsdErrno()
-        Windows => windowsErrno()
-        Other(_) => bsdErrno()
-    }
+    immut place = errnoPlace()
     mut value = 0
 
     for i in range(4) {

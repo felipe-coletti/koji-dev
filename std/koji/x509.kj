@@ -16,10 +16,7 @@
 // Everything here is public: nothing needs constant time.
 
 import system
-import { posixSeconds } from 'koji:posix'
-import { linuxEntryNameAt } from 'koji:linux'
-import { bsdEntryNameAt } from 'koji:bsd'
-import { windowsEntryNameAt, windowsSeconds } from 'koji:windows'
+import { certificateDirectories, entryNameAt, seconds } from 'koji:os'
 import { Address, CInt, CSize, allocate, free, isNull, newString, nullAddress, offset, read, stringBytes, stringSize, write } from 'koji:unsafe'
 import { digest, digestSize } from 'koji:sha'
 import { verifyPkcs1, verifyPss } from 'koji:rsa'
@@ -1431,13 +1428,9 @@ function addFile(mut authorities: Authority[], path: string): boolean {
 
 // The certificates of the files of a directory.
 function addDirectory(mut authorities: Authority[], path: string) {
-    // Windows: no directories of certificates (its own are in its store; the list built in serves).
-    match (system.os) {
-        Linux => {}
-        MacOS => {}
-        Windows => return
-        Other(_) => {}
-    }
+    // Systems without directories of certificates (Windows: its own are in its store; the list
+    // built in serves).
+    if (not certificateDirectories()) { return }
 
     immut cPath = cString(path)
     immut directory = opendir(cPath)
@@ -1703,12 +1696,7 @@ export function verifyChain(chain: Certificate[], authorities: Authority[], host
 
 // The seconds since 1970, now.
 export function now(): int {
-    return match (system.os) {
-        Linux => posixSeconds()
-        MacOS => posixSeconds()
-        Windows => windowsSeconds()
-        Other(_) => posixSeconds()
-    }
+    return seconds()
 }
 
 // The certificates of the DER at `bytes` one after the other (`size` bytes), each copied.
@@ -1772,10 +1760,5 @@ extern function koji_x509_authority_count(builtIn: CInt): int {
 
 // The name of an entry of `readdir`: where `d_name` is in a `struct dirent` of the system.
 function entryName(entry: Address): Address {
-    return offset(entry, match (system.os) {
-        Linux => linuxEntryNameAt()
-        MacOS => bsdEntryNameAt('')
-        Windows => windowsEntryNameAt()
-        Other(name) => bsdEntryNameAt(name)
-    })
+    return offset(entry, entryNameAt())
 }

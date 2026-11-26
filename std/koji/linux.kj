@@ -1,29 +1,48 @@
-// `koji:linux`: what Linux asks of the runtime, in the library of the runtime written in Koji: its
-// constants, and its poller (epoll). The rest it shares with the other systems of POSIX
-// (koji:posix).
+// `koji:linux`: Linux for the runtime, the module `koji:os` is on Linux (each system has one, with
+// the same functions: koji:macos, koji:windows; the compiler takes the one of its target, and the
+// common modules know no system). Its poller is epoll; the rest it shares with macOS (koji:posix),
+// with its own numbers.
 
 import system
 import { SocketNumbers } from 'koji:sockets'
+import { posixClose, posixDnsMessage, posixFind, posixNanoseconds, posixOutputReady, posixPipe, posixPrivate, posixRandom, posixRead, posixReceive, posixSeconds, posixSend, posixSetWaiting, posixSleep, posixStackFree, posixStackNew, posixStackStart, posixStream, posixThreadStart, posixWrite, posixWritev } from 'koji:posix'
 import { Address, CInt, read, write } from 'koji:unsafe'
 
 extern function epoll_create1(flags: CInt): CInt
 extern function epoll_ctl(poller: CInt, operation: CInt, fd: CInt, event: Address): CInt
 extern function epoll_wait(poller: CInt, events: Address, capacity: CInt, milliseconds: CInt): CInt
 extern function koji_system_errno(): CInt
-extern function linuxErrnoPlace(): Address from '__errno_location'
+extern function errnoLocation(): Address from '__errno_location'
 
-// The flags of the mapping of a stack: MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE.
-export function linuxStackFlags(): int {
-    return 2 | 0x20 | 0x4000
+// O_NONBLOCK.
+immut nonBlocking = 0x800
+
+// The tasks (koji:task).
+
+// A stack of `size` bytes above a guard (MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE).
+export function stackNew(size: int, guard: int): Address {
+    return posixStackNew(size, guard, 2 | 0x20 | 0x4000)
 }
 
-// CLOCK_MONOTONIC.
-export function linuxMonotonicClock(): int {
-    return 1
+export function stackFree(stack: Address, size: int, guard: int) {
+    posixStackFree(stack, size, guard)
+}
+
+export function stackStart(stack: Address, size: int, task: int): Address {
+    return posixStackStart(stack, size, task)
+}
+
+// The nanoseconds of CLOCK_MONOTONIC (1), a `struct timespec` at `words`.
+export function monotonicNanoseconds(words: Address): int {
+    return posixNanoseconds(1, words)
+}
+
+export function sleepFor(nanoseconds: int, words: Address) {
+    posixSleep(nanoseconds, words)
 }
 
 // The poller: epoll (EPOLL_CLOEXEC).
-export function linuxPollerNew(): int {
+export function pollerNew(): int {
     return epoll_create1(0x80000)
 }
 
@@ -38,7 +57,7 @@ function epollData(): int {
 // Watches `fd` until it is ready to read (or to write), with a `struct epoll_event` at `words`:
 // EPOLLIN or EPOLLOUT, with EPOLLONESHOT; EPOLL_CTL_MOD, or EPOLL_CTL_ADD for a socket not
 // watched yet (ENOENT). 0, or -1 (errno says why).
-export function linuxPollerWatch(poller: int, fd: int, writing: boolean, words: Address): int {
+export function pollerWatch(poller: int, fd: int, writing: boolean, words: Address): int {
     write(words, 0, (if (writing) { 4 } else { 1 }) | 1 << 30)
     write(words, epollData(), fd)
 
@@ -50,8 +69,9 @@ export function linuxPollerWatch(poller: int, fd: int, writing: boolean, words: 
 }
 
 // Waits at most `milliseconds` (-1: as long as it takes) for at most `most` sockets, their events
-// at `events`: how many are ready (0 for a signal, EINTR), their numbers at `ready`, or -1.
-export function linuxPollerWait(poller: int, milliseconds: int, ready: Address, most: int, events: Address): int {
+// at `events`: how many are ready (0 for a signal, EINTR), their numbers at `ready`, or -1. The
+// pipe of the jobs done (`jobsDone`) is watched as a socket.
+export function pollerWait(poller: int, milliseconds: int, ready: Address, most: int, events: Address, words: Address, jobsDone: int): int {
     immut size = epollData() + 8
     immut count = epoll_wait(poller, events, most, milliseconds)
 
@@ -65,22 +85,121 @@ export function linuxPollerWait(poller: int, milliseconds: int, ready: Address, 
     return count
 }
 
-// The numbers of the sockets.
-export function linuxSockets(): SocketNumbers {
-    return { level: 1, reuseAddress: 2, socketError: 4, noSignal: 0x4000, dontWait: 0x40, nonBlocking: 0x800, wouldBlock: 11, inProgress: 115, timedOut: 110, addressAt: 24, noPipeSignalOption: 0, addressLength: false, acceptedInherits: false }
+// The sockets (koji:net).
+
+export function socketNumbers(): SocketNumbers {
+    return { level: 1, reuseAddress: 2, socketError: 4, wouldBlock: 11, inProgress: 115, timedOut: 110, addressAt: 24, addressLength: false }
 }
 
-// The place of errno (__errno_location).
-export function linuxErrno(): Address {
-    return linuxErrnoPlace()
+export function socketsStart() {}
+
+export function socketError(): int {
+    return koji_system_errno()
 }
 
-// O_NONBLOCK.
-export function linuxNonBlocking(): int {
-    return 0x800
+export function setWaiting(fd: int, waiting: boolean) {
+    posixSetWaiting(fd, waiting, nonBlocking)
+}
+
+export function closeSocket(fd: int) {
+    posixClose(fd)
+}
+
+export function privateSocket(fd: int) {
+    posixPrivate(fd)
+}
+
+// MSG_NOSIGNAL | MSG_DONTWAIT.
+export function sendNow(fd: int, bytes: Address, size: int): int {
+    return posixSend(fd, bytes, size, 0x4000 | 0x40)
+}
+
+export function receiveNow(fd: int, bytes: Address, size: int): int {
+    return posixReceive(fd, bytes, size, 0x40)
+}
+
+// The error of a call of the sockets, already in errno.
+export function keepSocketError(error: int) {}
+
+// After a connection: the socket waits again (MSG_DONTWAIT does not).
+export function afterConnect(fd: int) {
+    setWaiting(fd, true)
+}
+
+// A socket accepted: its flags are its own.
+export function accepted(fd: int) {}
+
+// A write to a closed connection: MSG_NOSIGNAL says it.
+export function noPipeSignal(fd: int) {}
+
+export function dnsMessage(code: int): Address {
+    return posixDnsMessage(code)
+}
+
+// The system and the program (koji:prelude, koji:output, koji:start).
+
+export function errnoPlace(): Address {
+    return errnoLocation()
+}
+
+export function outputReady(fd: int, place: Address): boolean {
+    return posixOutputReady(fd, place)
+}
+
+export function pipeOf(ends: Address): boolean {
+    return posixPipe(ends)
+}
+
+export function threadStart(code: Address, state: Address, place: Address): boolean {
+    return posixThreadStart(code, state, place)
+}
+
+export function writeNow(fd: int, bytes: Address, size: int): int {
+    return posixWrite(fd, bytes, size)
+}
+
+// The pipe of the jobs done reads without waiting.
+export function pipeWithoutWaiting(fd: int) {
+    posixSetWaiting(fd, false, nonBlocking)
+}
+
+// The jobs done waiting in the pipe `fd`, at most `capacity` (their addresses at `out`): how many.
+export function jobsDone(fd: int, out: Address, capacity: int, waiting: Address): int {
+    immut got = posixRead(fd, out, capacity * 8)
+    return if (got <= 0) { 0 } else { got / 8 }
+}
+
+export function writevNow(fd: int, buffers: Address, count: int): int {
+    return posixWritev(fd, buffers, count)
+}
+
+export function inputStream(fd: int, mode: Address): Address {
+    return posixStream(fd, mode)
+}
+
+export function startStreams() {}
+
+// Certificates and randomness (koji:x509, koji:tls).
+
+export function seconds(): int {
+    return posixSeconds()
+}
+
+export function systemRandom(bytes: Address, size: int): boolean {
+    return posixRandom(bytes, size)
 }
 
 // Where `d_name` is in a `struct dirent`.
-export function linuxEntryNameAt(): int {
+export function entryNameAt(): int {
     return 19
+}
+
+// Whether the system keeps its certificates in directories of files.
+export function certificateDirectories(): boolean {
+    return true
+}
+
+// The first place of the needle in the haystack, or none (memmem).
+export function findBytes(haystack: Address, haystackSize: int, needle: Address, needleSize: int): Address {
+    return posixFind(haystack, haystackSize, needle, needleSize)
 }

@@ -18,10 +18,7 @@
 // field starts) and the functions that free and show it.
 
 import system
-import { posixOutputReady, posixPipe, posixRead, posixSetWaiting, posixThreadStart, posixWrite } from 'koji:posix'
-import { linuxNonBlocking } from 'koji:linux'
-import { bsdNonBlocking } from 'koji:bsd'
-import { windowsJobsDone, windowsPipe, windowsThreadStart, windowsWriteNow } from 'koji:windows'
+import { jobsDone, outputReady, pipeOf, pipeWithoutWaiting, threadStart, writeNow } from 'koji:os'
 import { Address, CInt, CSize, CVariadic, Location, Never, U128, blankString, charOfCode, decimalHigh, decimalLow, decimalOf, distance, highWord, isNull, leadingZeros, lowWord, nullAddress, offset, panicAt, read, stringBytes, wide, wordProduct, write } from 'koji:unsafe'
 
 extern function memcpy(target: Address, source: Address, size: CSize): Address
@@ -382,12 +379,7 @@ extern function koji_decimal_plus(a: decimal, b: decimal, here: Location): decim
 extern function koji_output_ready(fd: int): boolean {
     // Windows: not known (a thread that helps writes, while other tasks run).
     immut place = koji_pool_take(1)
-    immut ready = match (system.os) {
-        Linux => posixOutputReady(fd, place)
-        MacOS => posixOutputReady(fd, place)
-        Windows => false
-        Other(_) => posixOutputReady(fd, place)
-    }
+    immut ready = outputReady(fd, place)
     koji_pool_give(place, 1)
     return ready
 }
@@ -748,13 +740,8 @@ extern function koji_hash_void(slot: Address): int {
 // state: whether the system made it.
 function closedPipe(state: Address, at: int): boolean {
     immut ends = koji_pool_take(1)
-    // Not inherited by the programs a program runs (koji:posix, koji:windows).
-    immut made = match (system.os) {
-        Linux => posixPipe(ends)
-        MacOS => posixPipe(ends)
-        Windows => windowsPipe(ends)
-        Other(_) => posixPipe(ends)
-    }
+    // Not inherited by the programs a program runs (koji:os).
+    immut made = pipeOf(ends)
     // Two ints of C.
     immut both: int = read(ends, 0)
     koji_pool_give(ends, 1)
@@ -771,12 +758,7 @@ function closedPipe(state: Address, at: int): boolean {
 // A new thread running `code` with the state: whether the system made it.
 function started(code: Address, state: Address): boolean {
     immut thread = koji_pool_take(1)
-    immut made = match (system.os) {
-        Linux => posixThreadStart(code, state, thread)
-        MacOS => posixThreadStart(code, state, thread)
-        Windows => windowsThreadStart(code, state)
-        Other(_) => posixThreadStart(code, state, thread)
-    }
+    immut made = threadStart(code, state, thread)
     koji_pool_give(thread, 1)
     return made
 }
@@ -791,15 +773,6 @@ function written(fd: int, word: int, size: int) {
     koji_pool_give(place, 1)
 }
 
-function writeNow(fd: int, place: Address, size: int): int {
-    return match (system.os) {
-        Linux => posixWrite(fd, place, size)
-        MacOS => posixWrite(fd, place, size)
-        Windows => windowsWriteNow(fd, place, size)
-        Other(_) => posixWrite(fd, place, size)
-    }
-}
-
 // Makes the pipes of the jobs: the end the jobs done come from, which reads without waiting, or -1.
 extern function koji_helpers_start(): int {
     immut state = koji_threads_place()
@@ -809,12 +782,7 @@ extern function koji_helpers_start(): int {
     immut done: int = read(state, 16)
 
     // Without waiting; on Windows, it is read only when it holds a job (see koji_helpers_finished).
-    match (system.os) {
-        Linux => posixSetWaiting(done, false, linuxNonBlocking())
-        MacOS => posixSetWaiting(done, false, bsdNonBlocking())
-        Windows => {}
-        Other(_) => posixSetWaiting(done, false, bsdNonBlocking())
-    }
+    pipeWithoutWaiting(done)
 
     return done
 }
@@ -836,14 +804,9 @@ extern function koji_helpers_finished(out: Address, capacity: int): int {
 
     // Windows: the bytes waiting in the pipe first (PeekNamedPipe), which a read then takes.
     immut waiting = koji_pool_take(1)
-    immut got = match (system.os) {
-        Linux => posixRead(fd, out, capacity * 8)
-        MacOS => posixRead(fd, out, capacity * 8)
-        Windows => 8 * windowsJobsDone(fd, out, capacity, waiting)
-        Other(_) => posixRead(fd, out, capacity * 8)
-    }
+    immut count = jobsDone(fd, out, capacity, waiting)
     koji_pool_give(waiting, 1)
-    return if (got <= 0) { 0 } else { got / 8 }
+    return count
 }
 
 // Starts or stops the clock of preemption: whether the system could start it.

@@ -13,10 +13,7 @@
 // and the program stops with a panic.
 
 import system
-import { posixNanoseconds, posixSleep, posixStackFree, posixStackNew } from 'koji:posix'
-import { linuxMonotonicClock, linuxPollerNew, linuxPollerWait, linuxPollerWatch, linuxStackFlags } from 'koji:linux'
-import { bsdMonotonicClock, bsdPollerNew, bsdPollerWait, bsdPollerWatch, bsdStackFlags } from 'koji:bsd'
-import { windowsNanoseconds, windowsPollerWait, windowsPollerWatch, windowsSleep, windowsStackFree, windowsStackNew, windowsStackStart } from 'koji:windows'
+import { monotonicNanoseconds, pollerNew, pollerWait, pollerWatch, sleepFor, stackFree, stackNew, stackStart } from 'koji:os'
 import { Address, CInt, allocate, free, floatControl, isNull, nullAddress, offset, read, switchStacks, taskEntry, write } from 'koji:unsafe'
 
 extern function koji_system_errno(): CInt
@@ -41,76 +38,11 @@ function tasksSupported(): boolean {
     }
 }
 
-// A stack of `size` bytes (a multiple of the guard): its lowest address, above the guard, or the
-// address 0 (koji:posix, with the flags of each system; koji:windows).
-function stackNew(size: int): Address {
-    return match (system.os) {
-        Linux => posixStackNew(size, stackGuard, linuxStackFlags())
-        MacOS => posixStackNew(size, stackGuard, bsdStackFlags())
-        Windows => windowsStackNew(size, stackGuard)
-        Other(_) => posixStackNew(size, stackGuard, bsdStackFlags())
-    }
-}
+// The stacks of tasks are the system's (koji:os): `stackNew(size, guard)`, a stack of `size` bytes
+// above a guard (its lowest address, or the address 0); `stackStart`, its top for `switchStacks`,
+// which then starts the task where `taskEntry` is; `stackFree`.
 
-function stackFree(stack: Address, size: int) {
-    match (system.os) {
-        Linux => posixStackFree(stack, size, stackGuard)
-        MacOS => posixStackFree(stack, size, stackGuard)
-        Windows => windowsStackFree(stack, stackGuard)
-        Other(_) => posixStackFree(stack, size, stackGuard)
-    }
-}
-
-// The top of a new stack for `switchStacks`, which then starts `task` where `taskEntry` is: the
-// registers it restores, zero but for the task and where it returns, and the control words of
-// floating point of the current task (below the number of valgrind, aligned to 16 bytes).
-function stackStart(stack: Address, size: int, task: int): Address {
-    // On Windows, the limits of the stack in the block of the thread too (koji:windows).
-    return match (system.os) {
-        Linux => systemStackStart(stack, size, task)
-        MacOS => systemStackStart(stack, size, task)
-        Windows => windowsStackStart(stack, size, task)
-        Other(_) => systemStackStart(stack, size, task)
-    }
-}
-
-// The same on the systems of POSIX, by the convention of each processor.
-function systemStackStart(stack: Address, size: int, task: int): Address {
-    immut top = offset(stack, size - 16)
-
-    return match (system.architecture) {
-        X64 => {
-            // The control words, r15 to r12, rbx (the task), rbp, where it returns.
-            immut sp = offset(top, -72)
-
-            for word in range(9) {
-                write(sp, 8 * word, 0)
-            }
-
-            write(sp, 0, floatControl())
-            write(sp, 40, task)
-            write(sp, 56, taskEntry())
-            sp
-        }
-        Arm64 => {
-            // x19 (the task) to x30 (where it returns), d8 to d15, fpcr.
-            immut sp = offset(top, -176)
-
-            for word in range(22) {
-                write(sp, 8 * word, 0)
-            }
-
-            write(sp, 0, task)
-            write(sp, 88, taskEntry())
-            write(sp, 160, floatControl())
-            sp
-        }
-        OtherArchitecture(_) => nullAddress()
-    }
-}
-
-// The clock and the poller of the system (`match (system.os)`: each system compiles its own, see
-// "Code for one system" in doc/design.md). The records of C they fill are in `systemWords` (one
+// The clock and the poller of the system (koji:os, the module of each system). The records of C they fill are in `systemWords` (one
 // thread runs Koji, so one block serves every call).
 immut systemWords = allocate(4096)
 
@@ -150,12 +82,7 @@ mut jobsDone = -1
 // The nanoseconds of a clock that only grows (CLOCK_MONOTONIC: 1 on Linux, 6 on macOS, 4 on the
 // BSDs), from a `struct timespec` (seconds, nanoseconds).
 extern function koji_monotonic_nanoseconds(): int {
-    return match (system.os) {
-        Linux => posixNanoseconds(linuxMonotonicClock(), systemWords)
-        MacOS => posixNanoseconds(bsdMonotonicClock(''), systemWords)
-        Windows => windowsNanoseconds(systemWords)
-        Other(name) => posixNanoseconds(bsdMonotonicClock(name), systemWords)
-    }
+    return monotonicNanoseconds(systemWords)
 }
 
 // Sleeps until the monotonic clock is at `deadline` (in nanoseconds).
@@ -165,12 +92,7 @@ extern function koji_sleep_until(deadline: int) {
 
         if (left <= 0) { return }
 
-        match (system.os) {
-            Linux => posixSleep(left, systemWords)
-            MacOS => posixSleep(left, systemWords)
-            Windows => windowsSleep(left)
-            Other(_) => posixSleep(left, systemWords)
-        }
+        sleepFor(left, systemWords)
     }
 }
 
@@ -179,37 +101,19 @@ extern function koji_sleep_until(deadline: int) {
 // Linux, kqueue on macOS, FreeBSD and OpenBSD, none elsewhere (tasks cannot wait for sockets while
 // others run there).
 extern function koji_poller_new(): int {
-    return match (system.os) {
-        Linux => linuxPollerNew()
-        MacOS => bsdPollerNew('')
-        // The sockets watched are kept by koji:windows (one poller: no handle).
-        Windows => 0
-        Other(name) => bsdPollerNew(name)
-    }
+    return pollerNew()
 }
 
 // Watches `fd` until it is ready to read (or to write): 0, or -1 (errno says why).
 extern function koji_poller_watch(poller: int, fd: int, writing: boolean): int {
-    return match (system.os) {
-        Linux => linuxPollerWatch(poller, fd, writing, systemWords)
-        MacOS => bsdPollerWatch(poller, fd, writing, '', systemWords)
-        Windows => windowsPollerWatch(fd, writing)
-        Other(name) => bsdPollerWatch(poller, fd, writing, name, systemWords)
-    }
+    return pollerWatch(poller, fd, writing, systemWords)
 }
 
 // Waits for the sockets watched, at most `milliseconds` (-1: as long as it takes): how many are ready
 // (0 when the time ran out or a signal came), their numbers at `ready`, or -1.
 extern function koji_poller_wait(poller: int, milliseconds: int, ready: Address, capacity: int): int {
     immut most = if (capacity < 64) { capacity } else { 64 }
-    immut events = offset(systemWords, 64)
-
-    return match (system.os) {
-        Linux => linuxPollerWait(poller, milliseconds, ready, most, events)
-        MacOS => bsdPollerWait(poller, milliseconds, ready, most, events, '', systemWords)
-        Windows => windowsPollerWait(milliseconds, ready, most, jobsDone)
-        Other(name) => bsdPollerWait(poller, milliseconds, ready, most, events, name, systemWords)
-    }
+    return pollerWait(poller, milliseconds, ready, most, offset(systemWords, 64), systemWords, jobsDone)
 }
 
 // The stack of a task: 1 MB, of which the system only gives the memory a task uses (a few pages,
@@ -282,7 +186,7 @@ extern function koji_task_spawn(work: () => void): int {
     match (stacks.pop()) {
         Some(kept) => stack = kept
         None => {
-            stack = stackNew(stackSize)
+            stack = stackNew(stackSize, stackGuard)
 
             if (isNull(stack)) { panic('there is no memory for the stack of a new task') }
         }
@@ -344,7 +248,7 @@ function reap() {
     if (stacks.length() < keptStacks) {
         stacks.push(tasks[id].stack)
     } else {
-        stackFree(tasks[id].stack, stackSize)
+        stackFree(tasks[id].stack, stackSize, stackGuard)
     }
 
     tasks[id].stack = nullAddress()

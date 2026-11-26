@@ -2,7 +2,7 @@
 // of a program calls `koji_init` first).
 
 import system
-import { windowsBinaryStreams } from 'koji:windows'
+import { startStreams } from 'koji:os'
 import { Address, CInt, nullAddress, read } from 'koji:unsafe'
 
 // The pool (std/koji/memory.kj) and the modules of the library.
@@ -17,13 +17,9 @@ mut argumentValues = nullAddress()
 extern function koji_init(count: CInt, values: Address) {
     koji_pool_start()
 
-    // Windows: the standard streams as bytes (koji:windows).
-    match (system.os) {
-        Linux => {}
-        MacOS => {}
-        Windows => windowsBinaryStreams()
-        Other(_) => {}
-    }
+    // The standard streams as bytes, where the system asks it (Windows: no line breaks of two
+    // characters).
+    startStreams()
 
     koji_library_init()
     // Once the modules are ready (their globals have their first values).

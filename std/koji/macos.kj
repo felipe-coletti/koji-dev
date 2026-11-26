@@ -1,0 +1,209 @@
+// `koji:macos`: macOS for the runtime, the module `koji:os` is on macOS (each system has one, with
+// the same functions: koji:linux, koji:windows; the compiler takes the one of its target, and the
+// common modules know no system). Its poller is kqueue; the rest it shares with Linux
+// (koji:posix), with the numbers of a BSD.
+
+import { SocketNumbers } from 'koji:sockets'
+import { posixClose, posixDnsMessage, posixFind, posixNanoseconds, posixOptionOn, posixOutputReady, posixPipe, posixPrivate, posixRandom, posixRead, posixReceive, posixSeconds, posixSend, posixSetWaiting, posixSleep, posixStackFree, posixStackNew, posixStackStart, posixStream, posixThreadStart, posixWrite, posixWritev } from 'koji:posix'
+import { Address, CInt, nullAddress, read, write } from 'koji:unsafe'
+
+extern function kqueue(): CInt
+extern function kevent(poller: CInt, changes: Address, changeCount: CInt, events: Address, capacity: CInt, timeout: Address): CInt
+extern function koji_system_errno(): CInt
+extern function errnoLocation(): Address from '__error'
+
+// O_NONBLOCK, SOL_SOCKET, SO_NOSIGPIPE, the size of a `struct kevent`.
+immut nonBlocking = 4
+immut socketLevel = 0xFFFF
+immut noSigpipe = 0x1022
+immut keventSize = 32
+
+// The tasks (koji:task).
+
+// A stack of `size` bytes above a guard (MAP_PRIVATE | MAP_ANON).
+export function stackNew(size: int, guard: int): Address {
+    return posixStackNew(size, guard, 2 | 0x1000)
+}
+
+export function stackFree(stack: Address, size: int, guard: int) {
+    posixStackFree(stack, size, guard)
+}
+
+export function stackStart(stack: Address, size: int, task: int): Address {
+    return posixStackStart(stack, size, task)
+}
+
+// The nanoseconds of CLOCK_MONOTONIC (6), a `struct timespec` at `words`.
+export function monotonicNanoseconds(words: Address): int {
+    return posixNanoseconds(6, words)
+}
+
+export function sleepFor(nanoseconds: int, words: Address) {
+    posixSleep(nanoseconds, words)
+}
+
+// The poller: kqueue.
+export function pollerNew(): int {
+    return kqueue()
+}
+
+// Watches `fd` until it is ready to read (or to write), with a `struct kevent` at `words`: ident,
+// filter (EVFILT_READ -1, EVFILT_WRITE -2) and flags (EV_ADD | EV_ONESHOT) of 16 bits each,
+// fflags, data, udata. 0, or -1 (errno says why).
+export function pollerWatch(poller: int, fd: int, writing: boolean, words: Address): int {
+    write(words, 0, fd)
+    write(words, 8, ((if (writing) { -2 } else { -1 }) & 0xFFFF) | 0x11 << 16)
+    write(words, 16, 0)
+    write(words, 24, 0)
+
+    for word in range(4, 8) {
+        write(words, 8 * word, 0)
+    }
+
+    return if (kevent(poller, words, 1, nullAddress(), 0, nullAddress()) == 0) { 0 } else { -1 }
+}
+
+// Waits at most `milliseconds` (-1: as long as it takes) for at most `most` sockets, their events
+// at `events` (a `struct timespec` for the limit at `words`): how many are ready (0 for a signal,
+// EINTR), their numbers at `ready`, or -1. The pipe of the jobs done is watched as a socket.
+export function pollerWait(poller: int, milliseconds: int, ready: Address, most: int, events: Address, words: Address, jobsDone: int): int {
+    write(words, 0, milliseconds / 1000)
+    write(words, 8, milliseconds % 1000 * 1000000)
+    immut limit = if (milliseconds < 0) { nullAddress() } else { words }
+    immut count = kevent(poller, nullAddress(), 0, events, most, limit)
+
+    if (count < 0) { return if (koji_system_errno() == 4) { 0 } else { -1 } }
+
+    for i in range(count) {
+        immut fd: int = read(events, i * keventSize)
+        write(ready, 8 * i, fd)
+    }
+
+    return count
+}
+
+// The sockets (koji:net).
+
+// The numbers of a BSD: no MSG_NOSIGNAL (SO_NOSIGPIPE instead), a `struct sockaddr_in` that
+// starts with its length.
+export function socketNumbers(): SocketNumbers {
+    return { level: socketLevel, reuseAddress: 4, socketError: 0x1007, wouldBlock: 35, inProgress: 36, timedOut: 60, addressAt: 32, addressLength: true }
+}
+
+export function socketsStart() {}
+
+export function socketError(): int {
+    return koji_system_errno()
+}
+
+export function setWaiting(fd: int, waiting: boolean) {
+    posixSetWaiting(fd, waiting, nonBlocking)
+}
+
+export function closeSocket(fd: int) {
+    posixClose(fd)
+}
+
+export function privateSocket(fd: int) {
+    posixPrivate(fd)
+}
+
+// MSG_DONTWAIT.
+export function sendNow(fd: int, bytes: Address, size: int): int {
+    return posixSend(fd, bytes, size, 0x80)
+}
+
+export function receiveNow(fd: int, bytes: Address, size: int): int {
+    return posixReceive(fd, bytes, size, 0x80)
+}
+
+// The error of a call of the sockets, already in errno.
+export function keepSocketError(error: int) {}
+
+// After a connection: the socket waits again (MSG_DONTWAIT does not).
+export function afterConnect(fd: int) {
+    setWaiting(fd, true)
+}
+
+// A socket accepted has the flags of the one that listens: it waits, and has SO_NOSIGPIPE.
+export function accepted(fd: int) {
+    setWaiting(fd, true)
+    noPipeSignal(fd)
+}
+
+// SO_NOSIGPIPE: a write to a closed connection fails rather than raising SIGPIPE.
+export function noPipeSignal(fd: int) {
+    posixOptionOn(fd, socketLevel, noSigpipe)
+}
+
+export function dnsMessage(code: int): Address {
+    return posixDnsMessage(code)
+}
+
+// The system and the program (koji:prelude, koji:output, koji:start).
+
+export function errnoPlace(): Address {
+    return errnoLocation()
+}
+
+export function outputReady(fd: int, place: Address): boolean {
+    return posixOutputReady(fd, place)
+}
+
+export function pipeOf(ends: Address): boolean {
+    return posixPipe(ends)
+}
+
+export function threadStart(code: Address, state: Address, place: Address): boolean {
+    return posixThreadStart(code, state, place)
+}
+
+export function writeNow(fd: int, bytes: Address, size: int): int {
+    return posixWrite(fd, bytes, size)
+}
+
+// The pipe of the jobs done reads without waiting.
+export function pipeWithoutWaiting(fd: int) {
+    posixSetWaiting(fd, false, nonBlocking)
+}
+
+// The jobs done waiting in the pipe `fd`, at most `capacity` (their addresses at `out`): how many.
+export function jobsDone(fd: int, out: Address, capacity: int, waiting: Address): int {
+    immut got = posixRead(fd, out, capacity * 8)
+    return if (got <= 0) { 0 } else { got / 8 }
+}
+
+export function writevNow(fd: int, buffers: Address, count: int): int {
+    return posixWritev(fd, buffers, count)
+}
+
+export function inputStream(fd: int, mode: Address): Address {
+    return posixStream(fd, mode)
+}
+
+export function startStreams() {}
+
+// Certificates and randomness (koji:x509, koji:tls).
+
+export function seconds(): int {
+    return posixSeconds()
+}
+
+export function systemRandom(bytes: Address, size: int): boolean {
+    return posixRandom(bytes, size)
+}
+
+// Where `d_name` is in a `struct dirent`.
+export function entryNameAt(): int {
+    return 21
+}
+
+// Whether the system keeps its certificates in directories of files.
+export function certificateDirectories(): boolean {
+    return true
+}
+
+// The first place of the needle in the haystack, or none (memmem).
+export function findBytes(haystack: Address, haystackSize: int, needle: Address, needleSize: int): Address {
+    return posixFind(haystack, haystackSize, needle, needleSize)
+}

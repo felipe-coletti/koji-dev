@@ -9,6 +9,7 @@ import { decimalLiteral } from 'decimal.kj'
 import { foreignModule } from 'foreign.kj'
 import { isPackagePath, packageFile, foreignAllowed, preparePackages } from 'packages.kj'
 import { kojiModules, stdSource } from 'stdlib.kj'
+import { systemName } from 'systems.kj'
 
 // Names of the standard library modules (`import math`).
 immut stdlibModules: string[] = []
@@ -20,8 +21,20 @@ export immut coreStringMethods = ['trim', 'split', 'replace', 'startsWith', 'end
 // The internal modules (std/koji/): `koji:core`, compiled with the programs that use it, and those
 // of the library of the runtime written in Koji, compiled once (`kojic library`) and linked
 // into every program.
-immut internalModules = ['koji:aes', 'koji:bignum', 'koji:bsd', 'koji:chacha', 'koji:closure', 'koji:core', 'koji:decimal', 'koji:ecc', 'koji:floats', 'koji:linux', 'koji:list', 'koji:map', 'koji:memory', 'koji:net', 'koji:numbers', 'koji:output', 'koji:posix', 'koji:prelude', 'koji:record', 'koji:roots', 'koji:rsa', 'koji:ryu', 'koji:sha', 'koji:sockets', 'koji:start', 'koji:task', 'koji:text', 'koji:tls', 'koji:unicode', 'koji:windows', 'koji:x25519', 'koji:x509']
-export immut libraryModules = ['koji:aes', 'koji:bignum', 'koji:bsd', 'koji:chacha', 'koji:closure', 'koji:decimal', 'koji:ecc', 'koji:floats', 'koji:linux', 'koji:list', 'koji:map', 'koji:memory', 'koji:net', 'koji:numbers', 'koji:output', 'koji:posix', 'koji:prelude', 'koji:record', 'koji:roots', 'koji:rsa', 'koji:ryu', 'koji:sha', 'koji:sockets', 'koji:start', 'koji:task', 'koji:text', 'koji:tls', 'koji:unicode', 'koji:windows', 'koji:x25519', 'koji:x509']
+immut internalModules = ['koji:aes', 'koji:bignum', 'koji:chacha', 'koji:closure', 'koji:core', 'koji:decimal', 'koji:ecc', 'koji:floats', 'koji:linux', 'koji:list', 'koji:macos', 'koji:map', 'koji:memory', 'koji:net', 'koji:numbers', 'koji:output', 'koji:posix', 'koji:prelude', 'koji:record', 'koji:roots', 'koji:rsa', 'koji:ryu', 'koji:sha', 'koji:sockets', 'koji:start', 'koji:task', 'koji:text', 'koji:tls', 'koji:unicode', 'koji:windows', 'koji:x25519', 'koji:x509']
+export immut libraryModules = ['koji:aes', 'koji:bignum', 'koji:chacha', 'koji:closure', 'koji:decimal', 'koji:ecc', 'koji:floats', 'koji:list', 'koji:map', 'koji:memory', 'koji:net', 'koji:numbers', 'koji:output', 'koji:posix', 'koji:prelude', 'koji:record', 'koji:roots', 'koji:rsa', 'koji:ryu', 'koji:sha', 'koji:sockets', 'koji:start', 'koji:task', 'koji:text', 'koji:tls', 'koji:unicode', 'koji:x25519', 'koji:x509']
+
+// The module of the system compiled for, in the library of the runtime: what `koji:os` names. Each
+// system has one, with the same functions (koji:linux, koji:macos, koji:windows), so the modules
+// of the library that are common know no system; a library holds only the module of its own.
+export function systemModule(): string {
+    return `koji:${systemName()}`
+}
+
+// Whether a module is in the library of the runtime.
+export function inLibrary(path: string): boolean {
+    return path in libraryModules or path == systemModule()
+}
 
 type SymbolKind = {
     ValueSymbol
@@ -1395,14 +1408,17 @@ function findInTypes(types: Type[], ids: Set[int]): Option[int] {
 
 // The module `path` names: one of the standard library in the runtime, one written in Koji that
 // the compiler carries (std/), or a file, checked the first time.
-function Checker.importedModule(mut self, path: string): Result[int, string] {
+function Checker.importedModule(mut self, given: string): Result[int, string] {
+    // `koji:os`: the module of the system compiled for (koji:linux, koji:macos, koji:windows).
+    immut path = if (given == 'koji:os') { systemModule() } else { given }
+
     if (path in stdlibModules) { return Ok(self.stdlibModule(path)) }
 
     if (path in internalModules) {
         if (not self.state.path.startsWith('std:')) { return Err(self.failure(`'${path}' is only for the standard library`)) }
 
         // The modules of the library are compiled together: one of them may import another.
-        if (path in libraryModules and self.state.path != 'std:library' and not (`koji:${self.state.path[4..]}` in libraryModules)) {
+        if (inLibrary(path) and self.state.path != 'std:library' and not inLibrary(`koji:${self.state.path[4..]}`)) {
             return Err(self.failure(`'${path}' is in the library of the runtime: its functions are called by their names of C ('extern function')`))
         }
 
@@ -6246,6 +6262,8 @@ export function checkLibrary(): Result[Program, string] {
     for i in range(libraryModules.length()) {
         lines.push(`import library${i} from '${libraryModules[i]}'`)
     }
+
+    lines.push("import system from 'koji:os'")
 
     mut checker = Checker.create()
     immut result = checker.checkModule('std:library', 'koji:library', lines.join('\n'))

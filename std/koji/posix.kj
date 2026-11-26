@@ -1,9 +1,10 @@
-// `koji:posix`: what the systems of POSIX (Linux, macOS, the BSDs) share in the runtime, in the
-// library of the runtime written in Koji: the stacks of tasks mapped from the system, its clocks
-// and its sleeps. What differs between them is in their own modules (koji:linux, koji:bsd), given
-// to these functions; Windows has koji:windows.
+// `koji:posix`: what the systems of POSIX (Linux, macOS) share in the runtime, in the library of
+// the runtime written in Koji: their stacks, clocks and sleeps, sockets, pipes, threads, raw reads
+// and writes, time and randomness. Their modules (koji:linux, koji:macos: each the `koji:os` of its
+// system) call these with their own numbers.
 
-import { Address, CInt, CSize, CVariadic, distance, nullAddress, offset, read, valgrind, write } from 'koji:unsafe'
+import system
+import { Address, CInt, CSize, CVariadic, allocate, distance, floatControl, free, nullAddress, offset, read, taskEntry, valgrind, write } from 'koji:unsafe'
 
 extern function mmap(address: Address, size: CSize, protection: CInt, flags: CInt, fd: CInt, at: int): Address
 extern function munmap(address: Address, size: CSize): CInt
@@ -21,6 +22,12 @@ extern function writev(fd: CInt, buffers: Address, count: CInt): int
 extern function fdopen(fd: CInt, mode: Address): Address
 extern function time(place: Address): int
 extern function getentropy(buffer: Address, size: CSize): CInt
+extern function memmem(haystack: Address, haystackSize: CSize, needle: Address, needleSize: CSize): Address
+extern function send(fd: CInt, bytes: Address, size: CSize, flags: CInt): int
+extern function recv(fd: CInt, bytes: Address, size: CSize, flags: CInt): int
+extern function close(fd: CInt): CInt
+extern function setsockopt(fd: CInt, level: CInt, name: CInt, value: Address, length: CInt): CInt
+extern function gai_strerror(code: CInt): Address
 
 // A stack of `size` bytes above a guard of `guard` that the program cannot touch (PROT_NONE),
 // readable and writable (PROT_READ | PROT_WRITE), with the flags of the mapping of the system: its
@@ -135,4 +142,73 @@ export function posixSeconds(): int {
 // `size` random bytes at `bytes` (at most 256): whether the system gave them.
 export function posixRandom(bytes: Address, size: int): boolean {
     return getentropy(bytes, size) == 0
+}
+
+// The top of a new stack for `switchStacks`, which then starts `task` where `taskEntry` is, by the
+// convention of each processor (System V's, AAPCS64): the registers it restores, zero but for the
+// task and where it returns, and the control words of floating point of the current task (below
+// the number of valgrind, aligned to 16 bytes).
+export function posixStackStart(stack: Address, size: int, task: int): Address {
+    immut top = offset(stack, size - 16)
+
+    return match (system.architecture) {
+        X64 => {
+            // The control words, r15 to r12, rbx (the task), rbp, where it returns.
+            immut sp = offset(top, -72)
+
+            for word in range(9) {
+                write(sp, 8 * word, 0)
+            }
+
+            write(sp, 0, floatControl())
+            write(sp, 40, task)
+            write(sp, 56, taskEntry())
+            sp
+        }
+        Arm64 => {
+            // x19 (the task) to x30 (where it returns), d8 to d15, fpcr.
+            immut sp = offset(top, -176)
+
+            for word in range(22) {
+                write(sp, 8 * word, 0)
+            }
+
+            write(sp, 0, task)
+            write(sp, 88, taskEntry())
+            write(sp, 160, floatControl())
+            sp
+        }
+        OtherArchitecture(_) => nullAddress()
+    }
+}
+
+// The sockets of POSIX: sent and received without waiting (`flags`: MSG_DONTWAIT, and
+// MSG_NOSIGNAL where there is one), closed, and the message of an error of the names.
+export function posixSend(fd: int, bytes: Address, size: int, flags: int): int {
+    return send(fd, bytes, size, flags)
+}
+
+export function posixReceive(fd: int, bytes: Address, size: int, flags: int): int {
+    return recv(fd, bytes, size, flags)
+}
+
+export function posixClose(fd: int) {
+    close(fd)
+}
+
+export function posixDnsMessage(code: int): Address {
+    return gai_strerror(code)
+}
+
+// An option of a socket set to 1 (`level`, `name`: SO_NOSIGPIPE, say).
+export function posixOptionOn(fd: int, level: int, name: int) {
+    immut on = allocate(8)
+    write(on, 0, 1)
+    setsockopt(fd, level, name, on, 4)
+    free(on)
+}
+
+// The first place of the needle in the haystack, or none (memmem).
+export function posixFind(haystack: Address, haystackSize: int, needle: Address, needleSize: int): Address {
+    return memmem(haystack, haystackSize, needle, needleSize)
 }

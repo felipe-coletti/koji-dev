@@ -6,6 +6,7 @@
 
 import { Address, CInt, CSize, Location, U128, allocate, blankString, charOfCode, distance, isNull, lowWord, newString, nullAddress, offset, panicAt, read, setStringSize, stringBytes, stringCapacity, stringReferences, stringSize, wide, wordProduct, write } from 'koji:unsafe'
 import { isContinuation, isSpace, isUtf8, textOf } from 'koji:core'
+import { findBytes } from 'koji:os'
 import { alphabetic, cased, ignorable, lowerMultiple, lowerSingle, lowercase, numeric, upperMultiple, upperSingle, uppercase } from 'koji:unicode'
 
 extern function memcpy(target: Address, source: Address, size: CSize): Address
@@ -13,7 +14,6 @@ extern function koji_memory_give(block: Address, words: int)
 extern function memcmp(a: Address, b: Address, size: CSize): CInt
 extern function memchr(bytes: Address, value: CInt, size: CSize): Address
 // `memmem`, by the library (koji:windows: Windows has none).
-extern function koji_find_bytes(haystack: Address, haystackSize: CSize, needle: Address, needleSize: CSize): Address
 
 extern function koji_string_concat(a: string, b: string): string {
     immut sizeA = stringSize(a)
@@ -835,4 +835,12 @@ extern function koji_string_from_utf8(bytes: Address, size: CSize): string {
 extern function koji_string_free(text: Address) {
     immut capacity: int = read(text, 16)
     koji_memory_give(text, 3 + capacity / 8)
+}
+
+// The first place of the needle in the haystack, or none (for C, and koji:core): that of the system
+// (koji:os). An empty needle is at the start (glibc says so, macOS's says it is nowhere).
+extern function koji_find_bytes(haystack: Address, haystackSize: CSize, needle: Address, needleSize: CSize): Address {
+    if (needleSize == 0) { return haystack }
+
+    return findBytes(haystack, haystackSize, needle, needleSize)
 }

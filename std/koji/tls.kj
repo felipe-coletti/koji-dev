@@ -12,8 +12,7 @@
 // koji_tls_send, koji_tls_receive, koji_tls_close, and the text of a problem.
 
 import system
-import { posixRandom } from 'koji:posix'
-import { windowsRandom } from 'koji:windows'
+import { systemRandom } from 'koji:os'
 import { Address, CInt, CSize, allocate, free, isNull, newString, nullAddress, offset, read, stringBytes, stringSize, write } from 'koji:unsafe'
 import { digest, digestSize, hkdfExpand, hkdfExtract, hmac } from 'koji:sha'
 import { x25519, x25519Base } from 'koji:x25519'
@@ -605,12 +604,7 @@ function randomBytes(out: Address, size: int): boolean {
     while (done < size) {
         immut part = if (size - done > 256) { 256 } else { size - done }
 
-        immut given = match (system.os) {
-            Linux => posixRandom(offset(out, done), part)
-            MacOS => posixRandom(offset(out, done), part)
-            Windows => windowsRandom(offset(out, done), part)
-            Other(_) => posixRandom(offset(out, done), part)
-        }
+        immut given = systemRandom(offset(out, done), part)
 
         if (not given) { return false }
 

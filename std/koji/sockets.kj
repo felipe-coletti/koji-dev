@@ -1,29 +1,17 @@
-// `koji:sockets`: the numbers of the sockets that differ between systems, the record the module of
-// each system fills in (`linuxSockets` of koji:linux, `bsdSockets` of koji:bsd, `windowsSockets`
-// of koji:windows) for koji:net.
+// `koji:sockets`: the numbers of the sockets that koji:net needs and that differ between systems,
+// the record the module of each system fills in (`socketNumbers` of koji:os).
 
 export type SocketNumbers = {
     // SOL_SOCKET, SO_REUSEADDR, SO_ERROR.
     level: int
     reuseAddress: int
     socketError: int
-    // MSG_NOSIGNAL (0 where it is not needed), MSG_DONTWAIT (0 on Windows, whose sockets never
-    // wait), O_NONBLOCK.
-    noSignal: int
-    dontWait: int
-    nonBlocking: int
     // EWOULDBLOCK (EAGAIN), EINPROGRESS, ETIMEDOUT (Winsock's own on Windows).
     wouldBlock: int
     inProgress: int
     timedOut: int
     // The place of ai_addr in a `struct addrinfo` (after ai_canonname on a BSD and on Windows).
     addressAt: int
-    // SO_NOSIGPIPE (a BSD: a write to a closed connection fails rather than raising SIGPIPE), 0
-    // where there is none.
-    noPipeSignalOption: int
     // Whether a `struct sockaddr_in` starts with its length (a BSD).
     addressLength: boolean
-    // Whether a socket accepted has the flags of the one that listens (a BSD), which it then
-    // loses: it waits, and has SO_NOSIGPIPE.
-    acceptedInherits: boolean
 }

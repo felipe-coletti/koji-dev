@@ -3,7 +3,7 @@
 
 import { Node, Pattern, TypeExpr, Param, Arm, Entry, ObjectEntry, isTestName } from 'parser.kj'
 import { Type, TypeInfo, FieldType, substitute, display } from 'types.kj'
-import { MethodRef, LoadedModule, Tables, Program, coreStringMethods, listFunctionMethods, libraryModules, parentDir, resolvePath, foreignPrefix, foreignPath } from 'checker.kj'
+import { MethodRef, LoadedModule, Tables, Program, coreStringMethods, listFunctionMethods, inLibrary, libraryModules, parentDir, systemModule, resolvePath, foreignPrefix, foreignPath } from 'checker.kj'
 import { IrExtern, IrForC, IrTest, Ty, Operand, Place, Step, Target, IrField, IrVariant, IrRecord, StdArg, Writeback, MapEntry, Instruction, Terminator, IrBlock, IrLocal, IrFunction, IrGlobal, IrProgram, isManaged, itemOf, tyText, tysText } from 'ir.kj'
 import { decimalLiteral } from 'decimal.kj'
 import { foreignModule } from 'foreign.kj'
@@ -802,7 +802,10 @@ function Lowerer.externNamed(self, name: string): Option[IrExtern] {
 
 // The key of an imported module: `std:json` for a module of the standard library written in Koji
 // (as the checker names it), the resolved path of a file otherwise.
-function modulePath(directory: string, path: string): string {
+function modulePath(directory: string, given: string): string {
+    // `koji:os`: the module of the system compiled for (see `systemModule`).
+    immut path = if (given == 'koji:os') { systemModule() } else { given }
+
     if (path.startsWith(foreignPrefix)) { return path }
 
     if (isPackagePath(path)) {
@@ -819,7 +822,7 @@ function modulePath(directory: string, path: string): string {
 
 // A module of the standard library written in Koji (`json`), or the internal `koji:core`.
 function isKojiModule(path: string): boolean {
-    return path in kojiModules or path == 'koji:core' or path in libraryModules
+    return path in kojiModules or path == 'koji:core' or path == 'koji:os' or inLibrary(path)
 }
 
 // Adds the module at `path` and the modules it imports (each once).

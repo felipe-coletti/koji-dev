@@ -1,10 +1,10 @@
-// `koji:windows`: what Windows asks of the runtime, in the library of the runtime written in Koji:
-// what it does not give as the C libraries of Unix do (the writes and reads of several buffers, a
-// line of a stream, the entries of a directory by _findfirst64, `memmem`); the stacks of tasks
-// (VirtualAlloc), its clock and sleeps, the sockets tasks wait for (WSAPoll); Winsock; its pipes,
-// threads and streams; its time and randomness. The functions for C (`extern` with a body) are
-// in every library, so their bodies are empty on the other systems (`if (system.os !=
-// system.Windows)`, folded); the others are only where a `match (system.os)` calls them.
+// `koji:windows`: Windows for the runtime, the module `koji:os` is on Windows (each system has one,
+// with the same functions: koji:linux, koji:macos; the compiler takes the one of its target, and
+// the common modules know no system): the stacks of tasks (VirtualAlloc), its clock and sleeps, the
+// sockets tasks wait for (WSAPoll), Winsock, its pipes, threads and streams, its time and
+// randomness; and, for C (the public modules call them by their names), what it does not give as
+// the C libraries of Unix do: the writes and reads of several buffers, a line of a stream, the
+// entries of a directory (by _findfirst64), `waitpid`.
 
 import system
 import { SocketNumbers } from 'koji:sockets'
@@ -19,7 +19,6 @@ extern function strlen(text: Address): CSize
 extern function memcpy(target: Address, source: Address, size: CSize): Address
 extern function memcmp(a: Address, b: Address, size: CSize): CInt
 extern function memchr(bytes: Address, value: CInt, size: CSize): Address
-extern function memmem(haystack: Address, haystackSize: CSize, needle: Address, needleSize: CSize): Address
 extern function findFirst(pattern: Address, found: Address): int from '_findfirst64'
 extern function findNext(handle: int, found: Address): CInt from '_findnext64'
 extern function findClose(handle: int): CInt from '_findclose'
@@ -153,15 +152,9 @@ extern function koji_windows_closedir(directory: Address): CInt {
     return 0
 }
 
-// `memmem`: the first place of the needle in the haystack, or none (that of the C library, but on
-// Windows). An empty needle is at the start (glibc says so, macOS's says it is nowhere).
-extern function koji_find_bytes(haystack: Address, haystackSize: CSize, needle: Address, needleSize: CSize): Address {
-    if (needleSize == 0) { return haystack }
-
-    return if (system.os == system.Windows) { windowsFind(haystack, haystackSize, needle, needleSize) } else { memmem(haystack, haystackSize, needle, needleSize) }
-}
-
-function windowsFind(haystack: Address, haystackSize: CSize, needle: Address, needleSize: CSize): Address {
+// The first place of the needle in the haystack, or none (Windows has no `memmem`): the first byte
+// by memchr, then the rest by memcmp.
+export function findBytes(haystack: Address, haystackSize: int, needle: Address, needleSize: int): Address {
     if (needleSize == 0) { return haystack }
 
     immut first: byte = read(needle, 0)
@@ -215,7 +208,7 @@ extern function koji_monotonic_nanoseconds(): int
 
 // A stack of `size` bytes above a guard of `guard`: its memory given at once (MEM_COMMIT |
 // MEM_RESERVE, PAGE_READWRITE), the guard PAGE_NOACCESS.
-export function windowsStackNew(size: int, guard: int): Address {
+export function stackNew(size: int, guard: int): Address {
     immut reserved = VirtualAlloc(nullAddress(), size + guard, 0x3000, 4)
 
     if (isNull(reserved)) { return nullAddress() }
@@ -233,14 +226,14 @@ export function windowsStackNew(size: int, guard: int): Address {
 }
 
 // MEM_RELEASE.
-export function windowsStackFree(stack: Address, guard: int) {
+export function stackFree(stack: Address, size: int, guard: int) {
     VirtualFree(offset(stack, -guard), 0, 0x8000)
 }
 
 // The top of a new stack (x86-64) for `switchStacks`: as on the others, with the limits of the
 // stack in the block of the thread too (NT_TIB: StackLimit, StackBase), which the functions of the
 // system check.
-export function windowsStackStart(stack: Address, size: int, task: int): Address {
+export function stackStart(stack: Address, size: int, task: int): Address {
     immut sp = offset(stack, size - 16 - 88)
 
     for word in range(11) {
@@ -256,7 +249,7 @@ export function windowsStackStart(stack: Address, size: int, task: int): Address
 }
 
 // The nanoseconds of the counter of performance and its frequency, at `words`.
-export function windowsNanoseconds(words: Address): int {
+export function monotonicNanoseconds(words: Address): int {
     QueryPerformanceCounter(words)
     QueryPerformanceFrequency(offset(words, 8))
     immut count: int = read(words, 0)
@@ -265,7 +258,7 @@ export function windowsNanoseconds(words: Address): int {
 }
 
 // Sleeps at least `nanoseconds` (Sleep counts milliseconds).
-export function windowsSleep(nanoseconds: int) {
+export function sleepFor(nanoseconds: int, words: Address) {
     Sleep((nanoseconds + 999999) / 1000000)
 }
 
@@ -273,7 +266,11 @@ export function windowsSleep(nanoseconds: int) {
 // no handle.
 mut windowsWatched: int[] = []
 
-export function windowsPollerWatch(fd: int, writing: boolean): int {
+export function pollerNew(): int {
+    return 0
+}
+
+export function pollerWatch(poller: int, fd: int, writing: boolean, words: Address): int {
     immut entry = fd * 2 + (if (writing) { 1 } else { 0 })
 
     if (not (entry in windowsWatched)) { windowsWatched.push(entry) }
@@ -285,7 +282,7 @@ export function windowsPollerWatch(fd: int, writing: boolean): int {
 // POLLWRNORM, those that came): how many are ready, their numbers at `ready`, which are watched no
 // more. The pipe of the jobs done (`jobsDone`, -1 before there is one) is no socket: it is looked
 // at (PeekNamedPipe) between waits of 10 ms at most; with nothing else to wait for, a sleep.
-export function windowsPollerWait(milliseconds: int, ready: Address, most: int, jobsDone: int): int {
+export function pollerWait(poller: int, milliseconds: int, ready: Address, most: int, events: Address, words: Address, jobsDone: int): int {
     immut deadline = if (milliseconds < 0) { -1 } else { koji_monotonic_nanoseconds() + milliseconds * 1000000 }
     immut pipeEntry = jobsDone * 2
 
@@ -377,14 +374,14 @@ extern function windowsRecvC(fd: CInt, bytes: Address, size: CInt, flags: CInt):
 
 // The numbers of the sockets: Winsock's errors (WSAEWOULDBLOCK, which a connection under way gives
 // too, WSAETIMEDOUT); its sockets never wait, no flag needed (FIONBIO sets them).
-export function windowsSockets(): SocketNumbers {
-    return { level: 0xFFFF, reuseAddress: 4, socketError: 0x1007, noSignal: 0, dontWait: 0, nonBlocking: 0, wouldBlock: 10035, inProgress: 10035, timedOut: 10060, addressAt: 32, noPipeSignalOption: 0, addressLength: false, acceptedInherits: false }
+export function socketNumbers(): SocketNumbers {
+    return { level: 0xFFFF, reuseAddress: 4, socketError: 0x1007, wouldBlock: 10035, inProgress: 10035, timedOut: 10060, addressAt: 32, addressLength: false }
 }
 
 // Winsock, started before the first socket.
 mut winsockStarted = false
 
-export function windowsSocketsStart() {
+export function socketsStart() {
     if (winsockStarted) { return }
 
     immut data = allocate(512)
@@ -394,38 +391,59 @@ export function windowsSocketsStart() {
 }
 
 // The error of the last call of the sockets: Winsock's own.
-export function windowsSocketError(): int {
+export function socketError(): int {
     return WSAGetLastError()
 }
 
 // A socket waits or not (FIONBIO).
-export function windowsSetWaiting(fd: int, waiting: boolean) {
+export function setWaiting(fd: int, waiting: boolean) {
     immut mode = allocate(8)
     write(mode, 0, if (waiting) { 0 } else { 1 })
     ioctlsocket(fd, 0x8004667E, mode)
     free(mode)
 }
 
-export function windowsCloseSocket(fd: int) {
+export function closeSocket(fd: int) {
     closesocket(fd)
 }
 
-export function windowsSend(fd: int, bytes: Address, size: int): int {
+// Its sockets are not given to the programs a program runs.
+export function privateSocket(fd: int) {}
+
+export function sendNow(fd: int, bytes: Address, size: int): int {
     return windowsSendC(fd, bytes, size, 0)
 }
 
-export function windowsReceive(fd: int, bytes: Address, size: int): int {
+export function receiveNow(fd: int, bytes: Address, size: int): int {
     return windowsRecvC(fd, bytes, size, 0)
 }
 
+// The error of a call of the sockets (Winsock's own) in errno, which a function of C reads after
+// this library's (std/http.kj): its 4 bytes.
+export function keepSocketError(error: int) {
+    immut place = windowsErrnoPlace()
+
+    for i in range(4) {
+        immut part: byte = byte(error >> (8 * i) & 0xFF)
+        write(place, i, part)
+    }
+}
+
+// After a connection, accepted: its sockets stay without waiting, and raise no signal.
+export function afterConnect(fd: int) {}
+
+export function accepted(fd: int) {}
+
+export function noPipeSignal(fd: int) {}
+
 // The place of errno (_errno).
-export function windowsErrno(): Address {
+export function errnoPlace(): Address {
     return windowsErrnoPlace()
 }
 
 // The message of an error of the names (Windows has no `gai_strerror` in its DLLs): the code of
 // Winsock, as a string of C that stays.
-export function windowsDnsMessage(code: int): Address {
+export function dnsMessage(code: int): Address {
     immut text = `the name could not be resolved (error ${code} of Winsock)`
     immut size = text.length()
     immut bytes = allocate(size + 1)
@@ -448,13 +466,18 @@ extern function windowsFdopen(fd: CInt, mode: Address): Address from '_fdopen'
 
 // A pipe of the C library, its two ends at `ends`, binary and not inherited (_O_BINARY |
 // _O_NOINHERIT): whether the system made it.
-export function windowsPipe(ends: Address): boolean {
+// Whether a write would not wait: not known (a thread that helps writes, while other tasks run).
+export function outputReady(fd: int, place: Address): boolean {
+    return false
+}
+
+export function pipeOf(ends: Address): boolean {
     return windowsPipeC(ends, 4096, 0x8080) == 0
 }
 
 // A new thread running `code` (an adapter of the convention of Windows, see native.kj) with
 // `state`: whether the system made it.
-export function windowsThreadStart(code: Address, state: Address): boolean {
+export function threadStart(code: Address, state: Address, place: Address): boolean {
     immut handle = CreateThread(nullAddress(), 0, code, state, 0, nullAddress())
 
     if (isNull(handle)) { return false }
@@ -463,13 +486,21 @@ export function windowsThreadStart(code: Address, state: Address): boolean {
     return true
 }
 
-export function windowsWriteNow(fd: int, bytes: Address, size: int): int {
+export function writeNow(fd: int, bytes: Address, size: int): int {
     return windowsWrite(fd, bytes, size)
+}
+
+// The pipe of the jobs done is read only when it holds a job (see `jobsDone`).
+export function pipeWithoutWaiting(fd: int) {}
+
+// `writev`: a write each (koji_windows_writev).
+export function writevNow(fd: int, buffers: Address, count: int): int {
+    return koji_windows_writev(fd, buffers, count)
 }
 
 // The jobs done waiting in the pipe `fd` (whole addresses, PeekNamedPipe at `waiting`), at most
 // `capacity`, read at `out`: how many (a read of the pipe would wait when it holds none).
-export function windowsJobsDone(fd: int, out: Address, capacity: int, waiting: Address): int {
+export function jobsDone(fd: int, out: Address, capacity: int, waiting: Address): int {
     write(waiting, 0, 0)
     PeekNamedPipe(windowsHandle(fd), nullAddress(), 0, nullAddress(), waiting, nullAddress())
     immut available: int = read(waiting, 0)
@@ -483,7 +514,7 @@ export function windowsJobsDone(fd: int, out: Address, capacity: int, waiting: A
 }
 
 // A stream of C of `fd`.
-export function windowsStream(fd: int, mode: Address): Address {
+export function inputStream(fd: int, mode: Address): Address {
     return windowsFdopen(fd, mode)
 }
 
@@ -494,22 +525,27 @@ extern function BCryptGenRandom(algorithm: Address, buffer: Address, size: CInt,
 extern function windowsSetMode(fd: CInt, mode: CInt): CInt from '_setmode'
 
 // The seconds since 1970, now.
-export function windowsSeconds(): int {
+export function seconds(): int {
     return windowsTime(nullAddress())
 }
 
 // `size` random bytes at `bytes` (BCRYPT_USE_SYSTEM_PREFERRED_RNG): whether the system gave them.
-export function windowsRandom(bytes: Address, size: int): boolean {
+export function systemRandom(bytes: Address, size: int): boolean {
     return BCryptGenRandom(nullAddress(), bytes, size, 2) == 0
 }
 
 // Where the name is in an entry of koji_windows_readdir (as in Linux's `struct dirent`).
-export function windowsEntryNameAt(): int {
+export function entryNameAt(): int {
     return 19
 }
 
+// Its certificates are in its store, not in directories of files (the list built in serves).
+export function certificateDirectories(): boolean {
+    return false
+}
+
 // The standard streams as bytes (_O_BINARY), as on other systems: no line breaks of two characters.
-export function windowsBinaryStreams() {
+export function startStreams() {
     for fd in range(3) {
         windowsSetMode(fd, 0x8000)
     }
