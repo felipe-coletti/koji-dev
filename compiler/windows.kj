@@ -1,0 +1,9 @@
+// Windows to the compiler (x86-64): COFF, its linker of PE, its convention for the calls of C, its
+// entry (koji_windows_start), threads started at adapters, the limits of the stack in the block of
+// the thread, environ from __p__environ, Sleep.
+
+import { SystemDescription, Coff, CoffArchive, PeLinker, FromCFunction, NoArmBuild } from 'platform.kj'
+
+export function windowsSystem(): SystemDescription {
+    return { name: 'windows', object: Coff, archive: CoffArchive, linker: PeLinker, windowsCalls: true, variadicsOnStack: false, errnoFunction: '_errno', ownEntry: true, threadAdapters: true, environment: FromCFunction('__p__environ'), sleepsInMilliseconds: true, stackLimitsInThread: true, armFeatures: NoArmBuild }
+}

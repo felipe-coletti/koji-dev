@@ -1,0 +1,8 @@
+// macOS to the compiler: Mach-O, its linker, an archive of BSD, the variadic arguments of arm64 on
+// the stack (Apple's convention), environ from _NSGetEnviron, AES on every processor of Apple.
+
+import { SystemDescription, MachO, BsdArchive, MachLinker, FromFunction, AlwaysThere } from 'platform.kj'
+
+export function macosSystem(): SystemDescription {
+    return { name: 'macos', object: MachO, archive: BsdArchive, linker: MachLinker, windowsCalls: false, variadicsOnStack: true, errnoFunction: '__error', ownEntry: false, threadAdapters: false, environment: FromFunction('_NSGetEnviron'), sleepsInMilliseconds: false, stackLimitsInThread: false, armFeatures: AlwaysThere }
+}

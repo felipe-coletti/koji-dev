@@ -26,7 +26,8 @@ import { allocate } from 'mirregs.kj'
 import { emitX64, x64Registers } from 'x64.kj'
 import { emitA64, a64Registers } from 'a64.kj'
 import { ObjectFile, ObjectRelocation, ObjectSymbol, append, utf8 } from 'objects.kj'
-import { environmentAccess, errnoFunction, objectOf, ownEntry, sleepsInMilliseconds, stackLimitsInThread, targetArm, threadAdapters, variadicsOnStack, windowsCalls, ThroughTable, FromFunction, FromCFunction } from 'systems.kj'
+import { environmentAccess, errnoFunction, objectOf, ownEntry, sleepsInMilliseconds, stackLimitsInThread, targetArm, threadAdapters, variadicsOnStack, windowsCalls } from 'systems.kj'
+import { ThroughTable, FromFunction, FromCFunction } from 'platform.kj'
 import system
 
 immut rsi = 6

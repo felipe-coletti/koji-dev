@@ -19,7 +19,8 @@ import { lastUses, defs, uses, terminatorUses, successors, targetReads } from 'l
 import { addBit, removeBit, hasBit, bitMembers } from 'bits.kj'
 import { borrowedLocals, changes } from 'borrow.kj'
 import { floatWord, decimalBits } from 'constants.kj'
-import { armFeatures, targetArm, windowsCalls, AlwaysThere, FromAuxiliaryVector, NoArmBuild } from 'systems.kj'
+import { armFeatures, targetArm, windowsCalls } from 'systems.kj'
+import { AlwaysThere, FromAuxiliaryVector, NoArmBuild } from 'platform.kj'
 
 // What the lowering needs to know of the object: the offsets of the globals (in .bss), of the
 // string literals and of the descriptions of the records (in .data), the borrowed parameters of

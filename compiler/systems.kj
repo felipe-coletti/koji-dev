@@ -1,11 +1,11 @@
-// The systems Koji builds for, and what each one asks of the compiler, in one place. Each decision
-// that differs between systems is a function here, a `match` on the system with no wildcard: a new
-// system is a new variant of `System`, and the checker then names every decision it must make
-// (and the modules it needs: its object, its archive, its linker); a system dropped is a variant
-// and its modules removed. The rest of the compiler asks these functions, never the platform.
+// The systems Koji builds for: the one place that names them. Each system describes itself in a
+// module of its own (linux.kj, macos.kj, windows.kj: a `SystemDescription` of platform.kj, in
+// capabilities: its formats, its linker, its conventions); this module only says which one the
+// target is, and gives the rest of the compiler the answers of that description, and the formats
+// of objects and archives it names. A new system is a variant of `System`, its line here and its
+// module (with new formats, if it needs some); a system dropped, the same removed.
 //
-// What differs by processor (x86-64, arm64) is another matter, the emitters' (x64.kj, a64.kj); the
-// library has its own branches for each system (`match (system.os)`, see target.kj).
+// What differs by processor (x86-64, arm64) is another matter, the emitters' (x64.kj, a64.kj).
 
 import { targetPlatform } from 'inline.kj'
 import { ObjectFile } from 'objects.kj'
@@ -13,6 +13,10 @@ import { elfObject } from 'elf.kj'
 import { machArchive, machObject } from 'macho.kj'
 import { coffGlobals, coffObject } from 'coff.kj'
 import { archive, archiveNamed } from 'linker.kj'
+import { ArmFeatures, EnvironmentAccess, Linker, SystemDescription, Elf, MachO, Coff, SystemVArchive, BsdArchive, CoffArchive } from 'platform.kj'
+import { linuxSystem } from 'linux.kj'
+import { macosSystem } from 'macos.kj'
+import { windowsSystem } from 'windows.kj'
 
 // The systems, in the order of the variants of `system.OperatingSystem` (the platforms of
 // target.kj: `system * 3 + architecture`).
@@ -33,132 +37,75 @@ export function targetArm(): boolean {
     return targetPlatform() % 3 == 1
 }
 
-// The relocatable object of the code and the data: ELF, Mach-O or COFF.
+// The description of the system compiled for, by its module.
+export function target(): SystemDescription {
+    return match (targetSystem()) {
+        Linux => linuxSystem()
+        MacOS => macosSystem()
+        Windows => windowsSystem()
+    }
+}
+
+// The relocatable object of the code and the data, in the format of the system.
 export function objectOf(file: ObjectFile): byte[] {
-    return match (targetSystem()) {
-        Linux => elfObject(file)
-        MacOS => machObject(file)
-        Windows => coffObject(file)
+    return match (target().object) {
+        Elf => elfObject(file)
+        MachO => machObject(file)
+        Coff => coffObject(file)
     }
 }
 
-// The archive of the runtime library (`kojic library`), with the table of its symbols: of System V
-// for Linux, of BSD for macOS (its linker reads no other), with the names of COFF for Windows.
+// The archive of the runtime library (`kojic library`), with the table of its symbols.
 export function libraryArchive(object: byte[]): byte[] {
-    return match (targetSystem()) {
-        Linux => archive([object])
-        MacOS => machArchive([object])
-        Windows => archiveNamed([object], [coffGlobals(object)])
+    return match (target().archive) {
+        SystemVArchive => archive([object])
+        BsdArchive => machArchive([object])
+        CoffArchive => archiveNamed([object], [coffGlobals(object)])
     }
 }
 
-// Whether the functions of C (of the system, of a DLL) are called by the convention of Windows
-// (x64.kj: the first four arguments in rcx, rdx, r8, r9 or xmm0 to xmm3, 32 bytes above them),
-// rather than System V's.
+// The answers of the description (see platform.kj).
+export function targetLinker(): Linker {
+    return target().linker
+}
+
 export function windowsCalls(): boolean {
-    return match (targetSystem()) {
-        Linux => false
-        MacOS => false
-        Windows => true
-    }
+    return target().windowsCalls
 }
 
-// Whether, on arm64, the arguments after the fixed ones of a variadic function of C go on the stack
-// (the convention of macOS), rather than in registers as the others.
 export function variadicsOnStack(): boolean {
-    return match (targetSystem()) {
-        Linux => false
-        MacOS => true
-        Windows => false
-    }
+    return target().variadicsOnStack
 }
 
-// The function of the C library that gives the address of errno.
 export function errnoFunction(): string {
-    return match (targetSystem()) {
-        Linux => '__errno_location'
-        MacOS => '__error'
-        Windows => '_errno'
-    }
+    return target().errnoFunction
 }
 
-// Whether the system starts a program at an entry of its own (Windows, with no arguments: those of C
-// from its C library), rather than the start files of C calling `main`.
 export function ownEntry(): boolean {
-    return match (targetSystem()) {
-        Linux => false
-        MacOS => false
-        Windows => true
-    }
+    return target().ownEntry
 }
 
-// Whether a thread of the system starts by its own convention, at an adapter that calls the code of
-// Koji (Windows), rather than at that code (System V's).
 export function threadAdapters(): boolean {
-    return match (targetSystem()) {
-        Linux => false
-        MacOS => false
-        Windows => true
-    }
-}
-
-// How the variable of C `environ` is reached: through the table of the linker (Linux), its address
-// from _NSGetEnviron (macOS), or from __p__environ (Windows).
-export type EnvironmentAccess = {
-    ThroughTable
-    FromFunction(name: string)
-    FromCFunction(name: string)
+    return target().threadAdapters
 }
 
 export function environmentAccess(): EnvironmentAccess {
-    return match (targetSystem()) {
-        Linux => ThroughTable
-        MacOS => FromFunction('_NSGetEnviron')
-        Windows => FromCFunction('__p__environ')
-    }
+    return target().environment
 }
 
-// The sleep of the ticker of the runtime, 10 ms: nanosleep, or Sleep of Windows (in milliseconds).
 export function sleepsInMilliseconds(): boolean {
-    return match (targetSystem()) {
-        Linux => false
-        MacOS => false
-        Windows => true
-    }
+    return target().sleepsInMilliseconds
+}
+
+export function stackLimitsInThread(): boolean {
+    return target().stackLimitsInThread
+}
+
+export function armFeatures(): ArmFeatures {
+    return target().armFeatures
 }
 
 // The name of the system for messages and for KOJI_TARGET (`windows-x64`).
 export function systemName(): string {
-    return match (targetSystem()) {
-        Linux => 'linux'
-        MacOS => 'macos'
-        Windows => 'windows'
-    }
-}
-
-// Whether the switch between the stacks of tasks also saves the limits of the stack in the block of
-// the thread (Windows, whose functions check them: StackBase, StackLimit).
-export function stackLimitsInThread(): boolean {
-    return match (targetSystem()) {
-        Linux => false
-        MacOS => false
-        Windows => true
-    }
-}
-
-// How a program on arm64 knows whether the processor has the instructions of AES and PMULL: they
-// always are on macOS (Apple's processors); Linux tells it (getauxval(AT_HWCAP): bits 3 and 4).
-// (On x86-64, the processor itself tells, by cpuid, whatever the system.)
-export type ArmFeatures = {
-    AlwaysThere
-    FromAuxiliaryVector
-    NoArmBuild
-}
-
-export function armFeatures(): ArmFeatures {
-    return match (targetSystem()) {
-        Linux => FromAuxiliaryVector
-        MacOS => AlwaysThere
-        Windows => NoArmBuild
-    }
+    return target().name
 }

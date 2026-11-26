@@ -1,0 +1,7 @@
+// Linux to the compiler: ELF, its linker, System V's conventions, glibc (or musl).
+
+import { SystemDescription, Elf, SystemVArchive, ElfLinker, ThroughTable, FromAuxiliaryVector } from 'platform.kj'
+
+export function linuxSystem(): SystemDescription {
+    return { name: 'linux', object: Elf, archive: SystemVArchive, linker: ElfLinker, windowsCalls: false, variadicsOnStack: false, errnoFunction: '__errno_location', ownEntry: false, threadAdapters: false, environment: ThroughTable, sleepsInMilliseconds: false, stackLimitsInThread: false, armFeatures: FromAuxiliaryVector }
+}

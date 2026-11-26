@@ -12,7 +12,8 @@ import { lower, lowerTests } from 'lower.kj'
 import { IrExtern, IrProgram, programText } from 'ir.kj'
 import { generateNative } from 'native.kj'
 import { inlineSmall } from 'inline.kj'
-import { libraryArchive, targetArm, targetSystem, Linux, MacOS, Windows } from 'systems.kj'
+import { libraryArchive, targetArm, targetLinker } from 'systems.kj'
+import { ElfLinker, MachLinker, PeLinker } from 'platform.kj'
 import { Dylib, dylibIdentity, linkMach, machArchiveObjects, tbdIdentity } from 'machlink.kj'
 import { archiveObjects, linkExecutable, sharedName, sharedSymbols } from 'linker.kj'
 import { linkWindows } from 'pelink.kj'
@@ -301,9 +302,9 @@ function linkNative(program: IrProgram, output: string): Result[void, string] {
     }
 
     // The linker of the system compiled for (Koji's, else the system's: see above).
-    match (targetSystem()) {
-        // Linux: Koji's linker of ELF (linker.kj), with the shared libraries of the blocks `foreign`.
-        Linux => {
+    match (targetLinker()) {
+        // Koji's linker of ELF (linker.kj), with the shared libraries of the blocks `foreign`.
+        ElfLinker => {
             if (chosen != 'system') {
                 match (linkOwn(object, runtime, output, foreign)) {
                     Ok(_) => return Ok()
@@ -313,9 +314,9 @@ function linkNative(program: IrProgram, output: string): Result[void, string] {
                 }
             }
         }
-        // macOS: its linker of Mach-O (machlink.kj), with the dynamic libraries of the blocks
-        // `foreign` (`foreign 'sqlite3'`: libsqlite3.dylib, its file or its stub in the SDK).
-        MacOS => {
+        // Of Mach-O (machlink.kj), with the dynamic libraries of the blocks `foreign` (`foreign
+        // 'sqlite3'`: libsqlite3.dylib, its file or its stub in the SDK).
+        MachLinker => {
             if (chosen != 'system') {
                 match (linkMachOwn(object, runtime, output, program.externs, foreign)) {
                     Ok(_) => return Ok()
@@ -325,9 +326,9 @@ function linkNative(program: IrProgram, output: string): Result[void, string] {
                 }
             }
         }
-        // Windows: its linker of PE (pelink.kj), the only one: the functions of a block `foreign`
-        // from the DLL of its library (`foreign 'user32'`: user32.dll).
-        Windows => {
+        // Of PE (pelink.kj), the only one: the functions of a block `foreign` from the DLL of its
+        // library (`foreign 'user32'`: user32.dll).
+        PeLinker => {
             mut dlls: Map[string, string] = [:]
 
             for each in program.externs {

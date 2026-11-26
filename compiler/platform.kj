@@ -1,0 +1,74 @@
+// What a system is to the compiler: the description that the module of each system fills in
+// (linux.kj, macos.kj, windows.kj), in capabilities rather than names (its format of objects, its
+// linker, the convention of its calls of C...). The compiler asks the description of its target
+// (systems.kj), and decides by these, never by the system: a new system is a new description,
+// which may reuse the formats and linkers there are.
+
+// The relocatable object of the code and the data (elf.kj, macho.kj, coff.kj).
+export type ObjectFormat = {
+    Elf
+    MachO
+    Coff
+}
+
+// The archive of the runtime library, with the table of its symbols: of System V, of BSD (which the
+// linker of macOS reads), or with the names of COFF.
+export type ArchiveFormat = {
+    SystemVArchive
+    BsdArchive
+    CoffArchive
+}
+
+// Koji's linker of the system (linker.kj, machlink.kj, pelink.kj); the system's own, `KOJI_CC`, may
+// link for the first two too.
+export type Linker = {
+    ElfLinker
+    MachLinker
+    PeLinker
+}
+
+// How the variable of C `environ` is reached: through the table of the linker, its address from a
+// function of the system, or from a function of C (by the convention of C calls).
+export type EnvironmentAccess = {
+    ThroughTable
+    FromFunction(name: string)
+    FromCFunction(name: string)
+}
+
+// How a program on arm64 knows whether the processor has the instructions of AES and PMULL: they
+// always are, the system tells it (getauxval(AT_HWCAP): bits 3 and 4), or the system has no build
+// for arm64. (On x86-64, the processor itself tells, by cpuid, whatever the system.)
+export type ArmFeatures = {
+    AlwaysThere
+    FromAuxiliaryVector
+    NoArmBuild
+}
+
+export type SystemDescription = {
+    // The name for messages and for KOJI_TARGET (`windows-x64`).
+    name: string
+    object: ObjectFormat
+    archive: ArchiveFormat
+    linker: Linker
+    // Whether the functions of C are called by the convention of Windows (x64.kj: the first four
+    // arguments in rcx, rdx, r8, r9 or xmm0 to xmm3, 32 bytes above them), rather than System V's.
+    windowsCalls: boolean
+    // Whether, on arm64, the arguments after the fixed ones of a variadic function of C go on the
+    // stack (rather than in registers).
+    variadicsOnStack: boolean
+    // The function of the C library that gives the address of errno.
+    errnoFunction: string
+    // Whether the system starts a program at an entry of its own, with no arguments (those of C from
+    // its C library), rather than the start files of C calling `main`.
+    ownEntry: boolean
+    // Whether a thread starts by the system's own convention, at an adapter that calls the code of
+    // Koji, rather than at that code.
+    threadAdapters: boolean
+    environment: EnvironmentAccess
+    // Whether the ticker of the runtime sleeps by Sleep, in milliseconds, rather than nanosleep.
+    sleepsInMilliseconds: boolean
+    // Whether the switch between the stacks of tasks also saves the limits of the stack in the
+    // block of the thread (whose functions check them).
+    stackLimitsInThread: boolean
+    armFeatures: ArmFeatures
+}
