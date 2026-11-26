@@ -7,7 +7,8 @@
     `stream did not contain valid UTF-8`.
 -   `**`, `math.pow` and the logarithms of floats are correctly rounded always, with no rare case
     left: they are computed with big integers, with as many bits as it takes to decide the float,
-    and exactly when the result is the middle of two floats. A power takes some 13 µs.
+    and exactly when the result is the middle of two floats. A double-double phase with proven
+    bounds decides nearly every result first: a power takes about 0.5 µs.
 
 ## 0.2.1 (preview)
 
