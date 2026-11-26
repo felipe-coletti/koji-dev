@@ -1907,6 +1907,8 @@ print(float(-5.5) % float(2), 0x1.fffffffffffffp1023 % 0x1p-1074, float(1e300) %
 // Close to the middle of two floats, small, and among the subnormals.
 print(0x1.773aa76e16436p2 ** -0x1.7225a4462b1f9p5, 0x1.0a665c65d42efp-613 ** 0x1.a969dc7f6cc54p0, 0x0.4b84705039e7p-1022 ** -0x1p0)
 print(0x1.c88cc83d7778bp-269 ** 0x1p2, 0x1.8bb351943d206p913 ** -0x1.2d2d9fd49bedap0, 0x1.1e4bd40c1cac6p-852 ** 0x1.3368bb92c8fe4p0)
+// Exactly the middle of two floats (262143^3 has 54 bits), and 0.4999986 ulp from one.
+print(float(262143) ** float(3), float(262143 * 262143) ** float(1.5), (float(262143) * float(262143) * float(262143) * float(262143)) ** float(0.75))
 ---- output
 Ok(0x1.6a09e667f3bcdp0) Ok(0x1p-537) Ok(0x1.fffffffffffffp511)
 Ok(0x1.6a09e667f3bcdp0) Ok(0x0.00000000007e8p-1022) Ok(-0x1p-3)
@@ -1920,6 +1922,7 @@ Ok(0x1.3333333333333p-2) Ok(0x1.52d02c7e14af6p76)
 -0x1.8p0 0x0p0 0x1.4a11e087dfeacp-997 0x1.9999999999972p-4
 0x1.eb3f830346443p-119 0x1.58c598005ec09p-1019 0x1.b1e9e16801cb3p1023
 0x0.0000000000003p-1022 0x0.0000000000001p-1022 0x0.88facca6e0f85p-1022
+0x1.fffe80006p53 0x1.fffe80006p53 0x1.fffe80005ffffp53
 ==== floats_have_no_nan_or_infinity #1
 ---- source (no line break at the end)
 immut x = float(1e308) * float(10)
