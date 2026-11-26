@@ -312,7 +312,7 @@ immut memoryWidths: Map[string, int] = ['koji_unsafe_read_int': 8, 'koji_unsafe_
 immut machineInstructions: Map[string, string] = ['koji_unsafe_reverse_bytes': 'bswap', 'koji_aes_available': 'aesAvailable', 'koji_unsafe_aes_round': 'aesRound', 'koji_unsafe_aes_last_round': 'aesLastRound', 'koji_unsafe_carryless_product': 'carryless', 'koji_unsafe_float_control': 'floatControl', 'koji_unsafe_valgrind': 'valgrind']
 
 // The functions of `koji:unsafe` and of the pool the machine IR writes itself (see `libraryCall`).
-immut inlineLibrary = ['koji_unsafe_switch_stacks', 'koji_unsafe_task_entry', 'koji_unsafe_wide', 'koji_unsafe_float_bits', 'koji_unsafe_float_of_bits', 'koji_unsafe_low_word', 'koji_unsafe_high_word', 'koji_unsafe_word_product', 'koji_unsafe_decimal_low', 'koji_unsafe_decimal_high', 'koji_unsafe_decimal_of', 'koji_unsafe_leading_zeros', 'koji_unsafe_offset', 'koji_unsafe_distance', 'koji_unsafe_allocate', 'koji_unsafe_free', 'koji_unsafe_new_string', 'koji_unsafe_blank_string', 'koji_unsafe_set_string_size', 'koji_unsafe_set_list_length', 'koji_pool_heads', 'koji_pool_is_off', 'koji_memory_take', 'koji_pool_take', 'koji_memory_give', 'koji_pool_give', 'koji_record_field_count', 'koji_record_field_type', 'koji_record_field_slot', 'koji_record_get', 'koji_element_counted', 'koji_element_retain', 'koji_element_release']
+immut inlineLibrary = ['koji_unsafe_switch_stacks', 'koji_unsafe_task_entry', 'koji_unsafe_wide', 'koji_unsafe_float_bits', 'koji_unsafe_float_of_bits', 'koji_unsafe_float_sqrt', 'koji_unsafe_low_word', 'koji_unsafe_high_word', 'koji_unsafe_word_product', 'koji_unsafe_decimal_low', 'koji_unsafe_decimal_high', 'koji_unsafe_decimal_of', 'koji_unsafe_leading_zeros', 'koji_unsafe_offset', 'koji_unsafe_distance', 'koji_unsafe_allocate', 'koji_unsafe_free', 'koji_unsafe_new_string', 'koji_unsafe_blank_string', 'koji_unsafe_set_string_size', 'koji_unsafe_set_list_length', 'koji_pool_heads', 'koji_pool_is_off', 'koji_memory_take', 'koji_pool_take', 'koji_memory_give', 'koji_pool_give', 'koji_record_field_count', 'koji_record_field_type', 'koji_record_field_slot', 'koji_record_get', 'koji_element_counted', 'koji_element_retain', 'koji_element_release']
 
 function lowered(program: IrProgram, instruction: Instruction): boolean {
     return match (instruction) {
@@ -3353,6 +3353,8 @@ function Lowering.inlineLibrary(mut self, dest: Option[int], name: string, value
     }
 
     match (name) {
+        // The square root of a float: sqrtsd, fsqrt.
+        'koji_unsafe_float_sqrt' => self.current.push(MUnary(result, 'fsqrt', values[0], -1))
         // The switch between stacks (see `runtimeCode` in native.kj), a call that saves the
         // registers it must.
         'koji_unsafe_switch_stacks' => self.current.push(MCall(MExternal('koji_task_switch'), [values[0], values[1]], []))

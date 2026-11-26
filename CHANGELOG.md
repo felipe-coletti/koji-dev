@@ -9,6 +9,9 @@
     left: they are computed with big integers, with as many bits as it takes to decide the float,
     and exactly when the result is the middle of two floats. A double-double phase with proven
     bounds decides nearly every result first: a power takes about 0.5 µs.
+-   `math.sqrt` of a float is the instruction of the processor (some 6 ns, from 365), and
+    `float('...')` reads 17 digits and more without big integers, by the tables of Ryu (under
+    1 µs, from 27): both still correctly rounded.
 
 ## 0.2.1 (preview)
 

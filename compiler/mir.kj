@@ -55,7 +55,7 @@ export type MInstruction = {
     // panic of a result that is not finite (a float has no infinity).
     MBinary(dest: int, op: string, left: MValue, right: MValue, check: int)
     // `neg` (checked like an operation), `not` (of the bits), `sext32` (the low 32 bits
-    // sign-extended: an `int` of C); `fneg`, `itof` (an int to the nearest
+    // sign-extended: an `int` of C); `fneg`, `fsqrt`, `itof` (an int to the nearest
     // float), `ftoi` (a float truncated to an int), `fcheck` (a copy of a float that panics with
     // `check` when it is not finite).
     MUnary(dest: int, op: string, value: MValue, check: int)

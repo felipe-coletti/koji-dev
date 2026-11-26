@@ -282,8 +282,14 @@ function Emitter.instruction(mut self, instruction: MInstruction) {
             self.finish(dest, target)
         }
         MBinary(dest, op, left, right, check) => self.binary(dest, op, left, right, check)
-        MUnary(dest, op, value, check) if (op == 'fneg' or op == 'itof' or op == 'ftoi' or op == 'fcheck') => {
+        MUnary(dest, op, value, check) if (op == 'fneg' or op == 'itof' or op == 'ftoi' or op == 'fcheck' or op == 'fsqrt') => {
             match (op) {
+                // sqrtsd xmm0, xmm0
+                'fsqrt' => {
+                    self.floatValue(xmm, value)
+                    self.bytes([0xF2, 0x0F, 0x51, 0xC0])
+                    self.storeFloat(dest, xmm)
+                }
                 // movq rax, xmm0; btc rax, 63; movq xmm0, rax
                 'fneg' => {
                     self.floatValue(xmm, value)

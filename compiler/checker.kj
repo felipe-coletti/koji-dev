@@ -2060,7 +2060,7 @@ function Checker.unsafeModule(mut self): int {
 
     mut module: ModuleInfo = { display: 'koji:unsafe', members: [:], types: [:], private: Set.from([]) }
 
-    for member in ['allocate', 'free', 'read', 'write', 'panicAt', 'offset', 'distance', 'stringBytes', 'stringSize', 'newString', 'nullAddress', 'isNull', 'wide', 'lowWord', 'highWord', 'leadingZeros', 'wordProduct', 'wideToFloat', 'floatBits', 'floatOfBits', 'decimalLow', 'decimalHigh', 'decimalOf', 'blankString', 'stringReferences', 'stringCapacity', 'setStringSize', 'charOfCode', 'truncate', 'reserve', 'listItems', 'setListLength', 'locationAddress', 'sharedGet', 'sharedSet', 'switchStacks', 'taskEntry', 'floatControl', 'valgrind', 'aesRound', 'aesLastRound', 'carrylessProduct', 'reverseBytes', 'aesAvailable'] {
+    for member in ['allocate', 'free', 'read', 'write', 'panicAt', 'offset', 'distance', 'stringBytes', 'stringSize', 'newString', 'nullAddress', 'isNull', 'wide', 'lowWord', 'highWord', 'leadingZeros', 'wordProduct', 'wideToFloat', 'floatBits', 'floatOfBits', 'floatSqrt', 'decimalLow', 'decimalHigh', 'decimalOf', 'blankString', 'stringReferences', 'stringCapacity', 'setStringSize', 'charOfCode', 'truncate', 'reserve', 'listItems', 'setListLength', 'locationAddress', 'sharedGet', 'sharedSet', 'switchStacks', 'taskEntry', 'floatControl', 'valgrind', 'aesRound', 'aesLastRound', 'carrylessProduct', 'reverseBytes', 'aesAvailable'] {
         module.members[member] = builtinSymbol(`unsafe.${member}`)
     }
 
@@ -5507,6 +5507,12 @@ function Checker.checkBuiltinCall(mut self, name: string, args: Node[], expected
         }
         'unsafe.floatOfBits' => {
             self.checkExactly(name, types, [IntType])?
+            return Ok(FloatType)
+        }
+        // The square root of a float (0 or more), correctly rounded: an instruction of the
+        // processor (IEEE 754 asks it to round correctly).
+        'unsafe.floatSqrt' => {
+            self.checkExactly(name, types, [FloatType])?
             return Ok(FloatType)
         }
         // The product of the low words of two U128 (one multiplication of 64 bits by 64).

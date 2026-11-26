@@ -825,6 +825,13 @@ function Emitter.unary(mut self, dest: int, op: string, value: MValue, check: in
             self.storeFloat(dest, v)
             return
         }
+        // fsqrt d0, d
+        'fsqrt' => {
+            immut source = self.floatRegister(value, v)
+            self.word32(0x1E61C000 | (source - v) << 5)
+            self.storeFloat(dest, v)
+            return
+        }
         // scvtf d0, x
         'itof' => {
             immut source = self.valueRegister(value, sa)
