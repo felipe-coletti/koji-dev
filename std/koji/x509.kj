@@ -16,7 +16,7 @@
 // Everything here is public: nothing needs constant time.
 
 import system
-import { certificateDirectories, entryNameAt, seconds } from 'koji:os'
+import { certificateFiles, seconds } from 'koji:os'
 import { Address, CInt, CSize, allocate, free, isNull, newString, nullAddress, offset, read, stringBytes, stringSize, write } from 'koji:unsafe'
 import { digest, digestSize } from 'koji:sha'
 import { verifyPkcs1, verifyPss } from 'koji:rsa'
@@ -30,9 +30,6 @@ extern function getenv(name: Address): Address
 extern function fopen(path: Address, mode: Address): Address
 extern function fread(target: Address, size: CSize, count: CSize, file: Address): CSize
 extern function fclose(file: Address): CInt
-extern function opendir(path: Address): Address
-extern function readdir(directory: Address): Address
-extern function closedir(directory: Address): CInt
 extern function realloc(block: Address, size: CSize): Address
 // Windows (ucrtbase): `time` is `_time64` there.
 
@@ -1428,31 +1425,7 @@ function addFile(mut authorities: Authority[], path: string): boolean {
 
 // The certificates of the files of a directory.
 function addDirectory(mut authorities: Authority[], path: string) {
-    // Systems without directories of certificates (Windows: its own are in its store; the list
-    // built in serves).
-    if (not certificateDirectories()) { return }
-
-    immut cPath = cString(path)
-    immut directory = opendir(cPath)
-    free(cPath)
-
-    if (isNull(directory)) { return }
-
-    mut names: string[] = []
-
-    while (true) {
-        immut entry = readdir(directory)
-
-        if (isNull(entry)) { break }
-
-        immut name = textOfC(entryName(entry))
-
-        if (not name.startsWith('.')) { names.push(name) }
-    }
-
-    closedir(directory)
-
-    for name in names {
+    for name in certificateFiles(path) {
         addFile(mut authorities, path + '/' + name)
     }
 }
@@ -1756,9 +1729,4 @@ extern function koji_x509_authority_count(builtIn: CInt): int {
     if (builtIn == 1) { return builtInAuthorities().length() }
 
     return trustedAuthorities().length()
-}
-
-// The name of an entry of `readdir`: where `d_name` is in a `struct dirent` of the system.
-function entryName(entry: Address): Address {
-    return offset(entry, entryNameAt())
 }

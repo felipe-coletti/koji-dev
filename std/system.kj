@@ -4,7 +4,7 @@
 
 import { Address, CInt, CSize, Location, allocate, free, isNull, newString, nullAddress, offset, read, stringBytes, stringSize, write } from 'koji:unsafe'
 import { cString, cText, hasNul, isUtf8, textOf } from 'koji:core'
-import { executableInto, fixedArchitecture, unameField } from 'koji:host'
+import { architectureName, executableInto } from 'koji:host'
 
 // The C library.
 extern function strlen(text: Address): CSize
@@ -804,18 +804,9 @@ function systemNamed(): OperatingSystem {
     }
 }
 
-// The processor, from the name `uname` gives (the fifth field of its record, whose fields have the
-// size of the system's: koji:host).
+// The processor, from its name (koji:host: `uname`, on the systems that have it).
 function architectureNamed(): Architecture {
-    // No `uname` where the system names its processor (koji:host).
-    mut name = fixedArchitecture()
-
-    if (name == '') {
-        immut buffer = allocate(4096)
-        uname(buffer)
-        name = cText(offset(buffer, 4 * unameField()))
-        free(buffer)
-    }
+    immut name = architectureName()
 
     return match (name) {
         'x86_64' => X64

@@ -69,11 +69,7 @@ export function executableInto(buffer: Address, size: int): int {
     return if (length >= size) { -2 } else { length }
 }
 
-// No `uname`: Windows of Koji is on x86-64.
-export function unameField(): int {
-    return 0
-}
-
-export function fixedArchitecture(): string {
+// The name of the processor: no `uname`, and Windows of Koji is on x86-64.
+export function architectureName(): string {
     return 'x86_64'
 }

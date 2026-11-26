@@ -13465,6 +13465,7 @@ function f6 koji:posixhost (module)(): Void
     return
   b2:
     g5 = true
+    call f4()
     return
 
 function f7 path (module)(): Void
@@ -16428,77 +16429,55 @@ function f49 systemNamed(): Record(11)
 function f50 architectureNamed(): Record(12)
     local l0: Str
     local l1: Str // name
-    local l2: Bool
-    local l3: Int
-    local l4: Int // buffer
-    local l5: Int
-    local l6: Int
-    local l7: Int
-    local l8: Int
-    local l9: Str
-    local l10: Record(12)
-    local l11: Str
-    local l12: Bool
-    local l13: Record(12)
-    local l14: Bool
-    local l15: Record(12)
-    local l16: Bool
-    local l17: Record(12)
-    local l18: Bool
-    local l19: Record(12)
-    local l20: Record(12)
+    local l2: Record(12)
+    local l3: Str
+    local l4: Bool
+    local l5: Record(12)
+    local l6: Bool
+    local l7: Record(12)
+    local l8: Bool
+    local l9: Record(12)
+    local l10: Bool
+    local l11: Record(12)
+    local l12: Record(12)
   b0:
-    l0 = call f100()
+    l0 = call f99()
     l1 = l0
-    l2 = StrCompare(Equal) l1, s2
-    branch l2, b1, b2
+    l3 = l1
+    l4 = StrCompare(Equal) l3, s28
+    branch l4, b3, b2
   b1:
-    l3 = koji_unsafe_allocate([Value(Int(4096))])
-    l4 = l3
-    l5 = uname([Value(Local(4))])
-    l6 = call f99()
-    l7 = IntMul 4, l6
-    l8 = koji_unsafe_offset([Value(Local(4)), Value(Local(7))])
-    l9 = call f72(l8)
-    l1 = l9
-    koji_unsafe_free([Value(Local(4))])
-    goto b2
+    return l2
   b2:
-    l11 = l1
-    l12 = StrCompare(Equal) l11, s28
-    branch l12, b5, b4
+    l6 = StrCompare(Equal) l3, s29
+    branch l6, b5, b4
   b3:
-    return l10
+    l5 = record variant 0 ()
+    l2 = l5
+    goto b1
   b4:
-    l14 = StrCompare(Equal) l11, s29
-    branch l14, b7, b6
+    l8 = StrCompare(Equal) l3, s30
+    branch l8, b7, b6
   b5:
-    l13 = record variant 0 ()
-    l10 = l13
-    goto b3
+    l7 = record variant 0 ()
+    l2 = l7
+    goto b1
   b6:
-    l16 = StrCompare(Equal) l11, s30
-    branch l16, b9, b8
+    l10 = StrCompare(Equal) l3, s31
+    branch l10, b9, b8
   b7:
-    l15 = record variant 0 ()
-    l10 = l15
-    goto b3
+    l9 = record variant 1 ()
+    l2 = l9
+    goto b1
   b8:
-    l18 = StrCompare(Equal) l11, s31
-    branch l18, b11, b10
+    l12 = record variant 2 (l1)
+    l2 = l12
+    goto b1
   b9:
-    l17 = record variant 1 ()
-    l10 = l17
-    goto b3
+    l11 = record variant 1 ()
+    l2 = l11
+    goto b1
   b10:
-    l20 = record variant 2 (l1)
-    l10 = l20
-    goto b3
-  b11:
-    l19 = record variant 1 ()
-    l10 = l19
-    goto b3
-  b12:
     unreachable
 
 function f51 readInt32(l0: Int, l1: Int): Int
@@ -19415,7 +19394,7 @@ function f88 decimalOf(l0: Str): Record(18)
 function f89 openMode(l0: Str): Str
     local l1: Str
   b0:
-    l1 = call f101(l0)
+    l1 = call f100(l0)
     return l1
 
 function f90 directoryRefused(): Bool
@@ -19425,7 +19404,7 @@ function f90 directoryRefused(): Bool
 function f91 descriptor(l0: Int): Int
     local l1: Int
   b0:
-    l1 = call f102(l0)
+    l1 = call f101(l0)
     return l1
 
 function f92 entryNameAt(): Int
@@ -19434,13 +19413,13 @@ function f92 entryNameAt(): Int
 
 function f93 closeDirectory(l0: Int): Void
   b0:
-    call f103(l0)
+    call f102(l0)
     return
 
 function f94 changeMode(l0: Int, l1: Int): Bool
     local l2: Bool
   b0:
-    l2 = call f104(l0, l1)
+    l2 = call f103(l0, l1)
     return l2
 
 function f95 backslashes(): Bool
@@ -19450,13 +19429,13 @@ function f95 backslashes(): Bool
 function f96 monotonicSeconds(): Decimal
     local l0: Decimal
   b0:
-    l0 = call f105(1)
+    l0 = call f104(1)
     return l0
 
 function f97 realtimeSeconds(): Decimal
     local l0: Decimal
   b0:
-    l0 = call f105(0)
+    l0 = call f104(0)
     return l0
 
 function f98 executableInto(l0: Int, l1: Int): Int
@@ -19493,33 +19472,31 @@ function f98 executableInto(l0: Int, l1: Int): Int
   b5:
     return l8
 
-function f99 unameField(): Int
+function f99 architectureName(): Str
+    local l0: Str
   b0:
-    return 65
+    l0 = call f105(65)
+    return l0
 
-function f100 fixedArchitecture(): Str
-  b0:
-    return s2
-
-function f101 posixOpenMode(l0: Str): Str
+function f100 posixOpenMode(l0: Str): Str
     local l1: Str
   b0:
     l1 = StrConcat l0, s5
     return l1
 
-function f102 posixDescriptor(l0: Int): Int
+function f101 posixDescriptor(l0: Int): Int
     local l1: Int
   b0:
     l1 = fileno([Value(Local(0))])
     return l1
 
-function f103 posixCloseDirectory(l0: Int): Void
+function f102 posixCloseDirectory(l0: Int): Void
     local l1: Int
   b0:
     l1 = closedir([Value(Local(0))])
     return
 
-function f104 posixChangeMode(l0: Int, l1: Int): Bool
+function f103 posixChangeMode(l0: Int, l1: Int): Bool
     local l2: Int
     local l3: Bool
   b0:
@@ -19527,7 +19504,7 @@ function f104 posixChangeMode(l0: Int, l1: Int): Bool
     l3 = IntCompare(Equal) l2, 0
     return l3
 
-function f105 posixClock(l0: Int): Decimal
+function f104 posixClock(l0: Int): Decimal
     local l1: Int
     local l2: Int // time
     local l3: Int
@@ -19555,6 +19532,25 @@ function f105 posixClock(l0: Int): Decimal
     l11 = DecimalDiv l9, l10
     l12 = DecimalAdd l8, l11
     return l12
+
+function f105 posixArchitectureName(l0: Int): Str
+    local l1: Int
+    local l2: Int // buffer
+    local l3: Int
+    local l4: Int
+    local l5: Int
+    local l6: Str
+    local l7: Str // name
+  b0:
+    l1 = koji_unsafe_allocate([Value(Int(4096))])
+    l2 = l1
+    l3 = uname([Value(Local(2))])
+    l4 = IntMul 4, l0
+    l5 = koji_unsafe_offset([Value(Local(2)), Value(Local(4))])
+    l6 = call f72(l5)
+    l7 = l6
+    koji_unsafe_free([Value(Local(2))])
+    return l7
 
 function f106 separator(l0: Char): Bool
     local l1: Bool
@@ -33397,9 +33393,9 @@ function f136 anonymous function(l0: Record(45), l1: Record(25)): Record(25)
 ==== test/ir/cases.txt #19
 string s0 = "e"
 string s1 = "/proc/self/exe"
-string s2 = ""
-string s3 = "split() separator cannot be empty"
-string s4 = "replace() needs a non-empty text to replace"
+string s2 = "split() separator cannot be empty"
+string s3 = "replace() needs a non-empty text to replace"
+string s4 = ""
 string s5 = "�"
 string s6 = "command '"
 string s7 = "' not found"
@@ -33617,6 +33613,7 @@ function f5 koji:posixhost (module)(): Void
     return
   b2:
     g4 = true
+    call f3()
     return
 
 function f6 FileError.display(l0: Record(0)): Str
@@ -34495,7 +34492,7 @@ function f23 createAll(l0: Str): Record(6)
     local l25: Record(0)
     local l26: Record(6)
   b0:
-    l1 = StrCompare(Equal) l0, s2
+    l1 = StrCompare(Equal) l0, s4
     branch l1, b1, b2
   b1:
     l2 = record variant 0 (0)
@@ -35127,8 +35124,8 @@ function f41 command(l0: Str, l1: List(Str)): Record(10)
   b0:
     l2 = l0
     l3 = l1
-    l4 = s2
-    l5 = s2
+    l4 = s4
+    l5 = s4
     l6 = map []
     l7 = l6
     l8 = false
@@ -35607,7 +35604,7 @@ function f47 spawn(l0: Record(10), l1: Bool): Record(15)
     branch l59, b19, b20
   b19:
     l60 = l0.2
-    l61 = StrCompare(NotEqual) l60, s2
+    l61 = StrCompare(NotEqual) l60, s4
     l59 = l61
     goto b20
   b20:
@@ -35628,7 +35625,7 @@ function f47 spawn(l0: Record(10), l1: Bool): Record(15)
     branch l62, b23, b24
   b22:
     l93 = l0.3
-    l94 = StrCompare(NotEqual) l93, s2
+    l94 = StrCompare(NotEqual) l93, s4
     branch l94, b30, b31
   b23:
     l72 = koji_unsafe_offset([Value(Local(52)), Value(Int(16))])
@@ -36134,7 +36131,7 @@ function f50 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     branch l31, b8, b9
   b8:
     l32 = l0.2
-    l33 = StrCompare(NotEqual) l32, s2
+    l33 = StrCompare(NotEqual) l32, s4
     l31 = l33
     goto b9
   b9:
@@ -36206,7 +36203,7 @@ function f50 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     goto b19
   b18:
     l106 = l0.3
-    l107 = StrCompare(Equal) l106, s2
+    l107 = StrCompare(Equal) l106, s4
     branch l107, b30, b31
   b19:
     l75 = IntCompare(Less) l74, l73
@@ -36448,7 +36445,7 @@ function f52 windowsQuoted(l0: Str): Str
     local l34: Str
     local l35: Str
   b0:
-    l4 = StrCompare(NotEqual) l0, s2
+    l4 = StrCompare(NotEqual) l0, s4
     l3 = l4
     branch l3, b1, b2
   b1:
@@ -37246,77 +37243,55 @@ function f55 systemNamed(): Record(16)
 function f56 architectureNamed(): Record(17)
     local l0: Str
     local l1: Str // name
-    local l2: Bool
-    local l3: Int
-    local l4: Int // buffer
-    local l5: Int
-    local l6: Int
-    local l7: Int
-    local l8: Int
-    local l9: Str
-    local l10: Record(17)
-    local l11: Str
-    local l12: Bool
-    local l13: Record(17)
-    local l14: Bool
-    local l15: Record(17)
-    local l16: Bool
-    local l17: Record(17)
-    local l18: Bool
-    local l19: Record(17)
-    local l20: Record(17)
+    local l2: Record(17)
+    local l3: Str
+    local l4: Bool
+    local l5: Record(17)
+    local l6: Bool
+    local l7: Record(17)
+    local l8: Bool
+    local l9: Record(17)
+    local l10: Bool
+    local l11: Record(17)
+    local l12: Record(17)
   b0:
-    l0 = call f106()
+    l0 = call f105()
     l1 = l0
-    l2 = StrCompare(Equal) l1, s2
-    branch l2, b1, b2
+    l3 = l1
+    l4 = StrCompare(Equal) l3, s25
+    branch l4, b3, b2
   b1:
-    l3 = koji_unsafe_allocate([Value(Int(4096))])
-    l4 = l3
-    l5 = uname([Value(Local(4))])
-    l6 = call f105()
-    l7 = IntMul 4, l6
-    l8 = koji_unsafe_offset([Value(Local(4)), Value(Local(7))])
-    l9 = call f78(l8)
-    l1 = l9
-    koji_unsafe_free([Value(Local(4))])
-    goto b2
+    return l2
   b2:
-    l11 = l1
-    l12 = StrCompare(Equal) l11, s25
-    branch l12, b5, b4
+    l6 = StrCompare(Equal) l3, s26
+    branch l6, b5, b4
   b3:
-    return l10
+    l5 = record variant 0 ()
+    l2 = l5
+    goto b1
   b4:
-    l14 = StrCompare(Equal) l11, s26
-    branch l14, b7, b6
+    l8 = StrCompare(Equal) l3, s27
+    branch l8, b7, b6
   b5:
-    l13 = record variant 0 ()
-    l10 = l13
-    goto b3
+    l7 = record variant 0 ()
+    l2 = l7
+    goto b1
   b6:
-    l16 = StrCompare(Equal) l11, s27
-    branch l16, b9, b8
+    l10 = StrCompare(Equal) l3, s28
+    branch l10, b9, b8
   b7:
-    l15 = record variant 0 ()
-    l10 = l15
-    goto b3
+    l9 = record variant 1 ()
+    l2 = l9
+    goto b1
   b8:
-    l18 = StrCompare(Equal) l11, s28
-    branch l18, b11, b10
+    l12 = record variant 2 (l1)
+    l2 = l12
+    goto b1
   b9:
-    l17 = record variant 1 ()
-    l10 = l17
-    goto b3
+    l11 = record variant 1 ()
+    l2 = l11
+    goto b1
   b10:
-    l20 = record variant 2 (l1)
-    l10 = l20
-    goto b3
-  b11:
-    l19 = record variant 1 ()
-    l10 = l19
-    goto b3
-  b12:
     unreachable
 
 function f57 readInt32(l0: Int, l1: Int): Int
@@ -37708,7 +37683,7 @@ function f66 split(l0: Str, l1: Str, l2: Int): List(Str)
     l4 = IntCompare(Equal) l3, 0
     branch l4, b1, b2
   b1:
-    koji_std_panic([Value(Str(3)), Place(Local(2))])
+    koji_std_panic([Value(Str(2)), Place(Local(2))])
     unreachable
   b2:
     l5 = koji_unsafe_string_bytes([Value(Local(0))])
@@ -37772,7 +37747,7 @@ function f67 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
     l5 = IntCompare(Equal) l4, 0
     branch l5, b1, b2
   b1:
-    koji_std_panic([Value(Str(4)), Place(Local(3))])
+    koji_std_panic([Value(Str(3)), Place(Local(3))])
     unreachable
   b2:
     l6 = call f68(l0, l1, 0)
@@ -37784,7 +37759,7 @@ function f67 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
   b4:
     l9 = koji_unsafe_string_bytes([Value(Local(0))])
     l10 = l9
-    l11 = s2
+    l11 = s4
     l12 = 0
     goto b5
   b5:
@@ -38088,7 +38063,7 @@ function f73 textOf(l0: Int, l1: Int): Str
     local l22: Str
     local l23: Str
   b0:
-    l2 = s2
+    l2 = s4
     l3 = 0
     l4 = 0
     goto b1
@@ -40160,7 +40135,7 @@ function f91 powerOfTwo(l0: Int): Float
 function f92 readLine(l0: Int): Record(9)
     local l1: Record(9)
   b0:
-    l1 = call f93(s2, l0)
+    l1 = call f93(s4, l0)
     return l1
 
 function f93 readLineAfter(l0: Str, l1: Int): Record(9)
@@ -40233,7 +40208,7 @@ function f94 decimalOf(l0: Str): Record(23)
 function f95 openMode(l0: Str): Str
     local l1: Str
   b0:
-    l1 = call f107(l0)
+    l1 = call f106(l0)
     return l1
 
 function f96 directoryRefused(): Bool
@@ -40243,7 +40218,7 @@ function f96 directoryRefused(): Bool
 function f97 descriptor(l0: Int): Int
     local l1: Int
   b0:
-    l1 = call f108(l0)
+    l1 = call f107(l0)
     return l1
 
 function f98 entryNameAt(): Int
@@ -40252,13 +40227,13 @@ function f98 entryNameAt(): Int
 
 function f99 closeDirectory(l0: Int): Void
   b0:
-    call f109(l0)
+    call f108(l0)
     return
 
 function f100 changeMode(l0: Int, l1: Int): Bool
     local l2: Bool
   b0:
-    l2 = call f110(l0, l1)
+    l2 = call f109(l0, l1)
     return l2
 
 function f101 backslashes(): Bool
@@ -40268,13 +40243,13 @@ function f101 backslashes(): Bool
 function f102 monotonicSeconds(): Decimal
     local l0: Decimal
   b0:
-    l0 = call f111(1)
+    l0 = call f110(1)
     return l0
 
 function f103 realtimeSeconds(): Decimal
     local l0: Decimal
   b0:
-    l0 = call f111(0)
+    l0 = call f110(0)
     return l0
 
 function f104 executableInto(l0: Int, l1: Int): Int
@@ -40311,33 +40286,31 @@ function f104 executableInto(l0: Int, l1: Int): Int
   b5:
     return l8
 
-function f105 unameField(): Int
+function f105 architectureName(): Str
+    local l0: Str
   b0:
-    return 65
+    l0 = call f111(65)
+    return l0
 
-function f106 fixedArchitecture(): Str
-  b0:
-    return s2
-
-function f107 posixOpenMode(l0: Str): Str
+function f106 posixOpenMode(l0: Str): Str
     local l1: Str
   b0:
     l1 = StrConcat l0, s0
     return l1
 
-function f108 posixDescriptor(l0: Int): Int
+function f107 posixDescriptor(l0: Int): Int
     local l1: Int
   b0:
     l1 = fileno([Value(Local(0))])
     return l1
 
-function f109 posixCloseDirectory(l0: Int): Void
+function f108 posixCloseDirectory(l0: Int): Void
     local l1: Int
   b0:
     l1 = closedir([Value(Local(0))])
     return
 
-function f110 posixChangeMode(l0: Int, l1: Int): Bool
+function f109 posixChangeMode(l0: Int, l1: Int): Bool
     local l2: Int
     local l3: Bool
   b0:
@@ -40345,7 +40318,7 @@ function f110 posixChangeMode(l0: Int, l1: Int): Bool
     l3 = IntCompare(Equal) l2, 0
     return l3
 
-function f111 posixClock(l0: Int): Decimal
+function f110 posixClock(l0: Int): Decimal
     local l1: Int
     local l2: Int // time
     local l3: Int
@@ -40374,6 +40347,25 @@ function f111 posixClock(l0: Int): Decimal
     l12 = DecimalAdd l8, l11
     return l12
 
+function f111 posixArchitectureName(l0: Int): Str
+    local l1: Int
+    local l2: Int // buffer
+    local l3: Int
+    local l4: Int
+    local l5: Int
+    local l6: Str
+    local l7: Str // name
+  b0:
+    l1 = koji_unsafe_allocate([Value(Int(4096))])
+    l2 = l1
+    l3 = uname([Value(Local(2))])
+    l4 = IntMul 4, l0
+    l5 = koji_unsafe_offset([Value(Local(2)), Value(Local(4))])
+    l6 = call f78(l5)
+    l7 = l6
+    koji_unsafe_free([Value(Local(2))])
+    return l7
+
 function f112 drop Record(1)(l0: Record(1)): Void
     local l1: Record(1)
   b0:
@@ -40383,9 +40375,9 @@ function f112 drop Record(1)(l0: Record(1)): Void
 ==== test/ir/cases.txt #20
 string s0 = "e"
 string s1 = "/proc/self/exe"
-string s2 = ""
-string s3 = "split() separator cannot be empty"
-string s4 = "replace() needs a non-empty text to replace"
+string s2 = "split() separator cannot be empty"
+string s3 = "replace() needs a non-empty text to replace"
+string s4 = ""
 string s5 = "�"
 string s6 = "command '"
 string s7 = "' not found"
@@ -40618,6 +40610,7 @@ function f7 koji:posixhost (module)(): Void
     return
   b2:
     g6 = true
+    call f5()
     return
 
 function f8 DateTime.display(l0: Record(0)): Str
@@ -40805,7 +40798,7 @@ function f12 format(l0: Decimal, l1: Str): Str
     l2 = call f33(l0, location(datetime:53))
     l3 = call f16(l2)
     l4 = l3
-    l5 = s2
+    l5 = s4
     l6 = call f14(l1)
     l7 = l6
     l8 = ListLength l7
@@ -41352,7 +41345,7 @@ function f14 tokens(l0: Str): List(Record(3))
     l18 = l27
     goto b10
   b9:
-    l18 = s2
+    l18 = s4
     goto b10
   b10:
     l28 = l18
@@ -42661,8 +42654,8 @@ function f49 command(l0: Str, l1: List(Str)): Record(9)
   b0:
     l2 = l0
     l3 = l1
-    l4 = s2
-    l5 = s2
+    l4 = s4
+    l5 = s4
     l6 = map []
     l7 = l6
     l8 = false
@@ -43141,7 +43134,7 @@ function f55 spawn(l0: Record(9), l1: Bool): Record(14)
     branch l59, b19, b20
   b19:
     l60 = l0.2
-    l61 = StrCompare(NotEqual) l60, s2
+    l61 = StrCompare(NotEqual) l60, s4
     l59 = l61
     goto b20
   b20:
@@ -43162,7 +43155,7 @@ function f55 spawn(l0: Record(9), l1: Bool): Record(14)
     branch l62, b23, b24
   b22:
     l93 = l0.3
-    l94 = StrCompare(NotEqual) l93, s2
+    l94 = StrCompare(NotEqual) l93, s4
     branch l94, b30, b31
   b23:
     l72 = koji_unsafe_offset([Value(Local(52)), Value(Int(16))])
@@ -43668,7 +43661,7 @@ function f58 windowsSpawn(l0: Record(9), l1: Bool): Record(14)
     branch l31, b8, b9
   b8:
     l32 = l0.2
-    l33 = StrCompare(NotEqual) l32, s2
+    l33 = StrCompare(NotEqual) l32, s4
     l31 = l33
     goto b9
   b9:
@@ -43740,7 +43733,7 @@ function f58 windowsSpawn(l0: Record(9), l1: Bool): Record(14)
     goto b19
   b18:
     l106 = l0.3
-    l107 = StrCompare(Equal) l106, s2
+    l107 = StrCompare(Equal) l106, s4
     branch l107, b30, b31
   b19:
     l75 = IntCompare(Less) l74, l73
@@ -43982,7 +43975,7 @@ function f60 windowsQuoted(l0: Str): Str
     local l34: Str
     local l35: Str
   b0:
-    l4 = StrCompare(NotEqual) l0, s2
+    l4 = StrCompare(NotEqual) l0, s4
     l3 = l4
     branch l3, b1, b2
   b1:
@@ -44780,77 +44773,55 @@ function f63 systemNamed(): Record(15)
 function f64 architectureNamed(): Record(16)
     local l0: Str
     local l1: Str // name
-    local l2: Bool
-    local l3: Int
-    local l4: Int // buffer
-    local l5: Int
-    local l6: Int
-    local l7: Int
-    local l8: Int
-    local l9: Str
-    local l10: Record(16)
-    local l11: Str
-    local l12: Bool
-    local l13: Record(16)
-    local l14: Bool
-    local l15: Record(16)
-    local l16: Bool
-    local l17: Record(16)
-    local l18: Bool
-    local l19: Record(16)
-    local l20: Record(16)
+    local l2: Record(16)
+    local l3: Str
+    local l4: Bool
+    local l5: Record(16)
+    local l6: Bool
+    local l7: Record(16)
+    local l8: Bool
+    local l9: Record(16)
+    local l10: Bool
+    local l11: Record(16)
+    local l12: Record(16)
   b0:
-    l0 = call f114()
+    l0 = call f113()
     l1 = l0
-    l2 = StrCompare(Equal) l1, s2
-    branch l2, b1, b2
+    l3 = l1
+    l4 = StrCompare(Equal) l3, s25
+    branch l4, b3, b2
   b1:
-    l3 = koji_unsafe_allocate([Value(Int(4096))])
-    l4 = l3
-    l5 = uname([Value(Local(4))])
-    l6 = call f113()
-    l7 = IntMul 4, l6
-    l8 = koji_unsafe_offset([Value(Local(4)), Value(Local(7))])
-    l9 = call f86(l8)
-    l1 = l9
-    koji_unsafe_free([Value(Local(4))])
-    goto b2
+    return l2
   b2:
-    l11 = l1
-    l12 = StrCompare(Equal) l11, s25
-    branch l12, b5, b4
+    l6 = StrCompare(Equal) l3, s26
+    branch l6, b5, b4
   b3:
-    return l10
+    l5 = record variant 0 ()
+    l2 = l5
+    goto b1
   b4:
-    l14 = StrCompare(Equal) l11, s26
-    branch l14, b7, b6
+    l8 = StrCompare(Equal) l3, s27
+    branch l8, b7, b6
   b5:
-    l13 = record variant 0 ()
-    l10 = l13
-    goto b3
+    l7 = record variant 0 ()
+    l2 = l7
+    goto b1
   b6:
-    l16 = StrCompare(Equal) l11, s27
-    branch l16, b9, b8
+    l10 = StrCompare(Equal) l3, s28
+    branch l10, b9, b8
   b7:
-    l15 = record variant 0 ()
-    l10 = l15
-    goto b3
+    l9 = record variant 1 ()
+    l2 = l9
+    goto b1
   b8:
-    l18 = StrCompare(Equal) l11, s28
-    branch l18, b11, b10
+    l12 = record variant 2 (l1)
+    l2 = l12
+    goto b1
   b9:
-    l17 = record variant 1 ()
-    l10 = l17
-    goto b3
+    l11 = record variant 1 ()
+    l2 = l11
+    goto b1
   b10:
-    l20 = record variant 2 (l1)
-    l10 = l20
-    goto b3
-  b11:
-    l19 = record variant 1 ()
-    l10 = l19
-    goto b3
-  b12:
     unreachable
 
 function f65 readInt32(l0: Int, l1: Int): Int
@@ -45242,7 +45213,7 @@ function f74 split(l0: Str, l1: Str, l2: Int): List(Str)
     l4 = IntCompare(Equal) l3, 0
     branch l4, b1, b2
   b1:
-    koji_std_panic([Value(Str(3)), Place(Local(2))])
+    koji_std_panic([Value(Str(2)), Place(Local(2))])
     unreachable
   b2:
     l5 = koji_unsafe_string_bytes([Value(Local(0))])
@@ -45306,7 +45277,7 @@ function f75 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
     l5 = IntCompare(Equal) l4, 0
     branch l5, b1, b2
   b1:
-    koji_std_panic([Value(Str(4)), Place(Local(3))])
+    koji_std_panic([Value(Str(3)), Place(Local(3))])
     unreachable
   b2:
     l6 = call f76(l0, l1, 0)
@@ -45318,7 +45289,7 @@ function f75 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
   b4:
     l9 = koji_unsafe_string_bytes([Value(Local(0))])
     l10 = l9
-    l11 = s2
+    l11 = s4
     l12 = 0
     goto b5
   b5:
@@ -45622,7 +45593,7 @@ function f81 textOf(l0: Int, l1: Int): Str
     local l22: Str
     local l23: Str
   b0:
-    l2 = s2
+    l2 = s4
     l3 = 0
     l4 = 0
     goto b1
@@ -47694,7 +47665,7 @@ function f99 powerOfTwo(l0: Int): Float
 function f100 readLine(l0: Int): Record(8)
     local l1: Record(8)
   b0:
-    l1 = call f101(s2, l0)
+    l1 = call f101(s4, l0)
     return l1
 
 function f101 readLineAfter(l0: Str, l1: Int): Record(8)
@@ -47767,7 +47738,7 @@ function f102 decimalOf(l0: Str): Record(22)
 function f103 openMode(l0: Str): Str
     local l1: Str
   b0:
-    l1 = call f115(l0)
+    l1 = call f114(l0)
     return l1
 
 function f104 directoryRefused(): Bool
@@ -47777,7 +47748,7 @@ function f104 directoryRefused(): Bool
 function f105 descriptor(l0: Int): Int
     local l1: Int
   b0:
-    l1 = call f116(l0)
+    l1 = call f115(l0)
     return l1
 
 function f106 entryNameAt(): Int
@@ -47786,13 +47757,13 @@ function f106 entryNameAt(): Int
 
 function f107 closeDirectory(l0: Int): Void
   b0:
-    call f117(l0)
+    call f116(l0)
     return
 
 function f108 changeMode(l0: Int, l1: Int): Bool
     local l2: Bool
   b0:
-    l2 = call f118(l0, l1)
+    l2 = call f117(l0, l1)
     return l2
 
 function f109 backslashes(): Bool
@@ -47802,13 +47773,13 @@ function f109 backslashes(): Bool
 function f110 monotonicSeconds(): Decimal
     local l0: Decimal
   b0:
-    l0 = call f119(1)
+    l0 = call f118(1)
     return l0
 
 function f111 realtimeSeconds(): Decimal
     local l0: Decimal
   b0:
-    l0 = call f119(0)
+    l0 = call f118(0)
     return l0
 
 function f112 executableInto(l0: Int, l1: Int): Int
@@ -47845,33 +47816,31 @@ function f112 executableInto(l0: Int, l1: Int): Int
   b5:
     return l8
 
-function f113 unameField(): Int
+function f113 architectureName(): Str
+    local l0: Str
   b0:
-    return 65
+    l0 = call f119(65)
+    return l0
 
-function f114 fixedArchitecture(): Str
-  b0:
-    return s2
-
-function f115 posixOpenMode(l0: Str): Str
+function f114 posixOpenMode(l0: Str): Str
     local l1: Str
   b0:
     l1 = StrConcat l0, s0
     return l1
 
-function f116 posixDescriptor(l0: Int): Int
+function f115 posixDescriptor(l0: Int): Int
     local l1: Int
   b0:
     l1 = fileno([Value(Local(0))])
     return l1
 
-function f117 posixCloseDirectory(l0: Int): Void
+function f116 posixCloseDirectory(l0: Int): Void
     local l1: Int
   b0:
     l1 = closedir([Value(Local(0))])
     return
 
-function f118 posixChangeMode(l0: Int, l1: Int): Bool
+function f117 posixChangeMode(l0: Int, l1: Int): Bool
     local l2: Int
     local l3: Bool
   b0:
@@ -47879,7 +47848,7 @@ function f118 posixChangeMode(l0: Int, l1: Int): Bool
     l3 = IntCompare(Equal) l2, 0
     return l3
 
-function f119 posixClock(l0: Int): Decimal
+function f118 posixClock(l0: Int): Decimal
     local l1: Int
     local l2: Int // time
     local l3: Int
@@ -47907,6 +47876,25 @@ function f119 posixClock(l0: Int): Decimal
     l11 = DecimalDiv l9, l10
     l12 = DecimalAdd l8, l11
     return l12
+
+function f119 posixArchitectureName(l0: Int): Str
+    local l1: Int
+    local l2: Int // buffer
+    local l3: Int
+    local l4: Int
+    local l5: Int
+    local l6: Str
+    local l7: Str // name
+  b0:
+    l1 = koji_unsafe_allocate([Value(Int(4096))])
+    l2 = l1
+    l3 = uname([Value(Local(2))])
+    l4 = IntMul 4, l0
+    l5 = koji_unsafe_offset([Value(Local(2)), Value(Local(4))])
+    l6 = call f86(l5)
+    l7 = l6
+    koji_unsafe_free([Value(Local(2))])
+    return l7
 ==== test/ir/cases.txt #21
 string s0 = "split() separator cannot be empty"
 string s1 = "replace() needs a non-empty text to replace"
@@ -56906,9 +56894,9 @@ function f1 twice(): Int
 ==== test/ir/cases.txt #27
 string s0 = "e"
 string s1 = "/proc/self/exe"
-string s2 = ""
-string s3 = "split() separator cannot be empty"
-string s4 = "replace() needs a non-empty text to replace"
+string s2 = "split() separator cannot be empty"
+string s3 = "replace() needs a non-empty text to replace"
+string s4 = ""
 string s5 = "�"
 string s6 = "command '"
 string s7 = "' not found"
@@ -57075,7 +57063,7 @@ function f0 main(): Void
     l4 = StrConcat l2, s17
     l5 = StrConcat l4, l3
     koji_print_error([Value(Local(5)), Location(4)])
-    koji_print_error([Value(Str(2)), Location(5)])
+    koji_print_error([Value(Str(4)), Location(5)])
     l6 = call f18(s45)
     l7 = RecordTag l6
     l8 = IntCompare(Equal) l7, 1
@@ -57180,6 +57168,7 @@ function f5 koji:posixhost (module)(): Void
     return
   b2:
     g4 = true
+    call f3()
     return
 
 function f6 FileError.display(l0: Record(0)): Str
@@ -58058,7 +58047,7 @@ function f23 createAll(l0: Str): Record(6)
     local l25: Record(0)
     local l26: Record(6)
   b0:
-    l1 = StrCompare(Equal) l0, s2
+    l1 = StrCompare(Equal) l0, s4
     branch l1, b1, b2
   b1:
     l2 = record variant 0 (0)
@@ -58690,8 +58679,8 @@ function f41 command(l0: Str, l1: List(Str)): Record(10)
   b0:
     l2 = l0
     l3 = l1
-    l4 = s2
-    l5 = s2
+    l4 = s4
+    l5 = s4
     l6 = map []
     l7 = l6
     l8 = false
@@ -59170,7 +59159,7 @@ function f47 spawn(l0: Record(10), l1: Bool): Record(15)
     branch l59, b19, b20
   b19:
     l60 = l0.2
-    l61 = StrCompare(NotEqual) l60, s2
+    l61 = StrCompare(NotEqual) l60, s4
     l59 = l61
     goto b20
   b20:
@@ -59191,7 +59180,7 @@ function f47 spawn(l0: Record(10), l1: Bool): Record(15)
     branch l62, b23, b24
   b22:
     l93 = l0.3
-    l94 = StrCompare(NotEqual) l93, s2
+    l94 = StrCompare(NotEqual) l93, s4
     branch l94, b30, b31
   b23:
     l72 = koji_unsafe_offset([Value(Local(52)), Value(Int(16))])
@@ -59697,7 +59686,7 @@ function f50 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     branch l31, b8, b9
   b8:
     l32 = l0.2
-    l33 = StrCompare(NotEqual) l32, s2
+    l33 = StrCompare(NotEqual) l32, s4
     l31 = l33
     goto b9
   b9:
@@ -59769,7 +59758,7 @@ function f50 windowsSpawn(l0: Record(10), l1: Bool): Record(15)
     goto b19
   b18:
     l106 = l0.3
-    l107 = StrCompare(Equal) l106, s2
+    l107 = StrCompare(Equal) l106, s4
     branch l107, b30, b31
   b19:
     l75 = IntCompare(Less) l74, l73
@@ -60011,7 +60000,7 @@ function f52 windowsQuoted(l0: Str): Str
     local l34: Str
     local l35: Str
   b0:
-    l4 = StrCompare(NotEqual) l0, s2
+    l4 = StrCompare(NotEqual) l0, s4
     l3 = l4
     branch l3, b1, b2
   b1:
@@ -60809,77 +60798,55 @@ function f55 systemNamed(): Record(16)
 function f56 architectureNamed(): Record(17)
     local l0: Str
     local l1: Str // name
-    local l2: Bool
-    local l3: Int
-    local l4: Int // buffer
-    local l5: Int
-    local l6: Int
-    local l7: Int
-    local l8: Int
-    local l9: Str
-    local l10: Record(17)
-    local l11: Str
-    local l12: Bool
-    local l13: Record(17)
-    local l14: Bool
-    local l15: Record(17)
-    local l16: Bool
-    local l17: Record(17)
-    local l18: Bool
-    local l19: Record(17)
-    local l20: Record(17)
+    local l2: Record(17)
+    local l3: Str
+    local l4: Bool
+    local l5: Record(17)
+    local l6: Bool
+    local l7: Record(17)
+    local l8: Bool
+    local l9: Record(17)
+    local l10: Bool
+    local l11: Record(17)
+    local l12: Record(17)
   b0:
-    l0 = call f106()
+    l0 = call f105()
     l1 = l0
-    l2 = StrCompare(Equal) l1, s2
-    branch l2, b1, b2
+    l3 = l1
+    l4 = StrCompare(Equal) l3, s25
+    branch l4, b3, b2
   b1:
-    l3 = koji_unsafe_allocate([Value(Int(4096))])
-    l4 = l3
-    l5 = uname([Value(Local(4))])
-    l6 = call f105()
-    l7 = IntMul 4, l6
-    l8 = koji_unsafe_offset([Value(Local(4)), Value(Local(7))])
-    l9 = call f78(l8)
-    l1 = l9
-    koji_unsafe_free([Value(Local(4))])
-    goto b2
+    return l2
   b2:
-    l11 = l1
-    l12 = StrCompare(Equal) l11, s25
-    branch l12, b5, b4
+    l6 = StrCompare(Equal) l3, s26
+    branch l6, b5, b4
   b3:
-    return l10
+    l5 = record variant 0 ()
+    l2 = l5
+    goto b1
   b4:
-    l14 = StrCompare(Equal) l11, s26
-    branch l14, b7, b6
+    l8 = StrCompare(Equal) l3, s27
+    branch l8, b7, b6
   b5:
-    l13 = record variant 0 ()
-    l10 = l13
-    goto b3
+    l7 = record variant 0 ()
+    l2 = l7
+    goto b1
   b6:
-    l16 = StrCompare(Equal) l11, s27
-    branch l16, b9, b8
+    l10 = StrCompare(Equal) l3, s28
+    branch l10, b9, b8
   b7:
-    l15 = record variant 0 ()
-    l10 = l15
-    goto b3
+    l9 = record variant 1 ()
+    l2 = l9
+    goto b1
   b8:
-    l18 = StrCompare(Equal) l11, s28
-    branch l18, b11, b10
+    l12 = record variant 2 (l1)
+    l2 = l12
+    goto b1
   b9:
-    l17 = record variant 1 ()
-    l10 = l17
-    goto b3
+    l11 = record variant 1 ()
+    l2 = l11
+    goto b1
   b10:
-    l20 = record variant 2 (l1)
-    l10 = l20
-    goto b3
-  b11:
-    l19 = record variant 1 ()
-    l10 = l19
-    goto b3
-  b12:
     unreachable
 
 function f57 readInt32(l0: Int, l1: Int): Int
@@ -61271,7 +61238,7 @@ function f66 split(l0: Str, l1: Str, l2: Int): List(Str)
     l4 = IntCompare(Equal) l3, 0
     branch l4, b1, b2
   b1:
-    koji_std_panic([Value(Str(3)), Place(Local(2))])
+    koji_std_panic([Value(Str(2)), Place(Local(2))])
     unreachable
   b2:
     l5 = koji_unsafe_string_bytes([Value(Local(0))])
@@ -61335,7 +61302,7 @@ function f67 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
     l5 = IntCompare(Equal) l4, 0
     branch l5, b1, b2
   b1:
-    koji_std_panic([Value(Str(4)), Place(Local(3))])
+    koji_std_panic([Value(Str(3)), Place(Local(3))])
     unreachable
   b2:
     l6 = call f68(l0, l1, 0)
@@ -61347,7 +61314,7 @@ function f67 replace(l0: Str, l1: Str, l2: Str, l3: Int): Str
   b4:
     l9 = koji_unsafe_string_bytes([Value(Local(0))])
     l10 = l9
-    l11 = s2
+    l11 = s4
     l12 = 0
     goto b5
   b5:
@@ -61651,7 +61618,7 @@ function f73 textOf(l0: Int, l1: Int): Str
     local l22: Str
     local l23: Str
   b0:
-    l2 = s2
+    l2 = s4
     l3 = 0
     l4 = 0
     goto b1
@@ -63723,7 +63690,7 @@ function f91 powerOfTwo(l0: Int): Float
 function f92 readLine(l0: Int): Record(9)
     local l1: Record(9)
   b0:
-    l1 = call f93(s2, l0)
+    l1 = call f93(s4, l0)
     return l1
 
 function f93 readLineAfter(l0: Str, l1: Int): Record(9)
@@ -63796,7 +63763,7 @@ function f94 decimalOf(l0: Str): Record(23)
 function f95 openMode(l0: Str): Str
     local l1: Str
   b0:
-    l1 = call f107(l0)
+    l1 = call f106(l0)
     return l1
 
 function f96 directoryRefused(): Bool
@@ -63806,7 +63773,7 @@ function f96 directoryRefused(): Bool
 function f97 descriptor(l0: Int): Int
     local l1: Int
   b0:
-    l1 = call f108(l0)
+    l1 = call f107(l0)
     return l1
 
 function f98 entryNameAt(): Int
@@ -63815,13 +63782,13 @@ function f98 entryNameAt(): Int
 
 function f99 closeDirectory(l0: Int): Void
   b0:
-    call f109(l0)
+    call f108(l0)
     return
 
 function f100 changeMode(l0: Int, l1: Int): Bool
     local l2: Bool
   b0:
-    l2 = call f110(l0, l1)
+    l2 = call f109(l0, l1)
     return l2
 
 function f101 backslashes(): Bool
@@ -63831,13 +63798,13 @@ function f101 backslashes(): Bool
 function f102 monotonicSeconds(): Decimal
     local l0: Decimal
   b0:
-    l0 = call f111(1)
+    l0 = call f110(1)
     return l0
 
 function f103 realtimeSeconds(): Decimal
     local l0: Decimal
   b0:
-    l0 = call f111(0)
+    l0 = call f110(0)
     return l0
 
 function f104 executableInto(l0: Int, l1: Int): Int
@@ -63874,33 +63841,31 @@ function f104 executableInto(l0: Int, l1: Int): Int
   b5:
     return l8
 
-function f105 unameField(): Int
+function f105 architectureName(): Str
+    local l0: Str
   b0:
-    return 65
+    l0 = call f111(65)
+    return l0
 
-function f106 fixedArchitecture(): Str
-  b0:
-    return s2
-
-function f107 posixOpenMode(l0: Str): Str
+function f106 posixOpenMode(l0: Str): Str
     local l1: Str
   b0:
     l1 = StrConcat l0, s0
     return l1
 
-function f108 posixDescriptor(l0: Int): Int
+function f107 posixDescriptor(l0: Int): Int
     local l1: Int
   b0:
     l1 = fileno([Value(Local(0))])
     return l1
 
-function f109 posixCloseDirectory(l0: Int): Void
+function f108 posixCloseDirectory(l0: Int): Void
     local l1: Int
   b0:
     l1 = closedir([Value(Local(0))])
     return
 
-function f110 posixChangeMode(l0: Int, l1: Int): Bool
+function f109 posixChangeMode(l0: Int, l1: Int): Bool
     local l2: Int
     local l3: Bool
   b0:
@@ -63908,7 +63873,7 @@ function f110 posixChangeMode(l0: Int, l1: Int): Bool
     l3 = IntCompare(Equal) l2, 0
     return l3
 
-function f111 posixClock(l0: Int): Decimal
+function f110 posixClock(l0: Int): Decimal
     local l1: Int
     local l2: Int // time
     local l3: Int
@@ -63936,6 +63901,25 @@ function f111 posixClock(l0: Int): Decimal
     l11 = DecimalDiv l9, l10
     l12 = DecimalAdd l8, l11
     return l12
+
+function f111 posixArchitectureName(l0: Int): Str
+    local l1: Int
+    local l2: Int // buffer
+    local l3: Int
+    local l4: Int
+    local l5: Int
+    local l6: Str
+    local l7: Str // name
+  b0:
+    l1 = koji_unsafe_allocate([Value(Int(4096))])
+    l2 = l1
+    l3 = uname([Value(Local(2))])
+    l4 = IntMul 4, l0
+    l5 = koji_unsafe_offset([Value(Local(2)), Value(Local(4))])
+    l6 = call f78(l5)
+    l7 = l6
+    koji_unsafe_free([Value(Local(2))])
+    return l7
 
 function f112 drop Record(1)(l0: Record(1)): Void
     local l1: Record(1)

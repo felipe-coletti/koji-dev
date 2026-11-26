@@ -534,14 +534,10 @@ export function systemRandom(bytes: Address, size: int): boolean {
     return BCryptGenRandom(nullAddress(), bytes, size, 2) == 0
 }
 
-// Where the name is in an entry of koji_windows_readdir (as in Linux's `struct dirent`).
-export function entryNameAt(): int {
-    return 19
-}
-
-// Its certificates are in its store, not in directories of files (the list built in serves).
-export function certificateDirectories(): boolean {
-    return false
+// The files of a directory of certificates: none (its own are in its store; the list built in
+// serves).
+export function certificateFiles(path: string): string[] {
+    return []
 }
 
 // The standard streams as bytes (_O_BINARY), as on other systems: no line breaks of two characters.

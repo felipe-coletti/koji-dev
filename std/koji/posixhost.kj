@@ -2,12 +2,14 @@
 // (Linux, macOS), for their modules of `koji:host` (koji:linuxhost, koji:macoshost). Compiled with
 // the programs, as the public modules are: no globals.
 
-import { Address, CInt, allocate, free, read } from 'koji:unsafe'
+import { Address, CInt, allocate, free, offset, read } from 'koji:unsafe'
+import { cText } from 'koji:core'
 
 extern function fileno(file: Address): CInt
 extern function closedir(directory: Address): CInt
 extern function chmod(path: Address, mode: CInt): CInt
 extern function clock_gettime(clock: CInt, time: Address): CInt
+extern function uname(buffer: Address): CInt
 
 // The mode of fopen for 'r', 'w' or 'a': `e`, the descriptor is not given to the programs this one
 // runs.
@@ -35,4 +37,14 @@ export function posixClock(id: int): decimal {
     immut nanoseconds: int = read(time, 8)
     free(time)
     return decimal(seconds) + decimal(nanoseconds) / 1000000000
+}
+
+// The name of the processor that `uname` gives: the fifth field of its record, whose fields have
+// `field` bytes on the system.
+export function posixArchitectureName(field: int): string {
+    immut buffer = allocate(4096)
+    uname(buffer)
+    immut name = cText(offset(buffer, 4 * field))
+    free(buffer)
+    return name
 }

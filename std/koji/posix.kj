@@ -4,6 +4,7 @@
 // system) call these with their own numbers.
 
 import system
+import { cString, cText } from 'koji:core'
 import { Address, CInt, CSize, CVariadic, allocate, distance, floatControl, free, nullAddress, offset, read, taskEntry, valgrind, write } from 'koji:unsafe'
 
 extern function mmap(address: Address, size: CSize, protection: CInt, flags: CInt, fd: CInt, at: int): Address
@@ -22,6 +23,9 @@ extern function writev(fd: CInt, buffers: Address, count: CInt): int
 extern function fdopen(fd: CInt, mode: Address): Address
 extern function time(place: Address): int
 extern function getentropy(buffer: Address, size: CSize): CInt
+extern function opendir(path: Address): Address
+extern function readdir(directory: Address): Address
+extern function closedir(directory: Address): CInt
 extern function memmem(haystack: Address, haystackSize: CSize, needle: Address, needleSize: CSize): Address
 extern function send(fd: CInt, bytes: Address, size: CSize, flags: CInt): int
 extern function recv(fd: CInt, bytes: Address, size: CSize, flags: CInt): int
@@ -211,4 +215,29 @@ export function posixOptionOn(fd: int, level: int, name: int) {
 // The first place of the needle in the haystack, or none (memmem).
 export function posixFind(haystack: Address, haystackSize: int, needle: Address, needleSize: int): Address {
     return memmem(haystack, haystackSize, needle, needleSize)
+}
+
+// The names of the entries of the directory `path` but those that start with a dot (`.`, `..`,
+// hidden ones), `nameAt` where `d_name` is in a `struct dirent` of the system; none when it cannot
+// be read.
+export function posixDirectoryNames(path: string, nameAt: int): string[] {
+    immut cPath = cString(path)
+    immut directory = opendir(cPath)
+    free(cPath)
+    mut names: string[] = []
+
+    if (distance(nullAddress(), directory) == 0) { return names }
+
+    while (true) {
+        immut entry = readdir(directory)
+
+        if (distance(nullAddress(), entry) == 0) { break }
+
+        immut name = cText(offset(entry, nameAt))
+
+        if (not name.startsWith('.')) { names.push(name) }
+    }
+
+    closedir(directory)
+    return names
 }

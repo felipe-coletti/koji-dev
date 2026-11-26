@@ -3,7 +3,7 @@
 // Compiled with the programs: no globals.
 
 import { Address, CInt, CSize, allocate, free, write } from 'koji:unsafe'
-import { posixChangeMode, posixClock, posixCloseDirectory, posixDescriptor, posixOpenMode } from 'koji:posixhost'
+import { posixArchitectureName, posixChangeMode, posixClock, posixCloseDirectory, posixDescriptor, posixOpenMode } from 'koji:posixhost'
 
 extern function executablePathInto(buffer: Address, size: Address): CInt from '_NSGetExecutablePath'
 extern function strlen(text: Address): CSize
@@ -59,11 +59,7 @@ export function executableInto(buffer: Address, size: int): int {
     return if (failed != 0) { -2 } else { strlen(buffer) }
 }
 
-// The size of a field of the record of `uname` (the processor is the fifth).
-export function unameField(): int {
-    return 256
-}
-
-export function fixedArchitecture(): string {
-    return ''
+// The name of the processor (uname: fields of 256 bytes).
+export function architectureName(): string {
+    return posixArchitectureName(256)
 }

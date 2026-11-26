@@ -5,7 +5,7 @@
 
 import system
 import { SocketNumbers } from 'koji:sockets'
-import { posixClose, posixDnsMessage, posixFind, posixNanoseconds, posixOutputReady, posixPipe, posixPrivate, posixRandom, posixRead, posixReceive, posixSeconds, posixSend, posixSetWaiting, posixSleep, posixStackFree, posixStackNew, posixStackStart, posixStream, posixThreadStart, posixWrite, posixWritev } from 'koji:posix'
+import { posixClose, posixDirectoryNames, posixDnsMessage, posixFind, posixNanoseconds, posixOutputReady, posixPipe, posixPrivate, posixRandom, posixRead, posixReceive, posixSeconds, posixSend, posixSetWaiting, posixSleep, posixStackFree, posixStackNew, posixStackStart, posixStream, posixThreadStart, posixWrite, posixWritev } from 'koji:posix'
 import { Address, CInt, read, write } from 'koji:unsafe'
 
 extern function epoll_create1(flags: CInt): CInt
@@ -189,14 +189,9 @@ export function systemRandom(bytes: Address, size: int): boolean {
     return posixRandom(bytes, size)
 }
 
-// Where `d_name` is in a `struct dirent`.
-export function entryNameAt(): int {
-    return 19
-}
-
-// Whether the system keeps its certificates in directories of files.
-export function certificateDirectories(): boolean {
-    return true
+// The files of a directory of certificates (`d_name` at 19 in a `struct dirent`).
+export function certificateFiles(path: string): string[] {
+    return posixDirectoryNames(path, 19)
 }
 
 // The first place of the needle in the haystack, or none (memmem).
