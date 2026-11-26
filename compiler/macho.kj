@@ -8,29 +8,15 @@
 // object is an ARM64_RELOC_ADDEND before the relocation; on x86-64, addends are in the code, a
 // displacement counted from the end of its field (ELF's addend and 4).
 
-// A symbol defined in the object: its section (1 the code, 2 the constants, 3 the data, 4 the
-// zeros), its place in it, whether others may use it.
-export type MachSymbol = {
-    name: string
-    section: int
-    value: int
-    global: boolean
-}
-
-// A relocation of the code (section 1) or of the data (3), with a kind of ELF for AArch64 (257, the
-// address of a word of data), to a symbol or a section of ELF (`.text`, `.rodata`, `.data`, `.bss`)
-// plus an addend.
-export type MachRelocation = {
-    section: int
-    at: int
-    symbol: string
-    kind: int
-    addend: int
-}
+import { ObjectFile, ObjectRelocation, ObjectSymbol } from 'objects.kj'
 
 immut sectionNames = ['', '.text', '.rodata', '.data', '.bss']
 
-export function machObject(arm: boolean, given: byte[], rodata: byte[], givenData: byte[], bss: int, defined: MachSymbol[], relocations: MachRelocation[]): byte[] {
+export function machObject(file: ObjectFile): byte[] {
+    return machBytes(file.arm, file.code, file.rodata, file.data, file.bss, file.symbols, file.relocations)
+}
+
+function machBytes(arm: boolean, given: byte[], rodata: byte[], givenData: byte[], bss: int, defined: ObjectSymbol[], relocations: ObjectRelocation[]): byte[] {
     mut text = given
     mut data = givenData
     // The addresses of the sections (from 0, one after the other).
@@ -40,8 +26,8 @@ export function machObject(arm: boolean, given: byte[], rodata: byte[], givenDat
     immut addresses = [0, 0, rodataAddress, dataAddress, bssAddress]
     // The symbols: those defined, then the private ones a relocation to a section needs, then those
     // of other objects.
-    mut locals: MachSymbol[] = []
-    mut globals: MachSymbol[] = []
+    mut locals: ObjectSymbol[] = []
+    mut globals: ObjectSymbol[] = []
 
     for symbol in defined {
         if (symbol.global) {
@@ -70,7 +56,7 @@ export function machObject(arm: boolean, given: byte[], rodata: byte[], givenDat
             if (not places.has(key)) {
                 immut name = `lkoji.${section}.${offset}`
                 places[key] = name
-                locals.push({ name: name, section: section, value: offset, global: false })
+                locals.push({ name: name, section: section, value: offset, size: 0, global: false })
             }
 
             continue
@@ -256,7 +242,7 @@ export function machObject(arm: boolean, given: byte[], rodata: byte[], givenDat
 // Where the symbol of a relocation to a section goes in it, and the addend left (ELF's addend on
 // arm64 and for the data; on x86-64 the code counts from the end of the field, ELF's from its start,
 // and the symbol stays inside its section).
-function placeOf(relocation: MachRelocation, arm: boolean): int[] {
+function placeOf(relocation: ObjectRelocation, arm: boolean): int[] {
     if (arm or relocation.section == 3) { return [relocation.addend, 0] }
 
     immut value = relocation.addend + 4

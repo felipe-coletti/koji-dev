@@ -1,0 +1,90 @@
+// What the native backend (native.kj) gives the writer of the objects of each system (elf.kj for
+// Linux, macho.kj for macOS, coff.kj for Windows): the same code and data, symbols and
+// relocations, which each writes in its own format.
+
+// A symbol defined in the object: its section (1 the code, 2 the constants, 3 the data, 4 the
+// zeros), its place and size in it, whether others may use it. The local ones come first.
+export type ObjectSymbol = {
+    name: string
+    section: int
+    value: int
+    size: int
+    global: boolean
+}
+
+// A relocation of the code (section 1) or of the data (3), with a kind of ELF (of x86-64, or of
+// AArch64 on arm64; 257, the address of a word, for the data), to a symbol or a section of ELF
+// (`.text`, `.rodata`, `.data`, `.bss`) plus an addend.
+export type ObjectRelocation = {
+    section: int
+    at: int
+    symbol: string
+    kind: int
+    addend: int
+}
+
+// The object of a program or of the library: for arm64 or x86-64, its sections (code, constants,
+// data, and the size of the zeros), symbols and relocations.
+export type ObjectFile = {
+    arm: boolean
+    code: byte[]
+    rodata: byte[]
+    data: byte[]
+    bss: int
+    symbols: ObjectSymbol[]
+    relocations: ObjectRelocation[]
+}
+
+// The bytes of UTF-8 of a text.
+export function utf8(text: string): byte[] {
+    mut bytes: byte[] = []
+
+    for c in text {
+        immut code = c.code()
+
+        if (code < 0x80) {
+            bytes.push(byte(code))
+            continue
+        }
+
+        if (code < 0x800) {
+            bytes.push(byte(0xC0 | code >> 6))
+            bytes.push(byte(0x80 | code & 0x3F))
+            continue
+        }
+
+        if (code < 0x10000) {
+            bytes.push(byte(0xE0 | code >> 12))
+            bytes.push(byte(0x80 | code >> 6 & 0x3F))
+            bytes.push(byte(0x80 | code & 0x3F))
+            continue
+        }
+
+        bytes.push(byte(0xF0 | code >> 18))
+        bytes.push(byte(0x80 | code >> 12 & 0x3F))
+        bytes.push(byte(0x80 | code >> 6 & 0x3F))
+        bytes.push(byte(0x80 | code & 0x3F))
+    }
+
+    return bytes
+}
+
+// A number in `count` bytes, the lowest first.
+export function putBytes(mut out: byte[], number: int, count: int) {
+    for i in range(count) {
+        out.push(byte(number >> (8 * i) & 0xFF))
+    }
+}
+
+export function putWord(mut out: byte[], number: int) {
+    putBytes(mut out, number, 8)
+}
+
+export function putInt32(mut out: byte[], number: int) {
+    putBytes(mut out, number, 4)
+}
+
+// Adds the bytes at the end, in place (`out` read for the last time: see `koji_list_append`).
+export function append(mut out: byte[], bytes: byte[]) {
+    out = out + bytes
+}

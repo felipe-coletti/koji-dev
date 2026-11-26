@@ -19,7 +19,7 @@ import { lastUses, defs, uses, terminatorUses, successors, targetReads } from 'l
 import { addBit, removeBit, hasBit, bitMembers } from 'bits.kj'
 import { borrowedLocals, changes } from 'borrow.kj'
 import { floatWord, decimalBits } from 'constants.kj'
-import { targetPlatform } from 'inline.kj'
+import { armFeatures, targetArm, windowsCalls, AlwaysThere, FromAuxiliaryVector, NoArmBuild } from 'systems.kj'
 
 // What the lowering needs to know of the object: the offsets of the globals (in .bss), of the
 // string literals and of the descriptions of the records (in .data), the borrowed parameters of
@@ -1568,7 +1568,7 @@ function Lowering.movable(self, local: int, block: int, position: int): int {
 // A function of the C library called by the lowering itself: on Windows, by the convention of
 // Windows (see `callForeign`).
 function cCallee(name: string, count: int): MCallee {
-    return if (targetPlatform() / 3 == 2) { MVariadic(name, count) } else { MExternal(name) }
+    return if (windowsCalls()) { MVariadic(name, count) } else { MExternal(name) }
 }
 
 function makesCalls(routine: IrFunction): boolean {
@@ -3166,28 +3166,25 @@ function Lowering.libraryCall(mut self, dest: Option[int], name: string, args: S
         return
     }
 
-    // On arm64, the instructions of AES and PMULL as the system tells (getauxval(AT_HWCAP): bits 3
-    // and 4).
-    // On macOS and arm64 (Apple's processors), they always are.
-    if (name == 'koji_aes_available' and targetPlatform() == 4) {
-        match (dest) {
-            Some(local) => self.current.push(MMove(local, MImm(1)))
-            None => {}
-        }
-
-        return
-    }
-
-    if (name == 'koji_aes_available' and targetPlatform() == 1) {
+    // On arm64, the instructions of AES and PMULL as the system tells (systems.kj).
+    if (name == 'koji_aes_available' and targetArm()) {
         immut local = match (dest) {
             Some(found) => found
             None => return
         }
-        immut capabilities = self.temporary()
-        self.current.push(MCall(MExternal('getauxval'), [MImm(16)], [capabilities]))
-        self.current.push(MBinary(capabilities, 'shr', MReg(capabilities), MImm(3), -1))
-        self.current.push(MBinary(capabilities, 'and', MReg(capabilities), MImm(3), -1))
-        self.current.push(MSet(local, 'eq', MReg(capabilities), MImm(3)))
+
+        match (armFeatures()) {
+            AlwaysThere => self.current.push(MMove(local, MImm(1)))
+            FromAuxiliaryVector => {
+                immut capabilities = self.temporary()
+                self.current.push(MCall(MExternal('getauxval'), [MImm(16)], [capabilities]))
+                self.current.push(MBinary(capabilities, 'shr', MReg(capabilities), MImm(3), -1))
+                self.current.push(MBinary(capabilities, 'and', MReg(capabilities), MImm(3), -1))
+                self.current.push(MSet(local, 'eq', MReg(capabilities), MImm(3)))
+            }
+            NoArmBuild => self.current.push(MMove(local, MImm(0)))
+        }
+
         return
     }
 
@@ -3301,7 +3298,7 @@ function Lowering.libraryCall(mut self, dest: Option[int], name: string, args: S
     // On Windows, a function of C (of a DLL) is called by its convention, not by the one of the
     // code of Koji (System V): as a variadic one with all its arguments fixed. Not those of the
     // library (`koji_...`), which modules declare too.
-    if (targetPlatform() / 3 == 2 and not variadic and not symbol.startsWith('koji_')) {
+    if (windowsCalls() and not variadic and not symbol.startsWith('koji_')) {
         variadic = true
         fixed = values.length()
     }

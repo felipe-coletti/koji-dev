@@ -6,14 +6,18 @@
 // the code), an address of the data has its addend in its word; a relocation to a section is one
 // to the symbol of the section. Names keep no underscore (x86-64).
 
-import { MachSymbol, MachRelocation } from 'macho.kj'
+import { ObjectFile, ObjectRelocation, ObjectSymbol } from 'objects.kj'
 
 immut sectionNames = ['', '.text', '.rdata', '.data', '.bss']
 immut elfSections = ['', '.text', '.rodata', '.data', '.bss']
 
+export function coffObject(file: ObjectFile): byte[] {
+    return coffBytes(file.code, file.rodata, file.data, file.bss, file.symbols, file.relocations)
+}
+
 // `defined`: the symbols of the object (its section 1 to 4, its place); `relocations`: of the code
 // (section 1) or of the data (3), with a kind of ELF for x86-64.
-export function coffObject(given: byte[], rodata: byte[], givenData: byte[], bss: int, defined: MachSymbol[], relocations: MachRelocation[]): byte[] {
+function coffBytes(given: byte[], rodata: byte[], givenData: byte[], bss: int, defined: ObjectSymbol[], relocations: ObjectRelocation[]): byte[] {
     mut text = given
     mut data = givenData
     // The symbols: the four sections (with their records of definition), those defined, then those

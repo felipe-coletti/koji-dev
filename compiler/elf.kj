@@ -1,0 +1,204 @@
+// The relocatable object of ELF64 (Linux, x86-64 or arm64) of the code and the data of the native
+// backend (native.kj), the counterpart of its objects of Mach-O and COFF: the sections .text,
+// .rodata, .data and .bss, their relocations, the symbols (the sections, a file, the functions of
+// Koji named as in Koji, those defined for others, those of other objects) and their names.
+
+import { ObjectFile, ObjectRelocation, append, putBytes, putInt32, putWord, utf8 } from 'objects.kj'
+
+type Section = {
+    name: string
+    kind: int
+    flags: int
+    bytes: byte[]
+    size: int
+    link: int
+    info: int
+    alignment: int
+    entry: int
+}
+
+type Symbol = {
+    name: string
+    info: int
+    section: int
+    value: int
+    size: int
+}
+
+export function elfObject(file: ObjectFile): byte[] {
+    // The sections: 1 .text, 2 .rodata, 3 .data, 4 .bss, then the relocations and the tables.
+    immut sectionIndex: Map[string, int] = ['.text': 1, '.rodata': 2, '.data': 3, '.bss': 4]
+    mut symbols: Symbol[] = [{ name: '', info: 0, section: 0, value: 0, size: 0 }]
+
+    // The sections as local symbols (STT_SECTION: symbol i is section i), the file of the local
+    // symbols (STT_FILE, absolute: named the same for every program, so that the linker does not
+    // name it after the object, a temporary file, and builds the same program the same), then the
+    // functions of Koji (local, STT_FUNC), then the global ones.
+    for i in range(1, 5) {
+        symbols.push({ name: '', info: 3, section: i, value: 0, size: 0 })
+    }
+
+    symbols.push({ name: 'koji', info: 4, section: 0xFFF1, value: 0, size: 0 })
+
+    for each in file.symbols {
+        if (not each.global) { symbols.push({ name: each.name, info: 2, section: each.section, value: each.value, size: each.size }) }
+    }
+
+    immut firstGlobal = symbols.length()
+    mut external: Map[string, int] = [:]
+
+    // The symbols it defines for others (a relocation to one of them uses it, not another undefined).
+    for each in file.symbols {
+        if (each.global) {
+            external[each.name] = symbols.length()
+            symbols.push({ name: each.name, info: if (each.section == 1) { 0x12 } else { 0x11 }, section: each.section, value: each.value, size: each.size })
+        }
+    }
+
+    mut textRelocations: ObjectRelocation[] = []
+    mut dataRelocations: ObjectRelocation[] = []
+
+    for relocation in file.relocations {
+        if (relocation.section == 1) { textRelocations.push(relocation) } else { dataRelocations.push(relocation) }
+    }
+    for relocation in file.relocations {
+        if (sectionIndex.has(relocation.symbol) or external.has(relocation.symbol)) { continue }
+
+        external[relocation.symbol] = symbols.length()
+        symbols.push({ name: relocation.symbol, info: 0x10, section: 0, value: 0, size: 0 })
+    }
+
+    // The relocations: offset, (symbol << 32) | type, addend.
+    immut rela = relocationBytes(textRelocations, sectionIndex, external, file.arm)
+    immut relaData = relocationBytes(dataRelocations, sectionIndex, external, file.arm)
+    mut strtab: byte[] = [0]
+    mut symtab: byte[] = []
+
+    for symbol in symbols {
+        mut name = 0
+
+        if (symbol.name != '') {
+            name = strtab.length()
+            append(mut strtab, utf8(symbol.name))
+            strtab.push(0)
+        }
+
+        putInt32(mut symtab, name)
+        symtab.push(byte(symbol.info))
+        symtab.push(0)
+        putBytes(mut symtab, symbol.section, 2)
+        putWord(mut symtab, symbol.value)
+        putWord(mut symtab, symbol.size)
+    }
+
+    mut sections: Section[] = [
+        { name: '', kind: 0, flags: 0, bytes: [], size: 0, link: 0, info: 0, alignment: 0, entry: 0 },
+        // SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR.
+        { name: '.text', kind: 1, flags: 6, bytes: file.code, size: file.code.length(), link: 0, info: 0, alignment: 16, entry: 0 },
+        { name: '.rodata', kind: 1, flags: 2, bytes: file.rodata, size: file.rodata.length(), link: 0, info: 0, alignment: 8, entry: 0 },
+        // SHF_ALLOC | SHF_WRITE.
+        { name: '.data', kind: 1, flags: 3, bytes: file.data, size: file.data.length(), link: 0, info: 0, alignment: 8, entry: 0 },
+        // SHT_NOBITS.
+        { name: '.bss', kind: 8, flags: 3, bytes: [], size: file.bss, link: 0, info: 0, alignment: 16, entry: 0 },
+        // SHT_RELA, linked to .symtab (7), for .text (1) and .data (3); SHF_INFO_LINK.
+        { name: '.rela.text', kind: 4, flags: 0x40, bytes: rela, size: rela.length(), link: 7, info: 1, alignment: 8, entry: 24 },
+        { name: '.rela.data', kind: 4, flags: 0x40, bytes: relaData, size: relaData.length(), link: 7, info: 3, alignment: 8, entry: 24 },
+        // SHT_SYMTAB, its strings in .strtab (8), the first global symbol.
+        { name: '.symtab', kind: 2, flags: 0, bytes: symtab, size: symtab.length(), link: 8, info: firstGlobal, alignment: 8, entry: 24 },
+        { name: '.strtab', kind: 3, flags: 0, bytes: strtab, size: strtab.length(), link: 0, info: 0, alignment: 1, entry: 0 },
+        // No executable stack.
+        { name: '.note.GNU-stack', kind: 1, flags: 0, bytes: [], size: 0, link: 0, info: 0, alignment: 1, entry: 0 },
+        { name: '.shstrtab', kind: 3, flags: 0, bytes: [], size: 0, link: 0, info: 0, alignment: 1, entry: 0 }
+    ]
+    mut shstrtab: byte[] = [0]
+    mut names: int[] = []
+
+    for section in sections {
+        if (section.name == '') {
+            names.push(0)
+            continue
+        }
+
+        names.push(shstrtab.length())
+        append(mut shstrtab, utf8(section.name))
+        shstrtab.push(0)
+    }
+
+    immut last = sections.length() - 1
+    sections[last].bytes = shstrtab
+    sections[last].size = shstrtab.length()
+
+    // The header (64 bytes), the contents of the sections, then their headers.
+    mut out: byte[] = []
+    mut offsets: int[] = [0]
+    mut body: byte[] = []
+
+    for i in range(1, sections.length()) {
+        while ((64 + body.length()) % 16 != 0) {
+            body.push(0)
+        }
+
+        offsets.push(64 + body.length())
+
+        if (sections[i].kind != 8) { append(mut body, sections[i].bytes) }
+    }
+
+    while ((64 + body.length()) % 8 != 0) {
+        body.push(0)
+    }
+
+    immut headers = 64 + body.length()
+    // e_ident: ELF, 64 bits, little-endian, version 1, System V.
+    out = out + [0x7F, 0x45, 0x4C, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    putBytes(mut out, 1, 2)
+    // EM_X86_64, or EM_AARCH64.
+    putBytes(mut out, if (file.arm) { 183 } else { 62 }, 2)
+    putInt32(mut out, 1)
+    putWord(mut out, 0)
+    putWord(mut out, 0)
+    putWord(mut out, headers)
+    putInt32(mut out, 0)
+    putBytes(mut out, 64, 2)
+    putBytes(mut out, 0, 2)
+    putBytes(mut out, 0, 2)
+    putBytes(mut out, 64, 2)
+    putBytes(mut out, sections.length(), 2)
+    putBytes(mut out, last, 2)
+    append(mut out, body)
+
+    for i in range(sections.length()) {
+        immut section = sections[i]
+        putInt32(mut out, names[i])
+        putInt32(mut out, section.kind)
+        putWord(mut out, section.flags)
+        putWord(mut out, 0)
+        putWord(mut out, if (i == 0) { 0 } else { offsets[i] })
+        putWord(mut out, section.size)
+        putInt32(mut out, section.link)
+        putInt32(mut out, section.info)
+        putWord(mut out, section.alignment)
+        putWord(mut out, section.entry)
+    }
+
+    return out
+}
+
+// The relocations: offset, (symbol << 32) | type, addend. The address of a word (257, as Mach-O and
+// COFF have it) is R_X86_64_64 on x86-64, R_AARCH64_ABS64 on arm64.
+function relocationBytes(relocations: ObjectRelocation[], sectionIndex: Map[string, int], external: Map[string, int], arm: boolean): byte[] {
+    mut bytes: byte[] = []
+
+    for relocation in relocations {
+        immut symbol = match (sectionIndex.get(relocation.symbol)) {
+            Some(section) => section
+            None => external[relocation.symbol]
+        }
+        putWord(mut bytes, relocation.at)
+        immut word = relocation.kind == 257 or relocation.kind == 1
+        immut kind = if (word) { if (arm) { 257 } else { 1 } } else { relocation.kind }
+        putWord(mut bytes, symbol << 32 | kind)
+        putWord(mut bytes, relocation.addend)
+    }
+
+    return bytes
+}

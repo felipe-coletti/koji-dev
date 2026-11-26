@@ -60,8 +60,11 @@ A program goes through these files of `compiler/`, in order:
 5.  `mir.kj`, `mirlower.kj`, `mirregs.kj`...: the machine IR, which knows no processor, and the
     allocation of its registers.
 6.  `x64.kj` and `a64.kj`: the machine code of each processor; `native.kj` drives them.
-7.  `macho.kj`, `coff.kj` (and the ELF of `native.kj`): the object files; `linker.kj`,
-    `machlink.kj` and `pelink.kj`: the linkers of Linux, macOS and Windows.
+7.  `elf.kj`, `macho.kj` and `coff.kj`: the object files of Linux, macOS and Windows (from the same
+    `ObjectFile`, `objects.kj`); `linker.kj`, `machlink.kj` and `pelink.kj`: their linkers.
+
+What differs between systems is decided in `systems.kj`, each decision a `match` on the system:
+see [doc/internals.md](doc/internals.md) for adding or removing one.
 
 `main.kj` holds the commands (`run`, `build`, `test`, `fmt`...), `lsp.kj` the language server and
 `format.kj` the formatter. [doc/internals.md](doc/internals.md) explains why each part is the way

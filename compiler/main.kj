@@ -11,11 +11,10 @@ import { dumpTypes, check, checkLibrary, sourceError } from 'checker.kj'
 import { lower, lowerTests } from 'lower.kj'
 import { IrExtern, IrProgram, programText } from 'ir.kj'
 import { generateNative } from 'native.kj'
-import { inlineSmall, targetPlatform } from 'inline.kj'
-import { machArchive } from 'macho.kj'
+import { inlineSmall } from 'inline.kj'
+import { libraryArchive, targetArm, targetSystem, Linux, MacOS, Windows } from 'systems.kj'
 import { Dylib, dylibIdentity, linkMach, machArchiveObjects, tbdIdentity } from 'machlink.kj'
-import { archive, archiveNamed, archiveObjects, linkExecutable, sharedName, sharedSymbols } from 'linker.kj'
-import { coffGlobals } from 'coff.kj'
+import { archiveObjects, linkExecutable, sharedName, sharedSymbols } from 'linker.kj'
 import { linkWindows } from 'pelink.kj'
 import { serve } from 'lsp.kj'
 import { format } from 'format.kj'
@@ -301,37 +300,43 @@ function linkNative(program: IrProgram, output: string): Result[void, string] {
         if (not (library in ['c', 'm', 'pthread'])) { foreign.push(library) }
     }
 
-    // For macOS, its linker of Mach-O (machlink.kj), with the dynamic libraries of the blocks
-    // `foreign` (`foreign 'sqlite3'`: libsqlite3.dylib, its file or its stub in the SDK).
-    if (chosen != 'system' and targetPlatform() / 3 == 1) {
-        match (linkMachOwn(object, runtime, output, program.externs, foreign)) {
-            Ok(_) => return Ok()
-            Err(message) => {
-                if (chosen == 'koji') { return Err(`compile error: ${message}`) }
+    // The linker of the system compiled for (Koji's, else the system's: see above).
+    match (targetSystem()) {
+        // Linux: Koji's linker of ELF (linker.kj), with the shared libraries of the blocks `foreign`.
+        Linux => {
+            if (chosen != 'system') {
+                match (linkOwn(object, runtime, output, foreign)) {
+                    Ok(_) => return Ok()
+                    Err(message) => {
+                        if (chosen == 'koji') { return Err(`compile error: ${message}`) }
+                    }
+                }
             }
         }
-    }
-
-    // For Windows, its linker of PE (pelink.kj), the only one: the functions of a block `foreign`
-    // from the DLL of its library (`foreign 'user32'`: user32.dll).
-    if (targetPlatform() / 3 == 2) {
-        mut dlls: Map[string, string] = [:]
-
-        for each in program.externs {
-            if (each.library == '' or each.library in ['c', 'm', 'pthread']) { continue }
-
-            dlls[each.symbol] = if (each.library.lower().endsWith('.dll')) { each.library } else { `${each.library}.dll` }
-        }
-
-        return linkWindowsOwn(object, runtime, output, dlls)
-    }
-
-    if (chosen != 'system' and targetPlatform() / 3 != 1) {
-        match (linkOwn(object, runtime, output, foreign)) {
-            Ok(_) => return Ok()
-            Err(message) => {
-                if (chosen == 'koji') { return Err(`compile error: ${message}`) }
+        // macOS: its linker of Mach-O (machlink.kj), with the dynamic libraries of the blocks
+        // `foreign` (`foreign 'sqlite3'`: libsqlite3.dylib, its file or its stub in the SDK).
+        MacOS => {
+            if (chosen != 'system') {
+                match (linkMachOwn(object, runtime, output, program.externs, foreign)) {
+                    Ok(_) => return Ok()
+                    Err(message) => {
+                        if (chosen == 'koji') { return Err(`compile error: ${message}`) }
+                    }
+                }
             }
+        }
+        // Windows: its linker of PE (pelink.kj), the only one: the functions of a block `foreign`
+        // from the DLL of its library (`foreign 'user32'`: user32.dll).
+        Windows => {
+            mut dlls: Map[string, string] = [:]
+
+            for each in program.externs {
+                if (each.library == '' or each.library in ['c', 'm', 'pthread']) { continue }
+
+                dlls[each.symbol] = if (each.library.lower().endsWith('.dll')) { each.library } else { `${each.library}.dll` }
+            }
+
+            return linkWindowsOwn(object, runtime, output, dlls)
         }
     }
 
@@ -368,7 +373,7 @@ function linkNative(program: IrProgram, output: string): Result[void, string] {
 // A program for macOS by Koji's linker of Mach-O: the object and those of the archive of the
 // runtime, with the dynamic libraries of `foreign` and the functions each gives.
 function linkMachOwn(object: byte[], runtime: string, output: string, externs: IrExtern[], foreign: string[]): Result[void, string] {
-    immut cpu = if (targetPlatform() == 4) { 0x0100000C } else { 0x01000007 }
+    immut cpu = if (targetArm()) { 0x0100000C } else { 0x01000007 }
     mut libraries: Dylib[] = []
     mut libraryOf: Map[string, int] = [:]
 
@@ -565,7 +570,7 @@ function linkOwn(object: byte[], runtime: string, output: string, foreign: strin
         mut found = ''
 
         // Those of arm64 (on another system, those of its tools for arm64), or of x86-64.
-        immut directories = if (targetPlatform() == 1) { ['/lib/aarch64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/aarch64-linux-gnu/lib'] } else { ['/lib/x86_64-linux-gnu', '/usr/lib/x86_64-linux-gnu', '/lib64', '/usr/lib64', '/lib', '/usr/lib'] }
+        immut directories = if (targetArm()) { ['/lib/aarch64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/aarch64-linux-gnu/lib'] } else { ['/lib/x86_64-linux-gnu', '/usr/lib/x86_64-linux-gnu', '/lib64', '/usr/lib64', '/lib', '/usr/lib'] }
 
         for directory in directories {
             if (found == '' and file.exists(path.join(directory, name))) { found = path.join(directory, name) }
@@ -599,7 +604,7 @@ function linkOwn(object: byte[], runtime: string, output: string, foreign: strin
     }
 
     // The libraries of the blocks `foreign`, by their names for the dynamic loader.
-    immut systemDirectories = if (targetPlatform() == 1) { ['/lib/aarch64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/aarch64-linux-gnu/lib'] } else { ['/lib/x86_64-linux-gnu', '/usr/lib/x86_64-linux-gnu', '/lib64', '/usr/lib64', '/lib', '/usr/lib'] }
+    immut systemDirectories = if (targetArm()) { ['/lib/aarch64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/aarch64-linux-gnu/lib'] } else { ['/lib/x86_64-linux-gnu', '/usr/lib/x86_64-linux-gnu', '/lib64', '/usr/lib64', '/lib', '/usr/lib'] }
 
     for name in foreign {
         immut found = sharedLibrary(name, systemDirectories)
@@ -643,12 +648,8 @@ function buildLibrary(output: string): Result[void, string] {
         Ok(bytes) => bytes
         Err(message) => return Err(`compile error: ${message}`)
     }
-    // An archive of the object, with the table of its symbols (linker.kj).
-    // For macOS, an archive of BSD (its linker reads no other).
-    // For Windows, the table of the symbols of its object of COFF.
-    if (targetPlatform() / 3 == 2) { return writeBytes(output, archiveNamed([object], [coffGlobals(object)])) }
-
-    return writeBytes(output, if (targetPlatform() / 3 == 1) { machArchive([object]) } else { archive([object]) })
+    // An archive of the object, with the table of its symbols, as the system's linker reads it.
+    return writeBytes(output, libraryArchive(object))
 }
 
 function writeBytes(name: string, bytes: byte[]): Result[void, string] {
