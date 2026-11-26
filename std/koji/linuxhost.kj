@@ -1,0 +1,72 @@
+// `koji:linuxhost`: Linux for the public modules (file, path, time, system): the module `koji:host`
+// is on Linux (each system has one, with the same functions: koji:macoshost, koji:windowshost).
+// Compiled with the programs: no globals.
+
+import { Address, CInt, CSize, free } from 'koji:unsafe'
+import { cString } from 'koji:core'
+import { posixChangeMode, posixClock, posixCloseDirectory, posixDescriptor, posixOpenMode } from 'koji:posixhost'
+
+extern function readlink(path: Address, buffer: Address, size: CSize): int
+
+export function openMode(kind: string): string {
+    return posixOpenMode(kind)
+}
+
+// Whether fopen of a directory fails with EACCES (where the others open it, and say EISDIR when
+// it is read).
+export function directoryRefused(): boolean {
+    return false
+}
+
+export function descriptor(handle: Address): int {
+    return posixDescriptor(handle)
+}
+
+// Where `d_name` is in a `struct dirent`.
+export function entryNameAt(): int {
+    return 19
+}
+
+export function closeDirectory(directory: Address) {
+    posixCloseDirectory(directory)
+}
+
+export function changeMode(cPath: Address, mode: int): boolean {
+    return posixChangeMode(cPath, mode)
+}
+
+// Whether `\` separates parts too, and a drive starts a path (`C:\`).
+export function backslashes(): boolean {
+    return false
+}
+
+// CLOCK_MONOTONIC, CLOCK_REALTIME, in seconds.
+export function monotonicSeconds(): decimal {
+    return posixClock(1)
+}
+
+export function realtimeSeconds(): decimal {
+    return posixClock(0)
+}
+
+// The path of the executable in `buffer` (`size` bytes): its length, or -2 when the buffer is too
+// small, or -1 where the system cannot tell it (/proc/self/exe).
+export function executableInto(buffer: Address, size: int): int {
+    immut path = cString('/proc/self/exe')
+    immut length = readlink(path, buffer, size)
+    free(path)
+
+    if (length < 0) { return -1 }
+
+    return if (length == size) { -2 } else { length }
+}
+
+// The size of a field of the record of `uname` (the processor is the fifth), or 0 where there is no
+// `uname` (`fixedArchitecture` names the processor).
+export function unameField(): int {
+    return 65
+}
+
+export function fixedArchitecture(): string {
+    return ''
+}

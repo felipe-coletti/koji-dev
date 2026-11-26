@@ -3,26 +3,16 @@
 // nothing (`a//b/./c` is `a/b/c`), and a path that starts with `/` starts at the root. On Windows,
 // `\` separates parts too, and a path that starts with a drive (`C:\`) starts at a root.
 
-import system
-
-// Whether `\` separates parts too, and a drive starts a path (`C:\`): Windows.
-function windowsPaths(): boolean {
-    return match (system.os) {
-        Linux => false
-        MacOS => false
-        Windows => true
-        Other(_) => false
-    }
-}
+import { backslashes } from 'koji:host'
 
 // Whether a char separates parts.
 function separator(c: char): boolean {
-    return c == '/' or (windowsPaths() and c == '\\')
+    return c == '/' or (backslashes() and c == '\\')
 }
 
 // Whether the path ends with a separator.
 function endsWithSeparator(path: string): boolean {
-    return path.endsWith('/') or (windowsPaths() and path.endsWith('\\'))
+    return path.endsWith('/') or (backslashes() and path.endsWith('\\'))
 }
 
 // `base` followed by `part`, with a separator between them; an absolute `part` replaces `base`.
@@ -96,7 +86,7 @@ export function extension(path: string): Option[string] {
 export function isAbsolute(path: string): boolean {
     if (path.startsWith('/')) { return true }
 
-    if (not windowsPaths()) { return false }
+    if (not backslashes()) { return false }
 
     immut chars = path.chars()
     return path.startsWith('\\') or (chars.length() >= 3 and chars[1] == ':' and separator(chars[2]))

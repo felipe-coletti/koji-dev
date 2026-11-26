@@ -1,0 +1,69 @@
+// `koji:macoshost`: macOS for the public modules (file, path, time, system): the module `koji:host`
+// is on macOS (each system has one, with the same functions: koji:linuxhost, koji:windowshost).
+// Compiled with the programs: no globals.
+
+import { Address, CInt, CSize, allocate, free, write } from 'koji:unsafe'
+import { posixChangeMode, posixClock, posixCloseDirectory, posixDescriptor, posixOpenMode } from 'koji:posixhost'
+
+extern function executablePathInto(buffer: Address, size: Address): CInt from '_NSGetExecutablePath'
+extern function strlen(text: Address): CSize
+
+export function openMode(kind: string): string {
+    return posixOpenMode(kind)
+}
+
+// Whether fopen of a directory fails with EACCES (where the others open it, and say EISDIR when
+// it is read).
+export function directoryRefused(): boolean {
+    return false
+}
+
+export function descriptor(handle: Address): int {
+    return posixDescriptor(handle)
+}
+
+// Where `d_name` is in a `struct dirent`.
+export function entryNameAt(): int {
+    return 21
+}
+
+export function closeDirectory(directory: Address) {
+    posixCloseDirectory(directory)
+}
+
+export function changeMode(cPath: Address, mode: int): boolean {
+    return posixChangeMode(cPath, mode)
+}
+
+// Whether `\` separates parts too, and a drive starts a path (`C:\`).
+export function backslashes(): boolean {
+    return false
+}
+
+// CLOCK_MONOTONIC (6 on macOS), CLOCK_REALTIME, in seconds.
+export function monotonicSeconds(): decimal {
+    return posixClock(6)
+}
+
+export function realtimeSeconds(): decimal {
+    return posixClock(0)
+}
+
+// The path of the executable in `buffer` (`size` bytes): its length, or -2 when the buffer is too
+// small (_NSGetExecutablePath).
+export function executableInto(buffer: Address, size: int): int {
+    immut room = allocate(8)
+    write(room, 0, size)
+    immut failed = executablePathInto(buffer, room)
+    free(room)
+    return if (failed != 0) { -2 } else { strlen(buffer) }
+}
+
+// The size of a field of the record of `uname` (the processor is the fifth).
+export function unameField(): int {
+    return 256
+}
+
+export function fixedArchitecture(): string {
+    return ''
+}

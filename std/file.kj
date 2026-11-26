@@ -2,6 +2,7 @@
 // move-only: it is closed when it is dropped, and `close()` drops it.
 
 import system
+import { changeMode, closeDirectory, descriptor, directoryRefused, entryNameAt, openMode } from 'koji:host'
 import { Address, CInt, CSize, Location, allocate, free, isNull, newString, offset, panicAt, read, stringBytes, stringSize, write } from 'koji:unsafe'
 import { cString, cText, hasNul, isUtf8, textOf } from 'koji:core'
 
@@ -10,22 +11,16 @@ import { cString, cText, hasNul, isUtf8, textOf } from 'koji:core'
 // that may wait are made by a thread that helps while other tasks run (`koji_blocking_*`).
 extern function koji_blocking_fopen(path: Address, mode: Address): Address
 extern function fclose(file: Address): CInt
-extern function fileno(file: Address): CInt
 // `read` and `write` of C, with one buffer (`read` and `write` are those of `koji:unsafe` here).
 extern function koji_blocking_readv(fd: CInt, buffers: Address, count: CInt): int
 extern function koji_blocking_writev(fd: CInt, buffers: Address, count: CInt): int
 extern function koji_blocking_opendir(path: Address): Address
 extern function koji_blocking_readdir(directory: Address): Address
-extern function closedir(directory: Address): CInt
 extern function koji_blocking_access(path: Address, mode: CInt): CInt
 extern function koji_blocking_unlink(path: Address): CInt
 extern function koji_blocking_mkdir(path: Address, mode: CInt): CInt
-extern function chmod(path: Address, mode: CInt): CInt
 extern function rmdir(path: Address): CInt
 // Windows (ucrtbase), and the library there (koji:windows).
-extern function windowsFileno(file: Address): CInt from '_fileno'
-extern function windowsChmod(path: Address, mode: CInt): CInt from '_chmod'
-extern function koji_windows_closedir(directory: Address): CInt
 extern function strlen(text: Address): CSize
 extern function strerror(code: CInt): Address
 extern function realloc(memory: Address, size: CSize): Address
@@ -80,19 +75,13 @@ export function open(path: string, mode: Mode): Result[File, FileError] {
     if (hasNul(path)) { return Err(invalidPath(path)) }
 
     immut cPath = cString(path)
-    // `e`: the descriptor is not given to the programs this one runs (on Windows, `N`; `b`: the
-    // bytes as they are, no line breaks of two characters).
-    immut windows = match (system.os) {
-        Linux => false
-        MacOS => false
-        Windows => true
-        Other(_) => false
-    }
-    immut cMode = cString(match (mode) {
-        Read => if (windows) { 'rbN' } else { 're' }
-        Write => if (windows) { 'wbN' } else { 'we' }
-        Append => if (windows) { 'abN' } else { 'ae' }
-    })
+    // The mode of fopen of the system (koji:host): `e` on Linux, the descriptor not given to the
+    // programs this one runs.
+    immut cMode = cString(openMode(match (mode) {
+        Read => 'r'
+        Write => 'w'
+        Append => 'a'
+    }))
     immut handle = koji_blocking_fopen(cPath, cMode)
     immut code = koji_system_errno()
     free(cMode)
@@ -100,7 +89,7 @@ export function open(path: string, mode: Mode): Result[File, FileError] {
     if (isNull(handle)) {
         // Windows does not open a directory (EACCES), where the others say so when it is read:
         // the same error everywhere (EISDIR).
-        immut directory = windows and code == 13 and opensAsDirectory(cPath)
+        immut directory = directoryRefused() and code == 13 and opensAsDirectory(cPath)
         free(cPath)
         return Err(failure(path, if (directory) { 21 } else { code }))
     }
@@ -231,16 +220,6 @@ function File.writeAt(self, bytes: Address, size: int): Result[void, FileError] 
 // Closes the file (dropping it closes it).
 function File.close(take self) {}
 
-// The descriptor of a stream of C.
-function descriptor(handle: Address): int {
-    return match (system.os) {
-        Linux => fileno(handle)
-        MacOS => fileno(handle)
-        Windows => windowsFileno(handle)
-        Other(_) => fileno(handle)
-    }
-}
-
 // The names of the entries of the directory at `path`, sorted.
 export function list(path: string): Result[string[], FileError] {
     if (hasNul(path)) { return Err(invalidPath(path)) }
@@ -253,12 +232,7 @@ export function list(path: string): Result[string[], FileError] {
     if (isNull(directory)) { return Err(failure(path, code)) }
 
     // Where `d_name` is in a `struct dirent`.
-    immut nameAt = match (system.os) {
-        Linux => 19
-        MacOS => 21
-        Windows => 40
-        Other(_) => 19
-    }
+    immut nameAt = entryNameAt()
     mut names: string[] = []
 
     while (true) {
@@ -272,20 +246,7 @@ export function list(path: string): Result[string[], FileError] {
         if (text != '.' and text != '..') { names.push(text) }
     }
 
-    match (system.os) {
-        Linux => {
-            closedir(directory)
-        }
-        MacOS => {
-            closedir(directory)
-        }
-        Windows => {
-            koji_windows_closedir(directory)
-        }
-        Other(_) => {
-            closedir(directory)
-        }
-    }
+    closeDirectory(directory)
     names.sort()
     return Ok(names)
 }
@@ -317,7 +278,7 @@ function opensAsDirectory(cPath: Address): boolean {
 
     if (isNull(directory)) { return false }
 
-    koji_windows_closedir(directory)
+    closeDirectory(directory)
     return true
 }
 
@@ -340,12 +301,7 @@ export function setPermissions(path: string, mode: int): Result[void, FileError]
     if (hasNul(path)) { return Err(invalidPath(path)) }
 
     immut cPath = cString(path)
-    immut changed = match (system.os) {
-        Linux => chmod(cPath, mode) == 0
-        MacOS => chmod(cPath, mode) == 0
-        Windows => windowsChmod(cPath, mode) == 0
-        Other(_) => chmod(cPath, mode) == 0
-    }
+    immut changed = changeMode(cPath, mode)
     immut code = koji_system_errno()
     free(cPath)
 

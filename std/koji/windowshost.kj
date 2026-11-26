@@ -1,0 +1,79 @@
+// `koji:windowshost`: Windows for the public modules (file, path, time, system): the module
+// `koji:host` is on Windows (each system has one, with the same functions: koji:linuxhost,
+// koji:macoshost). Compiled with the programs: no globals.
+
+import { Address, CInt, allocate, free, nullAddress, read } from 'koji:unsafe'
+
+extern function windowsFileno(file: Address): CInt from '_fileno'
+extern function windowsChmod(path: Address, mode: CInt): CInt from '_chmod'
+extern function koji_windows_closedir(directory: Address): CInt
+extern function koji_monotonic_nanoseconds(): int
+extern function GetSystemTimePreciseAsFileTime(time: Address)
+extern function GetModuleFileNameA(module: Address, buffer: Address, size: CInt): CInt
+
+// The mode of fopen for 'r', 'w' or 'a': `b`, the bytes as they are (no line breaks of two
+// characters), `N`, not given to the programs this one runs.
+export function openMode(kind: string): string {
+    return `${kind}bN`
+}
+
+// Whether fopen of a directory fails with EACCES (where the others open it, and say EISDIR when
+// it is read).
+export function directoryRefused(): boolean {
+    return true
+}
+
+export function descriptor(handle: Address): int {
+    return windowsFileno(handle)
+}
+
+// Where the name is in an entry of koji_windows_readdir.
+export function entryNameAt(): int {
+    return 40
+}
+
+export function closeDirectory(directory: Address) {
+    koji_windows_closedir(directory)
+}
+
+export function changeMode(cPath: Address, mode: int): boolean {
+    return windowsChmod(cPath, mode) == 0
+}
+
+// Whether `\` separates parts too, and a drive starts a path (`C:\`).
+export function backslashes(): boolean {
+    return true
+}
+
+// The clock of the runtime (the counter of performance), in seconds.
+export function monotonicSeconds(): decimal {
+    return decimal(koji_monotonic_nanoseconds()) / 1000000000
+}
+
+// The time of the system (the realtime clock only), from 1601 to 1970 less.
+export function realtimeSeconds(): decimal {
+    immut file = allocate(8)
+    GetSystemTimePreciseAsFileTime(file)
+    immut hundreds: int = read(file, 0)
+    free(file)
+    return decimal(hundreds - 116444736000000000) / 10000000
+}
+
+// The path of the executable in `buffer` (`size` bytes): its length, or -2 when the buffer is too
+// small, or -1 where the system cannot tell it (GetModuleFileNameA).
+export function executableInto(buffer: Address, size: int): int {
+    immut length = GetModuleFileNameA(nullAddress(), buffer, size)
+
+    if (length <= 0) { return -1 }
+
+    return if (length >= size) { -2 } else { length }
+}
+
+// No `uname`: Windows of Koji is on x86-64.
+export function unameField(): int {
+    return 0
+}
+
+export function fixedArchitecture(): string {
+    return 'x86_64'
+}

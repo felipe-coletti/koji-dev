@@ -1,0 +1,38 @@
+// `koji:posixhost`: what the public modules (file, time, system) do alike on the systems of POSIX
+// (Linux, macOS), for their modules of `koji:host` (koji:linuxhost, koji:macoshost). Compiled with
+// the programs, as the public modules are: no globals.
+
+import { Address, CInt, allocate, free, read } from 'koji:unsafe'
+
+extern function fileno(file: Address): CInt
+extern function closedir(directory: Address): CInt
+extern function chmod(path: Address, mode: CInt): CInt
+extern function clock_gettime(clock: CInt, time: Address): CInt
+
+// The mode of fopen for 'r', 'w' or 'a': `e`, the descriptor is not given to the programs this one
+// runs.
+export function posixOpenMode(kind: string): string {
+    return `${kind}e`
+}
+
+export function posixDescriptor(handle: Address): int {
+    return fileno(handle)
+}
+
+export function posixCloseDirectory(directory: Address) {
+    closedir(directory)
+}
+
+export function posixChangeMode(cPath: Address, mode: int): boolean {
+    return chmod(cPath, mode) == 0
+}
+
+// The time of the clock `id` of the system (clock_gettime), in seconds.
+export function posixClock(id: int): decimal {
+    immut time = allocate(16)
+    clock_gettime(id, time)
+    immut seconds: int = read(time, 0)
+    immut nanoseconds: int = read(time, 8)
+    free(time)
+    return decimal(seconds) + decimal(nanoseconds) / 1000000000
+}
