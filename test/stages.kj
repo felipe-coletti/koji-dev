@@ -65,7 +65,11 @@ function checkSnapshot(stage: string, all: Case[]) {
     mut text = ''
 
     for each in all {
-        immut dumped = finish(compiler(['dump', stage, each.file], each.directory))
+        // For one platform on every system: the modules of the system (`koji:host`) are those of
+        // Linux on x86-64, whatever runs the tests.
+        mut command = compiler(['dump', stage, each.file], each.directory)
+        command.environment['KOJI_TARGET'] = 'x64'
+        immut dumped = finish(command)
         assert(dumped.status == 0, `kojic dump ${stage} ${each.name} failed: ${dumped.stderr}`)
         text += `==== ${each.name}\n${dumped.stdout}`
     }
