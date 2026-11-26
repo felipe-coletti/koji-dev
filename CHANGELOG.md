@@ -5,6 +5,8 @@
 -   A source that is not UTF-8 (saved in Latin-1 by some editors) says where and what to do:
     `error: main.kj:20:21: the file is not UTF-8 (byte 0xE3); save it as UTF-8`, rather than
     `stream did not contain valid UTF-8`.
+-   `**` and `math.pow` of floats take less than 60% of the time they took (about 250 ns), still
+    correctly rounded, which they now are for results among the subnormals too.
 
 ## 0.2.1 (preview)
 

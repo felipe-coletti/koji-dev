@@ -1904,6 +1904,9 @@ print(float('1.7976931348623157e308'), float('1.7976931348623159e308'), float('9
 print(float('0.30000000000000000000000000000000000000000000000000000000000000000000000000001'), float('1e23'))
 print(float(1.234567890123456789012345678901234e-300), math.pow(2, 0.5), math.sqrt(2))
 print(float(-5.5) % float(2), 0x1.fffffffffffffp1023 % 0x1p-1074, float(1e300) % float(3e-300), float(10) % float(0.1))
+// Close to the middle of two floats, small, and among the subnormals.
+print(0x1.773aa76e16436p2 ** -0x1.7225a4462b1f9p5, 0x1.0a665c65d42efp-613 ** 0x1.a969dc7f6cc54p0, 0x0.4b84705039e7p-1022 ** -0x1p0)
+print(0x1.c88cc83d7778bp-269 ** 0x1p2, 0x1.8bb351943d206p913 ** -0x1.2d2d9fd49bedap0, 0x1.1e4bd40c1cac6p-852 ** 0x1.3368bb92c8fe4p0)
 ---- output
 Ok(0x1.6a09e667f3bcdp0) Ok(0x1p-537) Ok(0x1.fffffffffffffp511)
 Ok(0x1.6a09e667f3bcdp0) Ok(0x0.00000000007e8p-1022) Ok(-0x1p-3)
@@ -1915,6 +1918,8 @@ Ok(0x1.fffffffffffffp1023) Err(OutOfRange('1.7976931348623159e308')) Ok(0x1p53)
 Ok(0x1.3333333333333p-2) Ok(0x1.52d02c7e14af6p76)
 0x1.a74fe1c1e8908p-997 Ok(1.414213562373095048801688724209698) Ok(1.414213562373095048801688724209698)
 -0x1.8p0 0x0p0 0x1.4a11e087dfeacp-997 0x1.9999999999972p-4
+0x1.eb3f830346443p-119 0x1.58c598005ec09p-1019 0x1.b1e9e16801cb3p1023
+0x0.0000000000003p-1022 0x0.0000000000001p-1022 0x0.88facca6e0f85p-1022
 ==== floats_have_no_nan_or_infinity #1
 ---- source (no line break at the end)
 immut x = float(1e308) * float(10)
