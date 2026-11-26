@@ -11,12 +11,12 @@ The Koji compiler, `kojic`, is written in Koji, and compiles programs to machine
 A release has a package for each platform (`koji-<version>-<platform>.tar.gz`, a `.zip` for Windows): `kojic` and the runtime library next to it. Unpack it and add its directory to your `PATH`:
 
 ```sh
-tar -xzf koji-0.2.0-linux-x64.tar.gz
-export PATH=$PWD/koji-0.2.0-linux-x64:$PATH
+tar -xzf koji-0.2.1-linux-x64.tar.gz
+export PATH=$PWD/koji-0.2.1-linux-x64:$PATH
 kojic version
 ```
 
-On macOS, a downloaded executable is quarantined by the system: `xattr -d com.apple.quarantine koji-0.2.0-macos-arm64/kojic` lets it run (or build Koji from the repository, below).
+On macOS, a downloaded executable is quarantined by the system: `xattr -d com.apple.quarantine koji-0.2.1-macos-arm64/kojic` lets it run (or build Koji from the repository, below).
 
 ## Building
 

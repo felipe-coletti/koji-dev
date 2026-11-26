@@ -22,7 +22,7 @@ import { format } from 'format.kj'
 import { initModule, addModule, updateModules } from 'packages.kj'
 
 // The version of Koji: of the language, its standard library and this compiler.
-immut version = '0.2.0'
+immut version = '0.2.1'
 
 immut usage = [
     `kojic ${version} - the Koji programming language (the compiler written in Koji)`,
