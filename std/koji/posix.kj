@@ -3,13 +3,14 @@
 // and its sleeps. What differs between them is in their own modules (koji:linux, koji:bsd), given
 // to these functions; Windows has koji:windows.
 
-import { Address, CInt, CSize, distance, nullAddress, offset, read, valgrind, write } from 'koji:unsafe'
+import { Address, CInt, CSize, CVariadic, distance, nullAddress, offset, read, valgrind, write } from 'koji:unsafe'
 
 extern function mmap(address: Address, size: CSize, protection: CInt, flags: CInt, fd: CInt, at: int): Address
 extern function munmap(address: Address, size: CSize): CInt
 extern function mprotect(address: Address, size: CSize, protection: CInt): CInt
 extern function clock_gettime(clock: CInt, time: Address): CInt
 extern function nanosleep(request: Address, remaining: Address): CInt
+extern function fcntl(fd: CInt, command: CInt, argument: CVariadic): CInt
 
 // A stack of `size` bytes above a guard of `guard` that the program cannot touch (PROT_NONE),
 // readable and writable (PROT_READ | PROT_WRITE), with the flags of the mapping of the system: its
@@ -51,4 +52,16 @@ export function posixSleep(nanoseconds: int, words: Address) {
     write(words, 0, nanoseconds / 1000000000)
     write(words, 8, nanoseconds % 1000000000)
     nanosleep(words, nullAddress())
+}
+
+// A socket (or pipe) waits or not: O_NONBLOCK (`nonBlocking`, its number on the system) cleared or
+// set (F_GETFL, F_SETFL).
+export function posixSetWaiting(fd: int, waiting: boolean, nonBlocking: int) {
+    immut flags = fcntl(fd, 3, 0)
+    fcntl(fd, 4, if (waiting) { flags & ~nonBlocking } else { flags | nonBlocking })
+}
+
+// A socket that the programs a program runs do not get (F_SETFD, FD_CLOEXEC).
+export function posixPrivate(fd: int) {
+    if (fd >= 0) { fcntl(fd, 2, 1) }
 }

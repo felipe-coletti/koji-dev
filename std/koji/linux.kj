@@ -3,12 +3,14 @@
 // (koji:posix).
 
 import system
+import { SocketNumbers } from 'koji:sockets'
 import { Address, CInt, read, write } from 'koji:unsafe'
 
 extern function epoll_create1(flags: CInt): CInt
 extern function epoll_ctl(poller: CInt, operation: CInt, fd: CInt, event: Address): CInt
 extern function epoll_wait(poller: CInt, events: Address, capacity: CInt, milliseconds: CInt): CInt
 extern function koji_system_errno(): CInt
+extern function linuxErrnoPlace(): Address from '__errno_location'
 
 // The flags of the mapping of a stack: MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE.
 export function linuxStackFlags(): int {
@@ -61,4 +63,14 @@ export function linuxPollerWait(poller: int, milliseconds: int, ready: Address, 
     }
 
     return count
+}
+
+// The numbers of the sockets.
+export function linuxSockets(): SocketNumbers {
+    return { level: 1, reuseAddress: 2, socketError: 4, noSignal: 0x4000, dontWait: 0x40, nonBlocking: 0x800, wouldBlock: 11, inProgress: 115, timedOut: 110, addressAt: 24, noPipeSignalOption: 0, addressLength: false, acceptedInherits: false }
+}
+
+// The place of errno (__errno_location).
+export function linuxErrno(): Address {
+    return linuxErrnoPlace()
 }

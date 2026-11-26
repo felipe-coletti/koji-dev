@@ -5,6 +5,7 @@
 // (their branches of Windows are not compiled), so that they need none of these functions.
 
 import system
+import { SocketNumbers } from 'koji:sockets'
 import { Address, CInt, CSize, allocate, distance, floatControl, free, isNull, nullAddress, offset, read, taskEntry, write } from 'koji:unsafe'
 
 // The C library of Windows (ucrtbase).
@@ -359,4 +360,80 @@ function pipeWaiting(fd: int): boolean {
     immut available: int = read(waiting, 0)
     free(waiting)
     return available & 0xFFFFFFFF > 0
+}
+
+// The sockets (koji:net): Winsock.
+
+extern function WSAStartup(version: CInt, data: Address): CInt
+extern function WSAGetLastError(): CInt
+extern function closesocket(fd: CInt): CInt
+extern function ioctlsocket(fd: CInt, command: CInt, argument: Address): CInt
+extern function windowsErrnoPlace(): Address from '_errno'
+// They give an int of C (32 bits), not a size.
+extern function windowsSendC(fd: CInt, bytes: Address, size: CInt, flags: CInt): CInt from 'send'
+extern function windowsRecvC(fd: CInt, bytes: Address, size: CInt, flags: CInt): CInt from 'recv'
+
+// The numbers of the sockets: Winsock's errors (WSAEWOULDBLOCK, which a connection under way gives
+// too, WSAETIMEDOUT); its sockets never wait, no flag needed (FIONBIO sets them).
+export function windowsSockets(): SocketNumbers {
+    return { level: 0xFFFF, reuseAddress: 4, socketError: 0x1007, noSignal: 0, dontWait: 0, nonBlocking: 0, wouldBlock: 10035, inProgress: 10035, timedOut: 10060, addressAt: 32, noPipeSignalOption: 0, addressLength: false, acceptedInherits: false }
+}
+
+// Winsock, started before the first socket.
+mut winsockStarted = false
+
+export function windowsSocketsStart() {
+    if (winsockStarted) { return }
+
+    immut data = allocate(512)
+    WSAStartup(0x0202, data)
+    free(data)
+    winsockStarted = true
+}
+
+// The error of the last call of the sockets: Winsock's own.
+export function windowsSocketError(): int {
+    return WSAGetLastError()
+}
+
+// A socket waits or not (FIONBIO).
+export function windowsSetWaiting(fd: int, waiting: boolean) {
+    immut mode = allocate(8)
+    write(mode, 0, if (waiting) { 0 } else { 1 })
+    ioctlsocket(fd, 0x8004667E, mode)
+    free(mode)
+}
+
+export function windowsCloseSocket(fd: int) {
+    closesocket(fd)
+}
+
+export function windowsSend(fd: int, bytes: Address, size: int): int {
+    return windowsSendC(fd, bytes, size, 0)
+}
+
+export function windowsReceive(fd: int, bytes: Address, size: int): int {
+    return windowsRecvC(fd, bytes, size, 0)
+}
+
+// The place of errno (_errno).
+export function windowsErrno(): Address {
+    return windowsErrnoPlace()
+}
+
+// The message of an error of the names (Windows has no `gai_strerror` in its DLLs): the code of
+// Winsock, as a string of C that stays.
+export function windowsDnsMessage(code: int): Address {
+    immut text = `the name could not be resolved (error ${code} of Winsock)`
+    immut size = text.length()
+    immut bytes = allocate(size + 1)
+    mut at = 0
+
+    for c in text.chars() {
+        write(bytes, at, byte(c.code() & 0xFF))
+        at += 1
+    }
+
+    write(bytes, size, byte(0))
+    return bytes
 }

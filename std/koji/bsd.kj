@@ -2,11 +2,13 @@
 // in the library of the runtime written in Koji: their constants, and their poller (kqueue). The
 // rest they share with Linux (koji:posix). `name` is that of another BSD ('freebsd'), '' for macOS.
 
+import { SocketNumbers } from 'koji:sockets'
 import { Address, CInt, nullAddress, read, write } from 'koji:unsafe'
 
 extern function kqueue(): CInt
 extern function kevent(poller: CInt, changes: Address, changeCount: CInt, events: Address, capacity: CInt, timeout: Address): CInt
 extern function koji_system_errno(): CInt
+extern function bsdErrnoPlace(): Address from '__error'
 
 // The flags of the mapping of a stack: MAP_PRIVATE | MAP_ANONYMOUS (MAP_ANON).
 export function bsdStackFlags(): int {
@@ -72,4 +74,19 @@ export function bsdPollerWait(poller: int, milliseconds: int, ready: Address, mo
     }
 
     return count
+}
+
+// Whether another system is a BSD, whose numbers and records are those here (else Linux's).
+export function isBsd(name: string): boolean {
+    return name == 'freebsd' or name == 'openbsd' or name == 'netbsd'
+}
+
+// The numbers of the sockets (no MSG_NOSIGNAL: SO_NOSIGPIPE).
+export function bsdSockets(): SocketNumbers {
+    return { level: 0xFFFF, reuseAddress: 4, socketError: 0x1007, noSignal: 0, dontWait: 0x80, nonBlocking: 4, wouldBlock: 35, inProgress: 36, timedOut: 60, addressAt: 32, noPipeSignalOption: 0x1022, addressLength: true, acceptedInherits: true }
+}
+
+// The place of errno (__error).
+export function bsdErrno(): Address {
+    return bsdErrnoPlace()
 }
