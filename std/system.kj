@@ -282,7 +282,12 @@ function environmentOf(given: Command): string[] {
 }
 
 function spawn(given: Command, captured: boolean): Result[Started, SystemError] {
-    if (os == Windows) { return windowsSpawn(given, captured) }
+    match (os) {
+        Linux => {}
+        MacOS => {}
+        Windows => return windowsSpawn(given, captured)
+        Other(_) => {}
+    }
 
     immut command = given.program
     immut args = given.args
@@ -672,7 +677,12 @@ function windowsReadBoth(stdout: int, stderr: int): string[] {
 // while `input` is written to the pipe `stdin` (when it is not -1) as it takes it: a program that
 // stops reading makes the rest of it fail, not this one (SIGPIPE is ignored while it is written).
 function readBoth(stdout: int, stderr: int, stdin: int, input: string): string[] {
-    if (os == Windows) { return windowsReadBoth(stdout, stderr) }
+    match (os) {
+        Linux => {}
+        MacOS => {}
+        Windows => return windowsReadBoth(stdout, stderr)
+        Other(_) => {}
+    }
 
     immut fds = allocate(24)
     mut buffers = [allocate(4096), allocate(4096)]
@@ -823,20 +833,27 @@ function executableInto(buffer: Address, size: int): int {
 
             return if (length >= size) { -2 } else { length }
         }
-        _ => return -1
+        Other(_) => return -1
     }
 }
 
 // The processor, from the name `uname` gives (the fifth field of its record, whose fields have 65
 // bytes on Linux, 256 on macOS).
 function architectureNamed(): Architecture {
-    if (os == Windows) { return X64 }
+    match (os) {
+        Linux => {}
+        MacOS => {}
+        Windows => return X64
+        Other(_) => {}
+    }
 
     immut buffer = allocate(4096)
     uname(buffer)
     immut field = match (os) {
+        Linux => 65
         MacOS => 256
-        _ => 65
+        Windows => 65
+        Other(_) => 65
     }
     immut name = cText(offset(buffer, 4 * field))
     free(buffer)

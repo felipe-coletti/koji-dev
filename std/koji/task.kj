@@ -65,11 +65,20 @@ function stackFree(stack: Address, size: int) {
 // registers it restores, zero but for the task and where it returns, and the control words of
 // floating point of the current task (below the number of valgrind, aligned to 16 bytes).
 function stackStart(stack: Address, size: int, task: int): Address {
+    // On Windows, the limits of the stack in the block of the thread too (koji:windows).
+    return match (system.os) {
+        Linux => systemStackStart(stack, size, task)
+        MacOS => systemStackStart(stack, size, task)
+        Windows => windowsStackStart(stack, size, task)
+        Other(_) => systemStackStart(stack, size, task)
+    }
+}
+
+// The same on the systems of POSIX, by the convention of each processor.
+function systemStackStart(stack: Address, size: int, task: int): Address {
     immut top = offset(stack, size - 16)
 
     return match (system.architecture) {
-        // On Windows, the limits of the stack in the block of the thread too (koji:windows).
-        X64 if (system.os == system.Windows) => windowsStackStart(stack, size, task)
         X64 => {
             // The control words, r15 to r12, rbx (the task), rbp, where it returns.
             immut sp = offset(top, -72)

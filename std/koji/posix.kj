@@ -11,6 +11,16 @@ extern function mprotect(address: Address, size: CSize, protection: CInt): CInt
 extern function clock_gettime(clock: CInt, time: Address): CInt
 extern function nanosleep(request: Address, remaining: Address): CInt
 extern function fcntl(fd: CInt, command: CInt, argument: CVariadic): CInt
+extern function poll(fds: Address, count: CSize, timeout: CInt): CInt
+extern function pipe(fds: Address): CInt
+extern function pthread_create(thread: Address, attributes: Address, start: Address, argument: Address): CInt
+extern function pthread_detach(thread: int): CInt
+extern function systemRead(fd: CInt, bytes: Address, size: CSize): int from 'read'
+extern function systemWrite(fd: CInt, bytes: Address, size: CSize): int from 'write'
+extern function writev(fd: CInt, buffers: Address, count: CInt): int
+extern function fdopen(fd: CInt, mode: Address): Address
+extern function time(place: Address): int
+extern function getentropy(buffer: Address, size: CSize): CInt
 
 // A stack of `size` bytes above a guard of `guard` that the program cannot touch (PROT_NONE),
 // readable and writable (PROT_READ | PROT_WRITE), with the flags of the mapping of the system: its
@@ -64,4 +74,65 @@ export function posixSetWaiting(fd: int, waiting: boolean, nonBlocking: int) {
 // A socket that the programs a program runs do not get (F_SETFD, FD_CLOEXEC).
 export function posixPrivate(fd: int) {
     if (fd >= 0) { fcntl(fd, 2, 1) }
+}
+
+// Whether a write to `fd` would not wait (poll: POLLOUT at once), a `struct pollfd` at `place`: the
+// descriptor (4 bytes), the events (2), the events that came (2).
+export function posixOutputReady(fd: int, place: Address): boolean {
+    write(place, 0, fd & 0xFFFFFFFF | 4 << 32)
+    immut answer = poll(place, 1, 0)
+    immut events: int = read(place, 0)
+    return answer == 1 and (events >> 48) & 4 != 0
+}
+
+// A pipe, its two ends (ints of C) at `ends`, which the programs a program runs do not get
+// (FD_CLOEXEC): whether the system made it.
+export function posixPipe(ends: Address): boolean {
+    if (pipe(ends) != 0) { return false }
+
+    immut both: int = read(ends, 0)
+    fcntl(both & 0xFFFFFFFF, 2, 1)
+    fcntl((both >> 32) & 0xFFFFFFFF, 2, 1)
+    return true
+}
+
+// A new thread running `code` with `state` (a pthread_t at `place`), detached: whether the system
+// made it.
+export function posixThreadStart(code: Address, state: Address, place: Address): boolean {
+    immut made = pthread_create(place, nullAddress(), code, state) == 0
+
+    if (made) {
+        immut id: int = read(place, 0)
+        pthread_detach(id)
+    }
+
+    return made
+}
+
+export function posixWrite(fd: int, bytes: Address, size: int): int {
+    return systemWrite(fd, bytes, size)
+}
+
+export function posixRead(fd: int, bytes: Address, size: int): int {
+    return systemRead(fd, bytes, size)
+}
+
+// `writev` of `count` buffers (an address and a size each).
+export function posixWritev(fd: int, buffers: Address, count: int): int {
+    return writev(fd, buffers, count)
+}
+
+// A stream of C of `fd`.
+export function posixStream(fd: int, mode: Address): Address {
+    return fdopen(fd, mode)
+}
+
+// The seconds since 1970, now.
+export function posixSeconds(): int {
+    return time(nullAddress())
+}
+
+// `size` random bytes at `bytes` (at most 256): whether the system gave them.
+export function posixRandom(bytes: Address, size: int): boolean {
+    return getentropy(bytes, size) == 0
 }

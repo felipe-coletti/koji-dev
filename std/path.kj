@@ -5,14 +5,24 @@
 
 import system
 
+// Whether `\` separates parts too, and a drive starts a path (`C:\`): Windows.
+function windowsPaths(): boolean {
+    return match (system.os) {
+        Linux => false
+        MacOS => false
+        Windows => true
+        Other(_) => false
+    }
+}
+
 // Whether a char separates parts.
 function separator(c: char): boolean {
-    return c == '/' or (system.os == system.Windows and c == '\\')
+    return c == '/' or (windowsPaths() and c == '\\')
 }
 
 // Whether the path ends with a separator.
 function endsWithSeparator(path: string): boolean {
-    return path.endsWith('/') or (system.os == system.Windows and path.endsWith('\\'))
+    return path.endsWith('/') or (windowsPaths() and path.endsWith('\\'))
 }
 
 // `base` followed by `part`, with a separator between them; an absolute `part` replaces `base`.
@@ -86,7 +96,7 @@ export function extension(path: string): Option[string] {
 export function isAbsolute(path: string): boolean {
     if (path.startsWith('/')) { return true }
 
-    if (system.os != system.Windows) { return false }
+    if (not windowsPaths()) { return false }
 
     immut chars = path.chars()
     return path.startsWith('\\') or (chars.length() >= 3 and chars[1] == ':' and separator(chars[2]))

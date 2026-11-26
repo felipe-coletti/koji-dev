@@ -2,13 +2,13 @@
 // of a program calls `koji_init` first).
 
 import system
+import { windowsBinaryStreams } from 'koji:windows'
 import { Address, CInt, nullAddress, read } from 'koji:unsafe'
 
 // The pool (std/koji/memory.kj) and the modules of the library.
 extern function koji_pool_start()
 extern function koji_library_init()
 // Windows (ucrtbase): the mode of a descriptor.
-extern function windowsSetMode(fd: CInt, mode: CInt): CInt from '_setmode'
 
 // The arguments of `main`, for std/system.kj: how many, and their strings of C.
 mut argumentCount = 0
@@ -17,12 +17,12 @@ mut argumentValues = nullAddress()
 extern function koji_init(count: CInt, values: Address) {
     koji_pool_start()
 
-    // Windows: the standard streams as bytes (_O_BINARY), as on other systems: no line breaks of two
-    // characters.
-    if (system.os == system.Windows) {
-        for fd in range(3) {
-            windowsSetMode(fd, 0x8000)
-        }
+    // Windows: the standard streams as bytes (koji:windows).
+    match (system.os) {
+        Linux => {}
+        MacOS => {}
+        Windows => windowsBinaryStreams()
+        Other(_) => {}
     }
 
     koji_library_init()

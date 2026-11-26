@@ -90,3 +90,20 @@ export function bsdSockets(): SocketNumbers {
 export function bsdErrno(): Address {
     return bsdErrnoPlace()
 }
+
+// O_NONBLOCK.
+export function bsdNonBlocking(): int {
+    return 4
+}
+
+// Where `d_name` is in a `struct dirent`: on macOS, NetBSD, FreeBSD and OpenBSD (19 elsewhere, as
+// Linux).
+export function bsdEntryNameAt(name: string): int {
+    return match (name) {
+        '' => 21
+        'netbsd' => 13
+        'freebsd' => 24
+        'openbsd' => 24
+        _ => 19
+    }
+}

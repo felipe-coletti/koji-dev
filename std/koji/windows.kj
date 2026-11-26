@@ -1,8 +1,10 @@
-// What Windows does not give as the C libraries of Unix do, for the library on Windows (`match
-// (system.os)` elsewhere chooses these there, see "Code for one system" in doc/design.md): the
-// writes and reads of several buffers, a line of a stream, the entries of a directory (by
-// _findfirst64 of the C library of Windows), and `memmem`. Each body is empty on the other systems
-// (their branches of Windows are not compiled), so that they need none of these functions.
+// `koji:windows`: what Windows asks of the runtime, in the library of the runtime written in Koji:
+// what it does not give as the C libraries of Unix do (the writes and reads of several buffers, a
+// line of a stream, the entries of a directory by _findfirst64, `memmem`); the stacks of tasks
+// (VirtualAlloc), its clock and sleeps, the sockets tasks wait for (WSAPoll); Winsock; its pipes,
+// threads and streams; its time and randomness. The functions for C (`extern` with a body) are
+// in every library, so their bodies are empty on the other systems (`if (system.os !=
+// system.Windows)`, folded); the others are only where a `match (system.os)` calls them.
 
 import system
 import { SocketNumbers } from 'koji:sockets'
@@ -436,4 +438,79 @@ export function windowsDnsMessage(code: int): Address {
 
     write(bytes, size, byte(0))
     return bytes
+}
+
+// The threads of the runtime (koji:prelude) and the output (koji:output).
+
+extern function windowsPipeC(fds: Address, size: CInt, mode: CInt): CInt from '_pipe'
+extern function CreateThread(attributes: Address, stack: CSize, start: Address, argument: Address, flags: CInt, id: Address): Address
+extern function windowsFdopen(fd: CInt, mode: Address): Address from '_fdopen'
+
+// A pipe of the C library, its two ends at `ends`, binary and not inherited (_O_BINARY |
+// _O_NOINHERIT): whether the system made it.
+export function windowsPipe(ends: Address): boolean {
+    return windowsPipeC(ends, 4096, 0x8080) == 0
+}
+
+// A new thread running `code` (an adapter of the convention of Windows, see native.kj) with
+// `state`: whether the system made it.
+export function windowsThreadStart(code: Address, state: Address): boolean {
+    immut handle = CreateThread(nullAddress(), 0, code, state, 0, nullAddress())
+
+    if (isNull(handle)) { return false }
+
+    CloseHandle(handle)
+    return true
+}
+
+export function windowsWriteNow(fd: int, bytes: Address, size: int): int {
+    return windowsWrite(fd, bytes, size)
+}
+
+// The jobs done waiting in the pipe `fd` (whole addresses, PeekNamedPipe at `waiting`), at most
+// `capacity`, read at `out`: how many (a read of the pipe would wait when it holds none).
+export function windowsJobsDone(fd: int, out: Address, capacity: int, waiting: Address): int {
+    write(waiting, 0, 0)
+    PeekNamedPipe(windowsHandle(fd), nullAddress(), 0, nullAddress(), waiting, nullAddress())
+    immut available: int = read(waiting, 0)
+    immut whole = (available & 0xFFFFFFFF) / 8
+    immut most = if (whole < capacity) { whole } else { capacity }
+
+    if (most == 0) { return 0 }
+
+    immut taken = windowsRead(fd, out, most * 8)
+    return if (taken <= 0) { 0 } else { taken / 8 }
+}
+
+// A stream of C of `fd`.
+export function windowsStream(fd: int, mode: Address): Address {
+    return windowsFdopen(fd, mode)
+}
+
+// Certificates, randomness, the start of a program (koji:x509, koji:tls, koji:start).
+
+extern function windowsTime(place: Address): int from '_time64'
+extern function BCryptGenRandom(algorithm: Address, buffer: Address, size: CInt, flags: CInt): CInt
+extern function windowsSetMode(fd: CInt, mode: CInt): CInt from '_setmode'
+
+// The seconds since 1970, now.
+export function windowsSeconds(): int {
+    return windowsTime(nullAddress())
+}
+
+// `size` random bytes at `bytes` (BCRYPT_USE_SYSTEM_PREFERRED_RNG): whether the system gave them.
+export function windowsRandom(bytes: Address, size: int): boolean {
+    return BCryptGenRandom(nullAddress(), bytes, size, 2) == 0
+}
+
+// Where the name is in an entry of koji_windows_readdir (as in Linux's `struct dirent`).
+export function windowsEntryNameAt(): int {
+    return 19
+}
+
+// The standard streams as bytes (_O_BINARY), as on other systems: no line breaks of two characters.
+export function windowsBinaryStreams() {
+    for fd in range(3) {
+        windowsSetMode(fd, 0x8000)
+    }
 }

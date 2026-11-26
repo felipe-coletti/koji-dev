@@ -27,14 +27,13 @@ export function now(): decimal {
 
 // A time that only grows, for durations: the difference of two is the time between them.
 export function monotonic(): decimal {
-    if (system.os == system.Windows) { return decimal(koji_monotonic_nanoseconds()) / 1000000000 }
-
-    // `CLOCK_MONOTONIC` is 6 on macOS, 1 elsewhere.
-    immut id = match (system.os) {
-        MacOS => 6
-        _ => 1
+    // `CLOCK_MONOTONIC` is 6 on macOS, 1 elsewhere; Windows: the clock of the runtime.
+    return match (system.os) {
+        Linux => clock(1)
+        MacOS => clock(6)
+        Windows => decimal(koji_monotonic_nanoseconds()) / 1000000000
+        Other(_) => clock(1)
     }
-    return clock(id)
 }
 
 // Pauses for `seconds` (nothing for zero or less): the current task waits, and the other tasks run
@@ -49,15 +48,25 @@ export function sleep(seconds: decimal) {
 
 // The time of a clock of the system, in seconds.
 function clock(id: int): decimal {
-    // Windows: the time of the system (the realtime clock only), from 1601 to 1970 less.
-    if (system.os == system.Windows) {
-        immut file = allocate(8)
-        GetSystemTimePreciseAsFileTime(file)
-        immut hundreds: int = read(file, 0)
-        free(file)
-        return decimal(hundreds - 116444736000000000) / 10000000
+    return match (system.os) {
+        Linux => posixClock(id)
+        MacOS => posixClock(id)
+        Windows => windowsClock()
+        Other(_) => posixClock(id)
     }
+}
 
+// Windows: the time of the system (the realtime clock only), from 1601 to 1970 less.
+function windowsClock(): decimal {
+    immut file = allocate(8)
+    GetSystemTimePreciseAsFileTime(file)
+    immut hundreds: int = read(file, 0)
+    free(file)
+    return decimal(hundreds - 116444736000000000) / 10000000
+}
+
+// clock_gettime of the clock `id`.
+function posixClock(id: int): decimal {
     immut time = allocate(16)
     clock_gettime(id, time)
     immut seconds: int = read(time, 0)

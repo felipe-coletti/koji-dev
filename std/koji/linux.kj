@@ -74,3 +74,13 @@ export function linuxSockets(): SocketNumbers {
 export function linuxErrno(): Address {
     return linuxErrnoPlace()
 }
+
+// O_NONBLOCK.
+export function linuxNonBlocking(): int {
+    return 0x800
+}
+
+// Where `d_name` is in a `struct dirent`.
+export function linuxEntryNameAt(): int {
+    return 19
+}

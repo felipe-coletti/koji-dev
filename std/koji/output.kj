@@ -6,21 +6,19 @@
 import { Address, CInt, CSize, Location, Never, allocate, free, isNull, locationAddress, newString, nullAddress, offset, read, stringBytes, stringSize, write } from 'koji:unsafe'
 import { cString, cText, isUtf8 } from 'koji:core'
 import system
+import { posixStream, posixWritev } from 'koji:posix'
+import { linuxErrno } from 'koji:linux'
+import { bsdErrno } from 'koji:bsd'
+import { windowsErrno, windowsStream } from 'koji:windows'
 
-extern function writev(fd: CInt, buffers: Address, count: CInt): int
 extern function strerror(code: CInt): Address
 extern function exit(code: CInt): Never
-extern function fdopen(fd: CInt, mode: Address): Address
 extern function koji_blocking_getline(line: Address, capacity: Address, stream: Address): int
 extern function ferror(stream: Address): CInt
 extern function koji_blocking_fread(target: Address, size: CSize, count: CSize, file: Address): CSize
 extern function clearerr(stream: Address)
 // The place of errno (under names of their own: <errno.h> declares them otherwise).
-extern function errnoPlace(): Address from '__errno_location'
-extern function errnoPlaceBsd(): Address from '__error'
 // Windows (ucrtbase), and the library there (koji:windows).
-extern function errnoPlaceWindows(): Address from '_errno'
-extern function windowsFdopen(fd: CInt, mode: Address): Address from '_fdopen'
 extern function koji_windows_writev(fd: CInt, buffers: Address, count: CInt): int
 // With other tasks alive (koji:task), a write that could wait is made by a thread that helps.
 extern function koji_task_alone(): boolean
@@ -135,12 +133,22 @@ function written(fd: int, text: string, ending: boolean): int {
 
 // `writev` of the buffers, by the system (on Windows, a write each).
 function writevNow(fd: int, count: int): int {
-    return if (system.os == system.Windows) { koji_windows_writev(fd, buffers, count) } else { writev(fd, buffers, count) }
+    return match (system.os) {
+        Linux => posixWritev(fd, buffers, count)
+        MacOS => posixWritev(fd, buffers, count)
+        Windows => koji_windows_writev(fd, buffers, count)
+        Other(_) => posixWritev(fd, buffers, count)
+    }
 }
 
 // The standard input as a stream of C.
 function inputStream(): Address {
-    return if (system.os == system.Windows) { windowsFdopen(0, readMode) } else { fdopen(0, readMode) }
+    return match (system.os) {
+        Linux => posixStream(0, readMode)
+        MacOS => posixStream(0, readMode)
+        Windows => windowsStream(0, readMode)
+        Other(_) => posixStream(0, readMode)
+    }
 }
 
 function writtenNow(fd: int, text: string, ending: boolean): int {
@@ -293,9 +301,10 @@ function isLineEnd(bytes: Address, at: int): boolean {
 // name): the int of C at the place each system gives.
 extern function koji_system_errno(): CInt {
     immut place = match (system.os) {
-        Linux => errnoPlace()
-        Windows => errnoPlaceWindows()
-        _ => errnoPlaceBsd()
+        Linux => linuxErrno()
+        MacOS => bsdErrno()
+        Windows => windowsErrno()
+        Other(_) => bsdErrno()
     }
     mut value = 0
 
